@@ -32,6 +32,7 @@ CLAUDE.md
 
 # Local agent state (per-machine, never committed)
 .anima/
+anima.config.ts
 
 # Test fixtures with private keys
 test/fixtures/keys/

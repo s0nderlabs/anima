@@ -12,6 +12,6 @@
   },
   "dependencies": {
     "@s0nderlabs/anima-core": "workspace:*",
-    "ethers": "^6.13.0"
+    "viem": "^2.21.55"
   }
 }

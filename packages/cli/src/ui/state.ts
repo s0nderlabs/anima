@@ -1,0 +1,44 @@
+import { createSignal } from 'solid-js'
+
+export interface TurnRow {
+  id: string
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  text: string
+}
+
+interface CreateChatStateOpts {
+  initialSystem: string
+  identityLabel: string
+  brainLabel: string
+}
+
+export function createChatState(opts: CreateChatStateOpts) {
+  const [rows, setRows] = createSignal<TurnRow[]>([
+    { id: 'sys-0', role: 'system', text: opts.initialSystem },
+  ])
+  const [input, setInput] = createSignal('')
+  const [status, setStatus] = createSignal<'idle' | 'thinking' | 'error'>('idle')
+  const [usage, setUsage] = createSignal<{ total?: number; cached?: number } | null>(null)
+
+  let idCounter = 1
+  const nextId = () => `row-${idCounter++}`
+
+  const pushRow = (row: Omit<TurnRow, 'id'>) => {
+    setRows(prev => [...prev, { ...row, id: nextId() }])
+  }
+
+  return {
+    rows,
+    input,
+    status,
+    usage,
+    setInput,
+    setStatus,
+    setUsage,
+    pushRow,
+    identityLabel: opts.identityLabel,
+    brainLabel: opts.brainLabel,
+  }
+}
+
+export type ChatState = ReturnType<typeof createChatState>
