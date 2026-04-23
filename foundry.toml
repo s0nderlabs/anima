@@ -1,0 +1,26 @@
+[profile.default]
+src = "contracts/src"
+out = "contracts/out"
+libs = ["contracts/lib"]
+cache_path = "contracts/cache"
+test = "contracts/test"
+script = "contracts/script"
+solc = "0.8.28"
+optimizer = true
+optimizer_runs = 200
+via_ir = false
+evm_version = "shanghai"
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = true
+
+[rpc_endpoints]
+og_mainnet = "https://evmrpc.0g.ai"
+og_testnet = "https://evmrpc-testnet.0g.ai"
+
+[etherscan]
+# Chainscan doesn't expose verify API yet; placeholder
+
+# See https://book.getfoundry.sh for config reference

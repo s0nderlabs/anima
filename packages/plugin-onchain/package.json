@@ -1,0 +1,17 @@
+{
+  "name": "@s0nderlabs/anima-plugin-onchain",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "On-chain wallet + chain ops plugin for anima",
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -b",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@s0nderlabs/anima-core": "workspace:*",
+    "ethers": "^6.13.0"
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "@s0nderlabs/anima-core",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Always-on infrastructure for the anima agent runtime",
+  "license": "MIT",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./config": "./src/config.ts",
+    "./events": "./src/events/index.ts",
+    "./memory": "./src/memory/index.ts",
+    "./tools": "./src/tools/index.ts",
+    "./brain": "./src/brain/index.ts",
+    "./storage": "./src/storage/index.ts",
+    "./wallet": "./src/wallet/index.ts",
+    "./identity": "./src/identity/index.ts",
+    "./runtime": "./src/runtime/index.ts",
+    "./paths": "./src/paths.ts"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@0glabs/0g-serving-broker": "^0.7.5",
+    "ethers": "^6.13.0",
+    "gray-matter": "^4.0.3",
+    "zod": "^3.24.1"
+  }
+}

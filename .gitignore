@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+build/
+*.tsbuildinfo
+
+# Bun
+# NOTE: commit bun.lock for reproducible CI installs (frozen-lockfile)
+# bun.lock
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+
+# Environment
+.env
+.env.local
+.env*.local
+
+# OS
+.DS_Store
+
+# Claude context (local only)
+.claude/
+CLAUDE.md
+
+# Logs
+*.log
+
+# Local agent state (per-machine, never committed)
+.anima/
+
+# Test fixtures with private keys
+test/fixtures/keys/
+
+# Local integration tests (real API calls, may contain secrets/findings)
+test/local/
+
+# Editor
+.vscode/
+.idea/
+*.swp

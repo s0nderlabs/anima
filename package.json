@@ -1,0 +1,31 @@
+{
+  "name": "anima",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "First fully on-chain sovereign agent runtime on 0G",
+  "repository": "github.com/s0nderlabs/anima",
+  "license": "MIT",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "bun run --filter='*' build",
+    "typecheck": "tsc -b",
+    "test": "bun test packages",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "fix": "biome check --write .",
+    "changeset": "changeset",
+    "version": "changeset version",
+    "release": "bun run build && changeset publish",
+    "anima": "bun packages/cli/bin/anima",
+    "test:cache": "bun test/local/prompt-cache.test.ts"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@changesets/cli": "^2.27.10",
+    "@types/bun": "^1.1.14",
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.2.2",
+    "typescript": "^5.7.2"
+  }
+}

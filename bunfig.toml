@@ -1,0 +1,7 @@
+[install]
+# Use bun workspaces
+workspaces = true
+
+[test]
+# Only discover tests from package src dirs. Local/integration tests live under test/local/ and run separately.
+root = "packages"
