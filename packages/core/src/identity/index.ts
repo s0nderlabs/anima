@@ -3,6 +3,7 @@ export { StubIdentity } from './stub'
 
 export {
   AnimaAgentNFTClient,
+  AnimaAgentNFTReader,
   buildMintEntries,
   bootstrapHashFor,
 } from './contract'
@@ -24,3 +25,7 @@ export {
   slotIndex,
 } from './intelligent-data'
 export { mintAgent, iNFTAgentId, type MintAgentOpts } from './mint'
+export {
+  persistKeystoreToStorage,
+  restoreKeystoreFromStorage,
+} from './keystore-storage'

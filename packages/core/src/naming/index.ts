@@ -9,5 +9,7 @@ export {
 export {
   AnimaRegistrarClient,
   ANIMA_REGISTRAR_ADDRESS,
+  isLabelTaken,
+  mainnetReadOnlyClient,
   type AnimaRegistrarClientOpts,
 } from './registrar'

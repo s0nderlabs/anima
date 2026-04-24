@@ -1,16 +1,18 @@
 import {
+  http,
   type Address,
   type Chain,
   type Hex,
   type PublicClient,
   type WalletClient,
+  createPublicClient,
   keccak256,
   parseEventLogs,
   toBytes,
 } from 'viem'
 import type { PrivateKeyAccount } from 'viem/accounts'
-import { MIN_GAS_PRICE, makeViemClients } from '../chain'
-import type { AnimaNetwork } from '../config'
+import { MIN_GAS_PRICE, makeViemClients, ogChain } from '../chain'
+import { type AnimaNetwork, NETWORK_RPC } from '../config'
 import { AGENT_NFT_ABI } from './abi'
 import {
   INTELLIGENT_DATA_SLOTS,
@@ -29,20 +31,80 @@ export interface ClientConfig {
   privkeyHex: Hex
 }
 
-export class AnimaAgentNFTClient {
+export interface ReaderConfig {
+  network: AnimaNetwork
+  contractAddress: Address
+}
+
+/**
+ * Read-only view into an AnimaAgentNFT deployment. No wallet required.
+ * Used by `anima restore`, subname availability checks, and other flows
+ * that only need `getIntelligentData` / `ownerOf` / `getSlotHash`.
+ */
+export class AnimaAgentNFTReader {
   readonly publicClient: PublicClient
-  readonly walletClient: WalletClient
   readonly contractAddress: Address
+
+  constructor(cfg: ReaderConfig) {
+    const chain = ogChain(cfg.network)
+    this.publicClient = createPublicClient({
+      transport: http(NETWORK_RPC[cfg.network]),
+      chain,
+    })
+    this.contractAddress = cfg.contractAddress
+  }
+
+  async totalSupply(): Promise<bigint> {
+    return await this.publicClient.readContract({
+      address: this.contractAddress,
+      abi: AGENT_NFT_ABI,
+      functionName: 'totalSupply',
+    })
+  }
+
+  async ownerOf(tokenId: bigint): Promise<Address> {
+    return (await this.publicClient.readContract({
+      address: this.contractAddress,
+      abi: AGENT_NFT_ABI,
+      functionName: 'ownerOf',
+      args: [tokenId],
+    })) as Address
+  }
+
+  async getIntelligentData(tokenId: bigint): Promise<IntelligentDataEntry[]> {
+    const data = (await this.publicClient.readContract({
+      address: this.contractAddress,
+      abi: AGENT_NFT_ABI,
+      functionName: 'getIntelligentData',
+      args: [tokenId],
+    })) as readonly { dataDescription: string; dataHash: Hex }[]
+    return data.map(d => ({
+      dataDescription: d.dataDescription as IntelligentDataSlot,
+      dataHash: d.dataHash,
+    }))
+  }
+
+  async getSlotHash(tokenId: bigint, slot: IntelligentDataSlot): Promise<Hex> {
+    return (await this.publicClient.readContract({
+      address: this.contractAddress,
+      abi: AGENT_NFT_ABI,
+      functionName: 'getSlotHash',
+      args: [tokenId, BigInt(slotIndex(slot))],
+    })) as Hex
+  }
+}
+
+export class AnimaAgentNFTClient extends AnimaAgentNFTReader {
+  readonly walletClient: WalletClient
   readonly account: PrivateKeyAccount
   private readonly chain: Chain
 
   constructor(cfg: ClientConfig) {
+    super(cfg)
     const clients = makeViemClients({ network: cfg.network, privkeyHex: cfg.privkeyHex })
     this.account = clients.account
     this.chain = clients.chain
-    this.publicClient = clients.publicClient
     this.walletClient = clients.walletClient
-    this.contractAddress = cfg.contractAddress
   }
 
   async mint(params: MintParams): Promise<MintResult> {
@@ -90,45 +152,6 @@ export class AnimaAgentNFTClient {
       throw new Error(`update reverted in tx ${hash}`)
     }
     return hash
-  }
-
-  async totalSupply(): Promise<bigint> {
-    return await this.publicClient.readContract({
-      address: this.contractAddress,
-      abi: AGENT_NFT_ABI,
-      functionName: 'totalSupply',
-    })
-  }
-
-  async ownerOf(tokenId: bigint): Promise<Address> {
-    return (await this.publicClient.readContract({
-      address: this.contractAddress,
-      abi: AGENT_NFT_ABI,
-      functionName: 'ownerOf',
-      args: [tokenId],
-    })) as Address
-  }
-
-  async getIntelligentData(tokenId: bigint): Promise<IntelligentDataEntry[]> {
-    const data = (await this.publicClient.readContract({
-      address: this.contractAddress,
-      abi: AGENT_NFT_ABI,
-      functionName: 'getIntelligentData',
-      args: [tokenId],
-    })) as readonly { dataDescription: string; dataHash: Hex }[]
-    return data.map(d => ({
-      dataDescription: d.dataDescription as IntelligentDataSlot,
-      dataHash: d.dataHash,
-    }))
-  }
-
-  async getSlotHash(tokenId: bigint, slot: IntelligentDataSlot): Promise<Hex> {
-    return (await this.publicClient.readContract({
-      address: this.contractAddress,
-      abi: AGENT_NFT_ABI,
-      functionName: 'getSlotHash',
-      args: [tokenId, BigInt(slotIndex(slot))],
-    })) as Hex
   }
 }
 

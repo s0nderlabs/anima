@@ -5,9 +5,28 @@ import { NETWORK_RPC } from '../config'
 import type { AnimaNetwork } from '../config'
 import type { Storage } from './types'
 
-const INDEXER_URL: Record<AnimaNetwork, string> = {
+export const INDEXER_URL: Record<AnimaNetwork, string> = {
   '0g-mainnet': 'https://indexer-storage-turbo.0g.ai',
   '0g-testnet': 'https://indexer-storage-testnet-turbo.0g.ai',
+}
+
+/**
+ * Download a blob from 0G Storage by its merkle root hash.
+ * Read-only — does NOT require a signer or funds. Used by `anima restore` to
+ * recover an encrypted keystore from storage without needing a local key.
+ */
+export async function downloadBlobByRoot(
+  network: AnimaNetwork,
+  rootHash: string,
+): Promise<Uint8Array | null> {
+  const indexer = new Indexer(INDEXER_URL[network])
+  try {
+    const [blob, err] = await indexer.downloadToBlob(rootHash, false)
+    if (err || !blob) return null
+    return new Uint8Array(await blob.arrayBuffer())
+  } catch {
+    return null
+  }
 }
 
 export interface OGStorageOpts {

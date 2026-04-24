@@ -1,6 +1,15 @@
-import type { Address, Chain, Hex, PublicClient, WalletClient } from 'viem'
+import {
+  http,
+  type Address,
+  type Chain,
+  type Hex,
+  type PublicClient,
+  type WalletClient,
+  createPublicClient,
+} from 'viem'
 import type { PrivateKeyAccount } from 'viem/accounts'
-import { MIN_GAS_PRICE, makeViemClients } from '../chain'
+import { MIN_GAS_PRICE, makeViemClients, ogChain } from '../chain'
+import { NETWORK_RPC } from '../config'
 import { waitForReceiptResilient } from '../identity/receipt'
 import { readRegistryOwner, subnameNode } from './sann'
 
@@ -102,7 +111,24 @@ export class AnimaRegistrarClient {
 
   /** UX fail-fast: checks the SANN registry so we don't pay gas for a doomed claim. */
   async isLabelTaken(label: string): Promise<boolean> {
-    const o = await readRegistryOwner(this.publicClient, subnameNode(label))
-    return o !== '0x0000000000000000000000000000000000000000'
+    return isLabelTaken(this.publicClient, label)
   }
+}
+
+/**
+ * Read-only helper to check whether a `<label>.anima.0g` is already claimed.
+ * Avoids instantiating a full `AnimaRegistrarClient` (which requires a
+ * privkey) for UX-only availability probes.
+ */
+export async function isLabelTaken(publicClient: PublicClient, label: string): Promise<boolean> {
+  const o = await readRegistryOwner(publicClient, subnameNode(label))
+  return o !== '0x0000000000000000000000000000000000000000'
+}
+
+/** Read-only public client for mainnet SANN/registrar reads. */
+export function mainnetReadOnlyClient(): PublicClient {
+  return createPublicClient({
+    transport: http(NETWORK_RPC['0g-mainnet']),
+    chain: ogChain('0g-mainnet'),
+  })
 }

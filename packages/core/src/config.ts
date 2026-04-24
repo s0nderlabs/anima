@@ -85,3 +85,8 @@ export const NETWORK_CHAIN_ID: Record<AnimaNetwork, number> = {
   '0g-mainnet': 16661,
   '0g-testnet': 16602,
 }
+
+export function networkFromChainId(id: number): AnimaNetwork | null {
+  return (Object.entries(NETWORK_CHAIN_ID).find(([, cid]) => cid === id)?.[0] ??
+    null) as AnimaNetwork | null
+}

@@ -14,3 +14,10 @@ export {
   type FrozenPrefix,
 } from './frozen-prefix'
 export { OGComputeBrain, type OGComputeBrainOpts } from './og-compute'
+export {
+  openComputeLedger,
+  getLedgerBalance,
+  depositToLedger,
+  type OpenLedgerOpts,
+  type LedgerStatus,
+} from './ledger'

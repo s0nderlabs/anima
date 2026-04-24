@@ -32,6 +32,11 @@ export {
   buildFrozenPrefix,
   renderFrozenPrefix,
   DEFAULT_SYSTEM_PROMPT,
+  openComputeLedger,
+  getLedgerBalance,
+  depositToLedger,
+  type OpenLedgerOpts,
+  type LedgerStatus,
 } from './brain'
 
 export type {
@@ -71,6 +76,8 @@ export {
   LocalStubStorage,
   OGStorage,
   type OGStorageOpts,
+  INDEXER_URL,
+  downloadBlobByRoot,
   encrypt as encryptBytes,
   decrypt as decryptBytes,
   packEnvelope,
@@ -92,6 +99,7 @@ export type { AgentIdentity, IdentityProvider } from './identity'
 export {
   StubIdentity,
   AnimaAgentNFTClient,
+  AnimaAgentNFTReader,
   AGENT_NFT_ABI,
   buildMintEntries,
   bootstrapHashFor,
@@ -110,6 +118,8 @@ export {
   mintAgent,
   iNFTAgentId,
   type MintAgentOpts,
+  persistKeystoreToStorage,
+  restoreKeystoreFromStorage,
 } from './identity'
 
 export {
@@ -121,10 +131,20 @@ export {
   type SannClientOpts,
   AnimaRegistrarClient,
   ANIMA_REGISTRAR_ADDRESS,
+  isLabelTaken,
+  mainnetReadOnlyClient,
   type AnimaRegistrarClientOpts,
 } from './naming'
 
-export { type OperatorSigner, KeychainOperatorSigner } from './operator'
+export {
+  type OperatorSigner,
+  KeychainOperatorSigner,
+  KeystoreFileOperatorSigner,
+  RawPrivkeyOperatorSigner,
+  WalletConnectOperatorSigner,
+  ANIMA_WC_PROJECT_ID,
+  type WalletConnectOperatorSignerOptions,
+} from './operator'
 export { waitForReceiptResilient } from './identity/receipt'
 export { MIN_GAS_PRICE, makeViemClients, ogChain, type ViemClients } from './chain'
 

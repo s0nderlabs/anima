@@ -14,12 +14,16 @@
     "test": "bun test"
   },
   "dependencies": {
-    "@s0nderlabs/anima-core": "workspace:*",
     "@clack/prompts": "^0.8.2",
     "@opentui/core": "^0.1.97",
     "@opentui/solid": "^0.1.97",
-    "solid-js": "^1.9.12",
+    "@s0nderlabs/anima-core": "workspace:*",
     "picocolors": "^1.1.1",
+    "qrcode-terminal": "^0.12.0",
+    "solid-js": "^1.9.12",
     "viem": "^2.21.55"
+  },
+  "devDependencies": {
+    "@types/qrcode-terminal": "^0.12.2"
   }
 }

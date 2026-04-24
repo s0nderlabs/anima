@@ -1,6 +1,11 @@
 export type { Storage } from './types'
 export { LocalStubStorage } from './local-stub'
-export { OGStorage, type OGStorageOpts } from './og'
+export {
+  OGStorage,
+  type OGStorageOpts,
+  INDEXER_URL,
+  downloadBlobByRoot,
+} from './og'
 export {
   encrypt,
   decrypt,

@@ -15,6 +15,17 @@ async function main(): Promise<void> {
       return
     }
     case 'init': {
+      if (argv.includes('--resume')) {
+        const { findAndLoadConfig } = await import('./config/load')
+        const loaded = await findAndLoadConfig()
+        if (!loaded) {
+          console.error('anima init --resume: no anima.config.ts found in cwd or parents.')
+          process.exit(1)
+        }
+        const { runResumeInit } = await import('./commands/init/resume')
+        await runResumeInit({ config: loaded.config, configPath: loaded.path })
+        return
+      }
       const { runInit } = await import('./commands/init')
       await runInit()
       return
@@ -31,6 +42,27 @@ async function main(): Promise<void> {
       const agentIdx = argv.indexOf('--agent')
       const agent = agentIdx >= 0 ? argv[agentIdx + 1] : undefined
       await runLogs({ agent, tail })
+      return
+    }
+    case 'restore': {
+      const ref = argv[1]
+      if (!ref) {
+        console.error(
+          'usage: anima restore <iNFT-ref>\n  ref formats:\n    eip155:16661:0x<contract>:<tokenId>\n    0g-mainnet:0x<contract>:<tokenId>\n    0g-testnet:0x<contract>:<tokenId>',
+        )
+        process.exit(1)
+      }
+      const { runRestore } = await import('./commands/restore')
+      await runRestore({ ref })
+      return
+    }
+    case 'topup': {
+      const agentIdx = argv.indexOf('--agent')
+      const computeIdx = argv.indexOf('--compute')
+      const agent = agentIdx >= 0 ? Number(argv[agentIdx + 1]) : undefined
+      const compute = computeIdx >= 0 ? Number(argv[computeIdx + 1]) : undefined
+      const { runTopup } = await import('./commands/topup')
+      await runTopup({ agent, compute })
       return
     }
     case '-h':
@@ -57,6 +89,8 @@ function printHelp(): void {
       '  anima               interactive chat with your agent (default)',
       '  anima status        show agent + wallet + config state',
       '  anima logs          tail the activity log  (flags: --tail N, --agent <id>)',
+      '  anima restore <ref> recover an agent from an iNFT (ref: eip155:16661:0x..:N)',
+      '  anima topup         add funds  (flags: --agent N  --compute N)',
       '  anima help          show this message',
       '',
     ].join('\n'),
