@@ -8,8 +8,8 @@ import type { AnimaNetwork } from '../config'
  * would produce different addresses.
  */
 export const ANIMA_AGENT_NFT_ADDRESS: Record<AnimaNetwork, Address> = {
-  '0g-testnet': '0xc2e3d0daac03fa525ebffa3ab0ddb80ef26fcc7f',
-  '0g-mainnet': '0xc2e3d0daac03fa525ebffa3ab0ddb80ef26fcc7f',
+  '0g-testnet': '0x9e71d79f06f956d4d2666b5c93dafab721c84721',
+  '0g-mainnet': '0x9e71d79f06f956d4d2666b5c93dafab721c84721',
 }
 
 export const EXPLORER_BASE: Record<AnimaNetwork, string> = {

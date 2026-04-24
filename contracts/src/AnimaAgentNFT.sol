@@ -67,9 +67,18 @@ contract AnimaAgentNFT is ERC721, Ownable {
         emit Minted(tokenId, to, iDatas);
     }
 
-    /// @notice Update one or more IntelligentData slots for a token. Owner-only.
+    /// @notice Update one or more IntelligentData slots for a token. Callable by
+    /// the token owner OR any address the owner has approved via `setApprovalForAll`
+    /// or per-token `approve`. This lets the agent's infra EOA (separate from the
+    /// operator's wallet that owns the iNFT per project-anima.md section 22.1)
+    /// push memory syncs without holding the operator's key.
     function update(uint256 tokenId, uint256[] calldata slots, bytes32[] calldata newHashes) external {
-        if (_ownerOf(tokenId) != msg.sender) revert NotTokenOwner();
+        address tokenOwner = _ownerOf(tokenId);
+        if (tokenOwner == address(0)) revert NotTokenOwner();
+        if (
+            msg.sender != tokenOwner && getApproved(tokenId) != msg.sender
+                && !isApprovedForAll(tokenOwner, msg.sender)
+        ) revert NotTokenOwner();
         if (slots.length != newHashes.length) revert LengthMismatch();
         IntelligentData[] storage data = _tokenData[tokenId];
         for (uint256 i = 0; i < slots.length; i++) {

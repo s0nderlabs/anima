@@ -1,16 +1,28 @@
 import { readFile } from 'node:fs/promises'
-import { type Address, type Hex, keccak256 } from 'viem'
+import { type Address, type Hex, keccak256, parseEventLogs } from 'viem'
+import { MIN_GAS_PRICE } from '../chain'
+import type { OperatorSigner } from '../operator'
 import { agentPaths } from '../paths'
-import { AnimaAgentNFTClient, bootstrapHashFor, buildMintEntries } from './contract'
+import { AGENT_NFT_ABI } from './abi'
+import { bootstrapHashFor, buildMintEntries } from './contract'
 import { ANIMA_AGENT_NFT_ADDRESS, type NetworkName } from './deployments'
 import type { IntelligentDataEntry, MintResult } from './intelligent-data'
+import { waitForReceiptResilient } from './receipt'
 
 export interface MintAgentOpts {
   network: NetworkName
-  privkeyHex: Hex
-  /** The EOA to mint the iNFT to. Usually the same as privkeyHex's account. */
-  to: Address
-  /** Path to the encrypted keystore file. Hash becomes the real value for the "keystore" slot. */
+  /**
+   * Operator signs the mint tx + owns the iNFT (section 22.1 wallet model).
+   * Agent EOA is a separate infra key — see `agentAddress` below.
+   */
+  operator: OperatorSigner
+  /**
+   * Agent EOA address. Operator will `setApprovalForAll(agentAddress, true)`
+   * inside this function so the agent can later call `update()` without
+   * holding the operator's key.
+   */
+  agentAddress: Address
+  /** Path to the encrypted agent keystore. Hash becomes the `keystore` IntelligentData slot. */
   keystorePath: string
 }
 
@@ -18,20 +30,59 @@ export async function mintAgent(opts: MintAgentOpts): Promise<{
   result: MintResult
   entries: IntelligentDataEntry[]
   contractAddress: Address
+  operatorAddress: Address
 }> {
   const contractAddress = ANIMA_AGENT_NFT_ADDRESS[opts.network]
   const keystoreBytes = await readFile(opts.keystorePath)
   const keystoreHash = keccak256(new Uint8Array(keystoreBytes)) as Hex
-
   const entries = buildMintEntries({ keystore: keystoreHash })
 
-  const client = new AnimaAgentNFTClient({
-    network: opts.network,
-    contractAddress,
-    privkeyHex: opts.privkeyHex,
+  const operatorAddress = await opts.operator.address()
+  const walletClient = await opts.operator.walletClient(opts.network)
+  const publicClient = await opts.operator.publicClient(opts.network)
+  const chain = opts.operator.chain(opts.network)
+
+  const mintHash = await walletClient.writeContract({
+    address: contractAddress,
+    abi: AGENT_NFT_ABI,
+    functionName: 'mint',
+    args: [operatorAddress, entries],
+    chain,
+    account: await opts.operator.account(),
+    maxFeePerGas: MIN_GAS_PRICE,
+    maxPriorityFeePerGas: MIN_GAS_PRICE,
   })
-  const result = await client.mint({ to: opts.to, iDatas: entries })
-  return { result, entries, contractAddress }
+  const mintReceipt = await waitForReceiptResilient(publicClient, mintHash)
+  if (mintReceipt.status !== 'success') throw new Error(`mint reverted in tx ${mintHash}`)
+  const logs = parseEventLogs({
+    abi: AGENT_NFT_ABI,
+    eventName: 'Minted',
+    logs: mintReceipt.logs,
+  })
+  const first = logs[0]
+  if (!first) throw new Error('mint succeeded but Minted event missing')
+  const tokenId = first.args.tokenId as bigint
+
+  // Operator pre-approves the agent EOA so the agent can push memory updates
+  // without the operator's key. Matches section 22.1 two-wallet architecture.
+  const approvalHash = await walletClient.writeContract({
+    address: contractAddress,
+    abi: AGENT_NFT_ABI,
+    functionName: 'setApprovalForAll',
+    args: [opts.agentAddress, true],
+    chain,
+    account: await opts.operator.account(),
+    maxFeePerGas: MIN_GAS_PRICE,
+    maxPriorityFeePerGas: MIN_GAS_PRICE,
+  })
+  await waitForReceiptResilient(publicClient, approvalHash)
+
+  return {
+    result: { tokenId, txHash: mintHash, blockNumber: mintReceipt.blockNumber },
+    entries,
+    contractAddress,
+    operatorAddress,
+  }
 }
 
 export interface DerivedAgentIdOpts {

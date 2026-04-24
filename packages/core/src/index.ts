@@ -117,10 +117,15 @@ export {
   SANN_ADDRESSES,
   sannNamehash,
   subnameNode,
+  readRegistryOwner,
   type SannClientOpts,
   AnimaRegistrarClient,
   ANIMA_REGISTRAR_ADDRESS,
   type AnimaRegistrarClientOpts,
 } from './naming'
+
+export { type OperatorSigner, KeychainOperatorSigner } from './operator'
+export { waitForReceiptResilient } from './identity/receipt'
+export { MIN_GAS_PRICE, makeViemClients, ogChain, type ViemClients } from './chain'
 
 export { Runtime, type RuntimeDeps, ActivityLog, type ActivityEntry } from './runtime'

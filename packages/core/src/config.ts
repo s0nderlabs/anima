@@ -32,6 +32,10 @@ export interface INFTRef {
 export interface AnimaConfig {
   identity: {
     iNFT: INFTRef | null
+    /** Operator wallet address that owns the iNFT (section 22.1). */
+    operator: string | null
+    /** Agent EOA address (separate key, pays infra gas). */
+    agent: string | null
   }
   network: AnimaNetwork
   storage: {
@@ -52,7 +56,7 @@ export interface AnimaConfig {
 export type AnimaConfigInput = Partial<AnimaConfig> & Pick<AnimaConfig, 'network'>
 
 const DEFAULT_CONFIG: Omit<AnimaConfig, 'network' | 'storage'> = {
-  identity: { iNFT: null },
+  identity: { iNFT: null, operator: null, agent: null },
   brain: { provider: null, model: null },
   plugins: ['onchain', 'comms', 'system'],
   tools: {},

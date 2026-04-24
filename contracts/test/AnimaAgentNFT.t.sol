@@ -64,6 +64,40 @@ contract AnimaAgentNFTTest is Test {
         assertEq(nft.getSlotHash(tokenId, 1), keccak256("new-identity-hash"));
     }
 
+    function test_UpdateByOperatorApprovedForAllSucceeds() public {
+        uint256 tokenId = nft.mint(alice, _canonicalDatas());
+        address infra = address(0x1F);
+
+        vm.prank(alice);
+        nft.setApprovalForAll(infra, true);
+
+        uint256[] memory slots = new uint256[](1);
+        bytes32[] memory hashes = new bytes32[](1);
+        slots[0] = 0;
+        hashes[0] = keccak256("via-infra");
+
+        vm.prank(infra);
+        nft.update(tokenId, slots, hashes);
+        assertEq(nft.getSlotHash(tokenId, 0), keccak256("via-infra"));
+    }
+
+    function test_UpdateBySingleApprovalSucceeds() public {
+        uint256 tokenId = nft.mint(alice, _canonicalDatas());
+        address infra = address(0x1F);
+
+        vm.prank(alice);
+        nft.approve(infra, tokenId);
+
+        uint256[] memory slots = new uint256[](1);
+        bytes32[] memory hashes = new bytes32[](1);
+        slots[0] = 1;
+        hashes[0] = keccak256("via-approve");
+
+        vm.prank(infra);
+        nft.update(tokenId, slots, hashes);
+        assertEq(nft.getSlotHash(tokenId, 1), keccak256("via-approve"));
+    }
+
     function test_UpdateNonOwnerReverts() public {
         uint256 tokenId = nft.mint(alice, _canonicalDatas());
         uint256[] memory slots = new uint256[](1);

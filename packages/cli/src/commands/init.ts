@@ -16,6 +16,8 @@ import {
 import {
   type AnimaNetwork,
   AnimaRegistrarClient,
+  KeychainOperatorSigner,
+  MIN_GAS_PRICE,
   NETWORK_CHAIN_ID,
   NETWORK_RPC,
   SannClient,
@@ -29,9 +31,10 @@ import {
   placeholderAgentId,
   saveKeystore,
   subnameNode,
+  waitForReceiptResilient,
 } from '@s0nderlabs/anima-core'
 import type { Hex } from 'viem'
-import { http, createPublicClient, formatEther } from 'viem'
+import { formatEther, parseEther } from 'viem'
 import { writeConfigTs } from '../config/render'
 
 export async function runInit(opts?: { cwd?: string }): Promise<void> {
@@ -110,20 +113,26 @@ export async function runInit(opts?: { cwd?: string }): Promise<void> {
   await saveKeystore(provisional.keystore, privkeyHex, pass)
   s.stop(`Agent EOA ${address}`)
 
-  const balance = await checkBalance(network, address)
-  const hasGas = balance > 0n
+  // Load operator wallet (dev pattern: macOS keychain, see feedback-wallet-source-multi-option.md).
+  const operator = new KeychainOperatorSigner()
+  const operatorAddress = await operator.address()
+  const operatorPublic = await operator.publicClient(network)
+  const operatorBalance = await operatorPublic.getBalance({ address: operatorAddress })
+  const operatorHasGas = operatorBalance > 0n
+
   let mintedTokenId: bigint | null = null
   let contractAddress: string | null = null
   let finalAgentId = provisionalAgentId
+  let operatorOwnerAddress: string | null = null
 
-  if (!hasGas) {
+  if (!operatorHasGas) {
     note(
-      `Agent EOA has 0 0G on ${network}. Fund ${address} with a small amount (e.g. 0.05 0G) and re-run \`anima init\` to mint the iNFT.`,
+      `Operator wallet ${operatorAddress} has 0 0G on ${network}. Fund it and re-run.`,
       'Skipping mint',
     )
   } else {
     const mintChoice = await confirm({
-      message: `Mint iNFT on ${network}? (agent balance: ${formatEther(balance)} 0G)`,
+      message: `Mint iNFT (owner=${operatorAddress}) on ${network}? (operator balance: ${formatEther(operatorBalance)} 0G)`,
       initialValue: true,
     })
     if (isCancel(mintChoice)) {
@@ -134,18 +143,38 @@ export async function runInit(opts?: { cwd?: string }): Promise<void> {
       const sMint = spinner()
       sMint.start(`Minting iNFT on ${network}`)
       try {
-        const { result, contractAddress: c } = await mintAgent({
+        const {
+          result,
+          contractAddress: c,
+          operatorAddress: owner,
+        } = await mintAgent({
           network,
-          privkeyHex,
-          to: address as `0x${string}`,
+          operator,
+          agentAddress: address as `0x${string}`,
           keystorePath: provisional.keystore,
         })
         mintedTokenId = result.tokenId
         contractAddress = c
+        operatorOwnerAddress = owner
         finalAgentId = iNFTAgentId({ contractAddress: c, tokenId: result.tokenId })
         sMint.stop(
-          `iNFT #${result.tokenId.toString()} minted → ${explorerTxUrl(network, result.txHash)}`,
+          `iNFT #${result.tokenId.toString()} minted to ${owner} → ${explorerTxUrl(network, result.txHash)}`,
         )
+
+        // Fund agent EOA from operator (subname claim + memory sync gas).
+        const sFund = spinner()
+        sFund.start(`Funding agent ${address} with 0.03 0G from operator`)
+        const opWc = await operator.walletClient(network)
+        const fundTx = await opWc.sendTransaction({
+          to: address as `0x${string}`,
+          value: parseEther('0.03'),
+          chain: operator.chain(network),
+          account: await operator.account(),
+          maxFeePerGas: MIN_GAS_PRICE,
+          maxPriorityFeePerGas: MIN_GAS_PRICE,
+        })
+        await waitForReceiptResilient(operatorPublic, fundTx)
+        sFund.stop(`agent funded (tx ${fundTx})`)
       } catch (e) {
         sMint.stop(`mint failed: ${(e as Error).message}`)
       }
@@ -210,6 +239,8 @@ export async function runInit(opts?: { cwd?: string }): Promise<void> {
               network,
             }
           : null,
+      operator: operatorOwnerAddress,
+      agent: address,
     },
     network,
     storage: { network },
@@ -228,6 +259,7 @@ export async function runInit(opts?: { cwd?: string }): Promise<void> {
     '',
     `  agent id   ${finalAgentId}`,
     `  agent EOA  ${address}`,
+    `  operator   ${operatorOwnerAddress ?? operatorAddress}${mintedTokenId === null ? ' (skipped)' : ''}`,
     `  network    ${network} (${NETWORK_RPC[network]})`,
     `  chain id   ${NETWORK_CHAIN_ID[network]}`,
     `  keystore   ${paths.keystore}`,
@@ -239,13 +271,4 @@ export async function runInit(opts?: { cwd?: string }): Promise<void> {
   if (registeredSubname) lines.push(`  subname    ${registeredSubname}.anima.0g (mainnet)`)
   lines.push('', 'Next: run `anima` to chat, or `anima sync` to push state to 0G Storage.')
   outro(lines.join('\n'))
-}
-
-async function checkBalance(network: AnimaNetwork, address: string): Promise<bigint> {
-  try {
-    const client = createPublicClient({ transport: http(NETWORK_RPC[network]) })
-    return await client.getBalance({ address: address as `0x${string}` })
-  } catch {
-    return 0n
-  }
 }
