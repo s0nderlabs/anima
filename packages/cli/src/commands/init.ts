@@ -14,8 +14,8 @@ import {
   text,
 } from '@clack/prompts'
 import {
-  ANIMA_AGENT_NFT_ADDRESS,
   type AnimaNetwork,
+  AnimaRegistrarClient,
   NETWORK_CHAIN_ID,
   NETWORK_RPC,
   SannClient,
@@ -171,20 +171,15 @@ export async function runInit(opts?: { cwd?: string }): Promise<void> {
     const sSub = spinner()
     sSub.start(`Registering ${registeredSubname}.anima.0g on mainnet`)
     try {
+      const registrar = new AnimaRegistrarClient({ privkeyHex: privkeyHex as Hex })
       const sann = new SannClient({ privkeyHex: privkeyHex as Hex })
-      const existingOwner = await sann.registryOwnerOf(subnameNode(registeredSubname))
-      if (
-        existingOwner !== '0x0000000000000000000000000000000000000000' &&
-        existingOwner.toLowerCase() !== address.toLowerCase()
-      ) {
-        sSub.stop(`skipping: subname already owned by ${existingOwner}`)
+      if (await registrar.isLabelTaken(registeredSubname)) {
+        sSub.stop(`skipping: ${registeredSubname}.anima.0g already claimed`)
         registeredSubname = null
       } else {
-        const reclaimTx = await sann.reclaimSubname(registeredSubname, address as `0x${string}`)
-        await sann.waitForReceipt(reclaimTx)
+        const claimTx = await registrar.claim(registeredSubname, address as `0x${string}`)
+        await registrar.waitForReceipt(claimTx)
         const node = subnameNode(registeredSubname)
-        const resTx = await sann.setSubnameResolver(node)
-        await sann.waitForReceipt(resTx)
         const addrTx = await sann.setText(node, 'address', address)
         await sann.waitForReceipt(addrTx)
         const inftTx = await sann.setText(
@@ -194,7 +189,7 @@ export async function runInit(opts?: { cwd?: string }): Promise<void> {
         )
         await sann.waitForReceipt(inftTx)
         sSub.stop(
-          `${registeredSubname}.anima.0g registered → ${explorerTxUrl('0g-mainnet', reclaimTx)}`,
+          `${registeredSubname}.anima.0g registered → ${explorerTxUrl('0g-mainnet', claimTx)}`,
         )
       }
     } catch (e) {

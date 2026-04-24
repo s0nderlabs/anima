@@ -118,6 +118,9 @@ export {
   sannNamehash,
   subnameNode,
   type SannClientOpts,
+  AnimaRegistrarClient,
+  ANIMA_REGISTRAR_ADDRESS,
+  type AnimaRegistrarClientOpts,
 } from './naming'
 
 export { Runtime, type RuntimeDeps, ActivityLog, type ActivityEntry } from './runtime'

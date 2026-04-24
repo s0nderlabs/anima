@@ -16,6 +16,7 @@ contracts/cache/
 contracts/broadcast/
 contracts/lib/
 broadcast/
+lcov.info
 
 # Environment
 .env

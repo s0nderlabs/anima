@@ -46,36 +46,30 @@ export interface SyncMemoryResult {
 /**
  * Encrypt + upload each memory file (if changed since last sync), compute
  * new slot hashes, and fire one `iNFT.update()` tx with all slot updates
- * batched per section 27.5 firing policy. Uploads run concurrently since
- * blobs are independent; the single update tx batches all slot hashes.
+ * batched per section 27.5 firing policy.
+ *
+ * Uploads run SEQUENTIALLY even though they're logically independent: the
+ * upstream `@0gfoundation/0g-ts-sdk` uses ethers with auto-managed nonces,
+ * and concurrent writes from the same wallet race on nonce reservation
+ * (`nonce too low`). Correctness over speed; the single batched `update()`
+ * at the end keeps on-chain cost bounded.
  */
 export async function syncMemory(opts: SyncMemoryOpts): Promise<SyncMemoryResult> {
   const targets = opts.targets ?? defaultSyncTargets(opts.agentId)
-
-  const prepared = await Promise.all(
-    targets.map(async target => {
-      if (target.slot === 'activity-log') return null // activity log sync is separate
-      const path = target.slot === 'keystore' ? opts.keystorePath : target.path
-      if (!path) return null
-      const bytes = await readOrNull(path)
-      if (!bytes) return null
-      const payload =
-        target.slot === 'keystore' ? bytes : packEnvelope(encrypt(bytes, opts.passphrase))
-      const rootHash = await opts.storage.putBlob(payload)
-      return {
-        slot: target.slot,
-        rootHash,
-        dataHash: keccak256(payload),
-      }
-    }),
-  )
-
   const uploads: { slot: IntelligentDataSlot; rootHash: string }[] = []
   const updates: UpdateSlot[] = []
-  for (const item of prepared) {
-    if (!item) continue
-    uploads.push({ slot: item.slot, rootHash: item.rootHash })
-    updates.push({ slot: item.slot, dataHash: item.dataHash })
+
+  for (const target of targets) {
+    if (target.slot === 'activity-log') continue
+    const path = target.slot === 'keystore' ? opts.keystorePath : target.path
+    if (!path) continue
+    const bytes = await readOrNull(path)
+    if (!bytes) continue
+    const payload =
+      target.slot === 'keystore' ? bytes : packEnvelope(encrypt(bytes, opts.passphrase))
+    const rootHash = await opts.storage.putBlob(payload)
+    uploads.push({ slot: target.slot, rootHash })
+    updates.push({ slot: target.slot, dataHash: keccak256(payload) })
   }
 
   if (updates.length === 0) {

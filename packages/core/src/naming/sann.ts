@@ -107,6 +107,16 @@ export function subnameNode(label: string): Hex {
   return sannNamehash(SANN_ADDRESSES.tldIdentifier, '0g', ['anima', label])
 }
 
+/** Read the registry owner of any SANN node. Shared by SannClient + AnimaRegistrarClient. */
+export async function readRegistryOwner(client: PublicClient, node: Hex): Promise<Address> {
+  return (await client.readContract({
+    address: SANN_ADDRESSES.registry,
+    abi: REGISTRY_ABI,
+    functionName: 'owner',
+    args: [node],
+  })) as Address
+}
+
 export interface SannClientOpts {
   privkeyHex: Hex
 }
@@ -185,12 +195,7 @@ export class SannClient {
   }
 
   async registryOwnerOf(node: Hex): Promise<Address> {
-    return (await this.publicClient.readContract({
-      address: SANN_ADDRESSES.registry,
-      abi: REGISTRY_ABI,
-      functionName: 'owner',
-      args: [node],
-    })) as Address
+    return await readRegistryOwner(this.publicClient, node)
   }
 
   async waitForReceipt(hash: Hex): Promise<void> {
