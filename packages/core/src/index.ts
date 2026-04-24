@@ -67,7 +67,16 @@ export {
 } from './memory'
 
 export type { Storage } from './storage'
-export { LocalStubStorage } from './storage'
+export {
+  LocalStubStorage,
+  OGStorage,
+  type OGStorageOpts,
+  encrypt as encryptBytes,
+  decrypt as decryptBytes,
+  packEnvelope,
+  unpackEnvelope,
+  type EncryptedEnvelope,
+} from './storage'
 
 export {
   encryptKey,
@@ -80,6 +89,35 @@ export {
 } from './wallet'
 
 export type { AgentIdentity, IdentityProvider } from './identity'
-export { StubIdentity } from './identity'
+export {
+  StubIdentity,
+  AnimaAgentNFTClient,
+  AGENT_NFT_ABI,
+  buildMintEntries,
+  bootstrapHashFor,
+  ANIMA_AGENT_NFT_ADDRESS,
+  EXPLORER_BASE,
+  INTELLIGENT_DATA_SLOTS,
+  type IntelligentDataSlot,
+  type IntelligentDataEntry,
+  type MintParams,
+  type MintResult,
+  type UpdateSlot,
+  type NetworkName,
+  slotIndex,
+  explorerTxUrl,
+  explorerTokenUrl,
+  mintAgent,
+  iNFTAgentId,
+  type MintAgentOpts,
+} from './identity'
+
+export {
+  SannClient,
+  SANN_ADDRESSES,
+  sannNamehash,
+  subnameNode,
+  type SannClientOpts,
+} from './naming'
 
 export { Runtime, type RuntimeDeps, ActivityLog, type ActivityEntry } from './runtime'

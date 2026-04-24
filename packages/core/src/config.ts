@@ -20,9 +20,18 @@ export type AnimaNetwork = '0g-mainnet' | '0g-testnet'
 
 export type AnimaPlugin = 'onchain' | 'comms' | 'system'
 
+export interface INFTRef {
+  /** ERC-7857 contract address. */
+  contract: string
+  /** Token id minted to the owner at `anima init`. */
+  tokenId: string
+  /** Network where the iNFT lives. */
+  network: AnimaNetwork
+}
+
 export interface AnimaConfig {
   identity: {
-    iNFT: string | null
+    iNFT: INFTRef | null
   }
   network: AnimaNetwork
   storage: {

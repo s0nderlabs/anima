@@ -22,3 +22,10 @@ export {
 } from './index-file'
 export { readTopic, writeTopic, topicPath } from './topic'
 export { makeMemorySaveTool, type MemorySaveArgs } from './save-tool'
+export {
+  syncMemory,
+  defaultSyncTargets,
+  type SyncMemoryOpts,
+  type SyncMemoryResult,
+  type SyncTarget,
+} from './sync'

@@ -14,6 +14,8 @@ build/
 contracts/out/
 contracts/cache/
 contracts/broadcast/
+contracts/lib/
+broadcast/
 
 # Environment
 .env

@@ -46,7 +46,10 @@
       "packages/*/dist",
       "contracts/out",
       "contracts/cache",
-      "contracts/broadcast"
+      "contracts/broadcast",
+      "contracts/lib",
+      "broadcast",
+      "anima.config.ts"
     ]
   }
 }

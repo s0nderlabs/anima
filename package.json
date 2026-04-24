@@ -1,6 +1,6 @@
 {
   "name": "anima",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "First fully on-chain sovereign agent runtime on 0G",
@@ -33,5 +33,8 @@
     "solid-js": "^1.9.12",
     "viem": "^2.21.55",
     "typescript": "^5.7.2"
+  },
+  "dependencies": {
+    "@0gfoundation/0g-ts-sdk": "^1.2.4"
   }
 }
