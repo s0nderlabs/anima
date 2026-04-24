@@ -20,9 +20,6 @@ export async function mintAgent(opts: MintAgentOpts): Promise<{
   contractAddress: Address
 }> {
   const contractAddress = ANIMA_AGENT_NFT_ADDRESS[opts.network]
-  if (!contractAddress) {
-    throw new Error(`AnimaAgentNFT not deployed on ${opts.network}`)
-  }
   const keystoreBytes = await readFile(opts.keystorePath)
   const keystoreHash = keccak256(new Uint8Array(keystoreBytes)) as Hex
 

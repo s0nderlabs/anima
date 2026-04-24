@@ -37,7 +37,7 @@ packages/
 | Contract | Network | Address |
 |----------|---------|---------|
 | `AnimaAgentNFT` (ERC-7857) | 0G Galileo testnet (16602) | `0xf132201d895f9a5d8b8dc4af2f7f8f9fc45935b1` |
-| `AnimaAgentNFT` | 0G mainnet (16661) | pending — deploys during hackathon close-out |
+| `AnimaAgentNFT` | 0G mainnet (16661) | `0x1a60a42c1f8620638c2eac56deb2a4dfa08ab232` |
 
 Parent domain `anima.0g` is registered on SPACE ID on mainnet; `anima init` issues `<label>.anima.0g` subnames for new agents.
 

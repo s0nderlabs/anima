@@ -131,30 +131,23 @@ export async function runInit(opts?: { cwd?: string }): Promise<void> {
       return
     }
     if (mintChoice) {
-      const contract = ANIMA_AGENT_NFT_ADDRESS[network]
-      if (!contract) {
-        note(
-          `AnimaAgentNFT not yet deployed on ${network}. Deploy first via forge, or pick testnet.`,
+      const sMint = spinner()
+      sMint.start(`Minting iNFT on ${network}`)
+      try {
+        const { result, contractAddress: c } = await mintAgent({
+          network,
+          privkeyHex,
+          to: address as `0x${string}`,
+          keystorePath: provisional.keystore,
+        })
+        mintedTokenId = result.tokenId
+        contractAddress = c
+        finalAgentId = iNFTAgentId({ contractAddress: c, tokenId: result.tokenId })
+        sMint.stop(
+          `iNFT #${result.tokenId.toString()} minted → ${explorerTxUrl(network, result.txHash)}`,
         )
-      } else {
-        const sMint = spinner()
-        sMint.start(`Minting iNFT on ${network}`)
-        try {
-          const { result, contractAddress: c } = await mintAgent({
-            network,
-            privkeyHex,
-            to: address as `0x${string}`,
-            keystorePath: provisional.keystore,
-          })
-          mintedTokenId = result.tokenId
-          contractAddress = c
-          finalAgentId = iNFTAgentId({ contractAddress: c, tokenId: result.tokenId })
-          sMint.stop(
-            `iNFT #${result.tokenId.toString()} minted → ${explorerTxUrl(network, result.txHash)}`,
-          )
-        } catch (e) {
-          sMint.stop(`mint failed: ${(e as Error).message}`)
-        }
+      } catch (e) {
+        sMint.stop(`mint failed: ${(e as Error).message}`)
       }
     }
   }

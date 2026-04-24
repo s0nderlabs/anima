@@ -4,6 +4,17 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-04-24
+
+### Added
+
+- `AnimaAgentNFT` deployed to 0G mainnet at `0x1a60a42c1f8620638c2eac56deb2a4dfa08ab232` (tx `0x81bfec81...`, ~$0.003 gas). Satisfies the hackathon requirement for a mainnet contract address + verifiable on-chain activity.
+
+### Changed
+
+- `ANIMA_AGENT_NFT_ADDRESS` mainnet entry populated; type tightened from `Address | null` to `Address` now that both networks are live.
+- `anima init` + `mintAgent` drop the "deployed? fall back to note()" branch since both networks have a canonical address.
+
 ## [0.2.0] - 2026-04-24
 
 ### Added
@@ -69,5 +80,6 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.2.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.2.1
 [0.2.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.2.0
 [0.1.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.1.0
