@@ -1,2 +1,23 @@
 #!/usr/bin/env bun
+// Polyfill Error.captureStackTrace for bun + follow-redirects compatibility.
+// follow-redirects@1.16 (transitive via @0glabs/0g-serving-broker → axios) calls
+// Error.captureStackTrace(this, ctor) inside a CustomError constructor whose
+// prototype is set to Error AFTER createErrorType returns. Bun's strict-mode
+// validator rejects the call when bun's workspace resolver loads the module
+// (the failure is cwd-dependent: only triggers when bun's cwd is inside this
+// monorepo). Wrapping the original keeps Node parity without monkey-patching
+// follow-redirects itself.
+const _origCapture = Error.captureStackTrace
+if (typeof _origCapture === 'function') {
+  Error.captureStackTrace = (target, ctor) => {
+    if (!target || typeof target !== 'object') return
+    try {
+      _origCapture(target, ctor)
+    } catch {
+      try {
+        target.stack = new Error().stack
+      } catch {}
+    }
+  }
+}
 import '../src/index'

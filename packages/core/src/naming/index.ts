@@ -13,3 +13,8 @@ export {
   mainnetReadOnlyClient,
   type AnimaRegistrarClientOpts,
 } from './registrar'
+export {
+  SUBNAME_LABEL_RE,
+  validateSubnameLabel,
+  type SubnameValidation,
+} from './validate'

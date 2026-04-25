@@ -29,3 +29,12 @@ export {
   persistKeystoreToStorage,
   restoreKeystoreFromStorage,
 } from './keystore-storage'
+export {
+  uploadKeystore,
+  fetchKeystore,
+  fetchAndDecryptKeystore,
+  type UploadKeystoreOpts,
+  type UploadKeystoreResult,
+  type FetchKeystoreOpts,
+  type FetchKeystoreResult,
+} from './keystore-blob'

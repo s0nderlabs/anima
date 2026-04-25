@@ -10,7 +10,7 @@ import {
   createWalletClient,
   custom,
 } from 'viem'
-import { type Account, toAccount } from 'viem/accounts'
+import { type LocalAccount, toAccount } from 'viem/accounts'
 import { ogChain } from '../chain'
 import { NETWORK_CHAIN_ID } from '../config'
 import type { AnimaNetwork } from '../config'
@@ -104,16 +104,21 @@ export class WalletConnectOperatorSigner implements OperatorSigner {
       console.log(`\nScan with any WalletConnect-compatible mobile wallet.\nOr copy URI:\n${uri}\n`)
     }
 
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(
+    let timeoutHandle: NodeJS.Timeout | undefined
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = setTimeout(
         () =>
           reject(
             new Error(`WalletConnect pair timeout after ${this.options.connectTimeoutMs / 1000}s`),
           ),
         this.options.connectTimeoutMs,
-      ),
-    )
-    await Promise.race([connectPromise, timeoutPromise])
+      )
+    })
+    try {
+      await Promise.race([connectPromise, timeoutPromise])
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle)
+    }
 
     if (!provider.accounts || provider.accounts.length === 0) {
       throw new Error('WalletConnect paired but no accounts returned')
@@ -130,7 +135,7 @@ export class WalletConnectOperatorSigner implements OperatorSigner {
     return this.connectedAddress
   }
 
-  async account(): Promise<Account> {
+  async account(): Promise<LocalAccount> {
     const provider = await this.ensureProvider()
     const addr = await this.address()
 

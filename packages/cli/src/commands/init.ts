@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { mkdir, rename } from 'node:fs/promises'
+import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
   cancel,
@@ -8,7 +8,6 @@ import {
   isCancel,
   note,
   outro,
-  password,
   select,
   spinner,
   text,
@@ -30,10 +29,10 @@ import {
   mainnetReadOnlyClient,
   mintAgent,
   openComputeLedger,
-  persistKeystoreToStorage,
   placeholderAgentId,
-  saveKeystore,
   subnameNode,
+  uploadKeystore,
+  validateSubnameLabel,
   waitForReceiptResilient,
 } from '@s0nderlabs/anima-core'
 import { type Address, type Hex, formatEther, parseEther } from 'viem'
@@ -45,8 +44,7 @@ import { pickOperatorSigner } from './init/operator-picker'
 import { initialWizardState, updateWizardState, writeWizardState } from './init/wizard-state'
 
 export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promise<void> {
-  const cwd = opts?.cwd ?? process.cwd()
-  const configPath = join(cwd, 'anima.config.ts')
+  const configPath = agentPaths.config
 
   intro('anima init')
 
@@ -85,9 +83,8 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     placeholder: 'e.g. alice',
     validate: v => {
       if (!v) return undefined
-      if (!/^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])?$/.test(v))
-        return 'Subnames: 3-32 chars, lowercase a-z, 0-9, hyphens (not leading/trailing).'
-      return undefined
+      const r = validateSubnameLabel(v)
+      return r.ok ? undefined : `Subname invalid: ${r.reason ?? 'rejected'}`
     },
   })) as string | symbol
   if (isCancel(requestedSubname)) {
@@ -176,28 +173,11 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     ledgerSize = Number(custom)
   }
 
-  const pass = await password({
-    message: 'Choose a passphrase for the agent keystore (min 8 chars)',
-    validate: v => (v && v.length >= 8 ? undefined : 'Min 8 chars required.'),
-  })
-  if (isCancel(pass)) {
-    cancel('Aborted.')
-    return
-  }
-  const passConfirm = await password({ message: 'Confirm passphrase' })
-  if (isCancel(passConfirm)) {
-    cancel('Aborted.')
-    return
-  }
-  if (pass !== passConfirm) {
-    cancel('Passphrases do not match.')
-    return
-  }
-
   // ─── Phase B: wallet gate ────────────────────────────────────────────────
 
-  const operator = await pickOperatorSigner({ network })
-  if (!operator) return
+  const picked = await pickOperatorSigner({ network })
+  if (!picked) return
+  const { signer: operator, hint: operatorHint } = picked
 
   const sConnect = spinner()
   sConnect.start(`Connecting via ${operator.source}`)
@@ -252,27 +232,21 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   const provisionalAgentId = placeholderAgentId(agent.address)
   const provisional = agentPaths.agent(provisionalAgentId)
   await mkdir(provisional.dir, { recursive: true })
-  await saveKeystore(provisional.keystore, agent.privkeyHex, pass)
 
   await writeWizardState(provisional.dir, {
     ...initialWizardState(agent.address, network),
-    steps: {
-      ...initialWizardState(agent.address, network).steps,
-      keystoreSaved: true,
-    },
   })
 
   let mintedTokenId: bigint | null = null
   let contractAddress: Address | null = null
 
   const sMint = spinner()
-  sMint.start(`Minting iNFT on ${network}`)
+  sMint.start(`Minting iNFT on ${network} (keystore slot left as bootstrap until upload)`)
   try {
     const { result, contractAddress: c } = await mintAgent({
       network,
       operator,
       agentAddress: agent.address as Address,
-      keystorePath: provisional.keystore,
     })
     mintedTokenId = result.tokenId
     contractAddress = c
@@ -329,26 +303,61 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   }
 
   const sPersist = spinner()
-  sPersist.start('Persisting encrypted keystore to 0G Storage')
+  sPersist.start('Encrypting agent keystore to operator wallet + uploading to 0G Storage')
+  let keystorePersisted = false
   try {
-    const { readFile } = await import('node:fs/promises')
-    const keystoreBytes = new Uint8Array(await readFile(paths.keystore))
-    const { rootHash, updateTx } = await persistKeystoreToStorage({
+    const { rootHash, updateTx } = await uploadKeystore({
       network,
+      signer: operator,
+      agentAddress: agent.address as Address,
       agentPrivkey: agent.privkeyHex as Hex,
       tokenId: mintedTokenId!,
       contractAddress: contractAddress!,
-      keystoreBytes,
+      cachePath: paths.keystore,
     })
     await updateWizardState(paths.dir, draft => {
       draft.steps.keystorePersistedTx = updateTx
       draft.steps.keystoreRootHash = rootHash
+      draft.steps.keystoreSaved = true
     })
+    keystorePersisted = true
     sPersist.stop(`keystore anchored (root ${rootHash.slice(0, 12)}…)`)
   } catch (e) {
     sPersist.stop(`keystore persistence failed: ${(e as Error).message.slice(0, 120)}`)
-    // Non-fatal — user can re-run later via topup-style command. Continue.
   }
+
+  if (!keystorePersisted) {
+    note(
+      [
+        `iNFT #${mintedTokenId!.toString()} is minted and the agent EOA is funded with`,
+        `${formatEther(fundingAmount)} 0G, but the agent privkey only existed in this`,
+        `wizard's RAM and is now unrecoverable. The funds in ${agent.address}`,
+        'are stranded — there is no way to derive the privkey to spend them.',
+        '',
+        'Re-run `anima init` to mint a fresh iNFT (the old one stays owned by the',
+        'operator and can be reused for a new agent EOA via a future tool).',
+      ].join('\n'),
+      'unrecoverable failure — agent EOA orphaned',
+    )
+    cancel('Aborted before writing config (init failed mid-flow).')
+    await operator.close?.()
+    return
+  }
+
+  // Phase 6.7: seed canonical memory starter files so identity / persona /
+  // profile slots can land on chain on the first chat turn. Without this the
+  // sync manager has nothing to anchor for those slots and they stay
+  // bootstrap-placeholder forever (gap discovered during stress test).
+  await seedStarterMemoryFiles({
+    paths,
+    network,
+    contractAddress: contractAddress!,
+    tokenId: mintedTokenId!,
+    agentAddress: agent.address as Address,
+    operatorAddress,
+    brainProvider: modelPick?.provider ?? null,
+    brainModel: modelPick?.model ?? null,
+  })
 
   if (!skipLedger) {
     const sLedger = spinner()
@@ -434,6 +443,7 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     plugins: ['onchain', 'comms', 'system'],
     tools: {},
     imports: { claudeCode: true },
+    operator: operatorHint,
   })
   await writeConfigTs(configPath, cfg, {
     header: '// Regenerated by `anima init`. Edit freely; type-safe.',
@@ -448,10 +458,11 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     '',
     `  agent id   ${finalAgentId}`,
     `  agent EOA  ${agent.address}`,
-    `  operator   ${operatorAddress}`,
+    `  operator   ${operatorAddress}  (source: ${operatorHint.source})`,
     `  network    ${network} (${NETWORK_RPC[network]})`,
     `  chain id   ${NETWORK_CHAIN_ID[network]}`,
-    `  keystore   ${paths.keystore}`,
+    `  config     ${configPath}`,
+    `  keystore   on 0G Storage (cached at ${paths.keystore})`,
   ]
   if (mintedTokenId !== null && contractAddress) {
     lines.push(`  iNFT       #${mintedTokenId.toString()} at ${contractAddress}`)
@@ -462,4 +473,45 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   if (!skipLedger) lines.push(`  ledger     ${ledgerSize} 0G`)
   lines.push('', 'Next: `anima` to chat · `anima status` for health · `anima topup` to add funds')
   outro(lines.join('\n'))
+}
+
+interface SeedStarterOpts {
+  paths: ReturnType<typeof agentPaths.agent>
+  network: AnimaNetwork
+  contractAddress: Address
+  tokenId: bigint
+  agentAddress: Address
+  operatorAddress: Address
+  brainProvider: string | null
+  brainModel: string | null
+}
+
+/**
+ * Seed `MEMORY.md`, `/agent/identity.md`, `/agent/persona.md`, and
+ * `/user/profile.md` immediately after mint so the per-turn sync manager
+ * has real content for the identity / persona / memory-index slots on the
+ * first chat turn. Without this, those slots stay bootstrap-placeholder
+ * forever (gap discovered during the Phase 6.7 stress test).
+ */
+async function seedStarterMemoryFiles(opts: SeedStarterOpts): Promise<void> {
+  const memDir = opts.paths.memoryDir
+  const agentMem = `${memDir}/agent`
+  const userMem = `${memDir}/user`
+  await mkdir(agentMem, { recursive: true })
+  await mkdir(userMem, { recursive: true })
+
+  const now = new Date().toISOString().slice(0, 10)
+  const identity = `---\nname: identity\ndescription: Auto-written agent identity facts.\ntype: agent-identity\n---\n# Anima identity\n\n- iNFT: #${opts.tokenId.toString()} at ${opts.contractAddress} (${opts.network})\n- Agent EOA: ${opts.agentAddress}\n- Operator: ${opts.operatorAddress}\n- Minted: ${now}\n${opts.brainProvider ? `- Brain provider: ${opts.brainProvider}\n` : ''}${opts.brainModel ? `- Brain model: ${opts.brainModel}\n` : ''}`
+  const persona =
+    '---\nname: persona\ndescription: Voice + behavior style.\ntype: agent-persona\n---\n# Persona\n\nI am Anima, a sovereign agent runtime on 0G. I anchor my state on chain every turn, decrypt my keystore via my operator wallet at session start, and use 0G Compute (TEE-attested) for reasoning. I am direct, concise, and factual.\n'
+  const profile =
+    '---\nname: profile\ndescription: User profile (operator-scoped, never anchored on chain).\ntype: user\n---\n# User profile\n\n(empty — fills as we chat)\n'
+
+  await writeFile(join(agentMem, 'identity.md'), identity, 'utf8')
+  await writeFile(join(agentMem, 'persona.md'), persona, 'utf8')
+  await writeFile(join(userMem, 'profile.md'), profile, 'utf8')
+
+  // Seed an empty MEMORY.md so per-turn sync has something to anchor and the
+  // brain's first turn sees a parseable index.
+  await writeFile(opts.paths.memoryIndex, '# Anima — Memory Index\n\n', 'utf8')
 }

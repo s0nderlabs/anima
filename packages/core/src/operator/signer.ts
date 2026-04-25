@@ -1,5 +1,5 @@
 import type { Address, Chain, PublicClient, WalletClient } from 'viem'
-import type { Account } from 'viem/accounts'
+import type { LocalAccount } from 'viem/accounts'
 import type { AnimaNetwork } from '../config'
 
 /**
@@ -24,12 +24,14 @@ export interface OperatorSigner {
   /** Operator's on-chain address. Becomes the iNFT owner. */
   address(): Promise<Address>
   /**
-   * viem Account for composing with wallet clients. For privkey-based sources
-   * (keychain, keystore file, raw) this is a `PrivateKeyAccount`. For
-   * WalletConnect it's a JSON-RPC account whose sign methods delegate to the
-   * paired mobile wallet over the WC relay.
+   * viem LocalAccount for composing with wallet clients. For privkey-based
+   * sources (keychain, keystore file, raw) this is a `PrivateKeyAccount`. For
+   * WalletConnect it's a custom local account whose sign methods delegate to
+   * the paired mobile wallet over the WC relay. Keeping the return type as
+   * `LocalAccount` (not the broader `Account`) guarantees `signTypedData` is
+   * reachable, which Phase 6.6 needs for the sign-derived-key keystore.
    */
-  account(): Promise<Account>
+  account(): Promise<LocalAccount>
   /** A wallet client bound to `network` that signs from the operator's address. */
   walletClient(network: AnimaNetwork): Promise<WalletClient>
   /** A public client for the same network (reads only). */

@@ -1,5 +1,4 @@
 import { mkdir, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
 import { cancel, intro, isCancel, note, outro, password, spinner } from '@clack/prompts'
 import {
   type AnimaNetwork,
@@ -9,13 +8,16 @@ import {
   decryptKey,
   defineConfig,
   explorerTokenUrl,
+  fetchAndDecryptKeystore,
   iNFTAgentId,
   networkFromChainId,
   restoreKeystoreFromStorage,
+  sniffKeystoreVersion,
 } from '@s0nderlabs/anima-core'
 import { type Address, bytesToHex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { writeConfigTs } from '../config/render'
+import { pickOperatorSigner } from './init/operator-picker'
 
 interface ParsedRef {
   network: AnimaNetwork
@@ -49,8 +51,7 @@ function parseRef(ref: string): ParsedRef {
 }
 
 export async function runRestore(opts: { ref: string; cwd?: string }): Promise<void> {
-  const cwd = opts.cwd ?? process.cwd()
-  const configPath = join(cwd, 'anima.config.ts')
+  const configPath = agentPaths.config
 
   intro('anima restore')
 
@@ -66,7 +67,7 @@ export async function runRestore(opts: { ref: string; cwd?: string }): Promise<v
   s1.start(`Fetching iNFT #${parsed.tokenId} on ${parsed.network}`)
 
   let encryptedBytes: Uint8Array
-  let operatorAddress: Address
+  let operatorAddressOnChain: Address
   try {
     const downloaded = await restoreKeystoreFromStorage({
       network: parsed.network,
@@ -87,39 +88,111 @@ export async function runRestore(opts: { ref: string; cwd?: string }): Promise<v
       return
     }
     encryptedBytes = downloaded.encryptedBytes
-    operatorAddress = downloaded.owner
+    operatorAddressOnChain = downloaded.owner
     s1.stop(`fetched ${encryptedBytes.byteLength} bytes from 0G Storage`)
   } catch (e) {
     s1.stop(`fetch failed: ${(e as Error).message}`)
     return
   }
 
-  const pass = await password({
-    message: 'Passphrase for the agent keystore',
-    validate: v => (v && v.length >= 1 ? undefined : 'Required.'),
-  })
-  if (isCancel(pass)) {
-    cancel('Aborted.')
-    return
-  }
-
-  let keystore: EncryptedKeystore
-  let privkeyHex: `0x${string}`
-  let agentAddress: Address
-  try {
-    keystore = JSON.parse(new TextDecoder().decode(encryptedBytes)) as EncryptedKeystore
-    const privkey = decryptKey(keystore, pass)
-    privkeyHex = bytesToHex(privkey)
-    agentAddress = privateKeyToAccount(privkeyHex).address
-  } catch (e) {
-    cancel(`decrypt failed: ${(e as Error).message}. Wrong passphrase or corrupted keystore.`)
-    return
-  }
+  const version = sniffKeystoreVersion(encryptedBytes)
 
   const agentId = iNFTAgentId({ contractAddress: parsed.contract, tokenId: parsed.tokenId })
   const paths = agentPaths.agent(agentId)
-  await mkdir(paths.dir, { recursive: true })
-  await writeFile(paths.keystore, JSON.stringify(keystore, null, 2), 'utf8')
+  let privkeyHex: `0x${string}`
+  let agentAddress: Address
+
+  if (version === 1) {
+    note(
+      'Detected legacy v1 (passphrase) keystore. After restore, run `anima migrate-keystore` to upgrade to v2 (operator-wallet-encrypted).',
+      'legacy keystore',
+    )
+    const pass = await password({
+      message: 'Passphrase for the agent keystore',
+      validate: v => (v && v.length >= 1 ? undefined : 'Required.'),
+    })
+    if (isCancel(pass)) {
+      cancel('Aborted.')
+      return
+    }
+    try {
+      const ks = JSON.parse(new TextDecoder().decode(encryptedBytes)) as EncryptedKeystore
+      const privkey = decryptKey(ks, pass)
+      privkeyHex = bytesToHex(privkey)
+      agentAddress = privateKeyToAccount(privkeyHex).address
+    } catch (e) {
+      cancel(`decrypt failed: ${(e as Error).message}. Wrong passphrase or corrupted keystore.`)
+      return
+    }
+    await mkdir(paths.dir, { recursive: true })
+    await writeFile(paths.keystore, new TextDecoder().decode(encryptedBytes), 'utf8')
+  } else if (version === 2) {
+    const picked = await pickOperatorSigner({ network: parsed.network })
+    if (!picked) return
+    const operator = picked.signer
+    const pickedAddr = await operator.address()
+    if (pickedAddr.toLowerCase() !== operatorAddressOnChain.toLowerCase()) {
+      note(
+        `Picked operator ${pickedAddr} does not match iNFT owner ${operatorAddressOnChain}. The decrypt will fail; you must connect the same operator that minted this iNFT.`,
+        'operator mismatch',
+      )
+    }
+
+    const sUnlock = spinner()
+    sUnlock.start('Decrypting keystore via operator wallet signature')
+    try {
+      // We don't know the agent address yet (it's encoded into the typed data).
+      // Best path: read the agent address from the iNFT's text records or
+      // attempt decrypt by trying the address derived from a successful
+      // decrypt. For MVP we ask the user since restoring on a fresh machine
+      // means they can't easily derive it.
+      sUnlock.stop('need agent address')
+      const agentAddrInput = (await password({
+        message: 'Agent EOA address (0x…) — find it on the iNFT subname or your records',
+        validate: v => {
+          if (!v) return 'Required.'
+          if (!/^0x[0-9a-fA-F]{40}$/.test(v)) return 'Must be a 20-byte hex address.'
+          return undefined
+        },
+      })) as string | symbol
+      if (isCancel(agentAddrInput)) {
+        cancel('Aborted.')
+        await operator.close?.()
+        return
+      }
+      agentAddress = agentAddrInput as Address
+
+      const sDecrypt = spinner()
+      sDecrypt.start('Sign typed data + decrypt')
+      const decrypted = await fetchAndDecryptKeystore({
+        network: parsed.network,
+        contractAddress: parsed.contract,
+        tokenId: parsed.tokenId,
+        signer: operator,
+        agentAddress,
+        cachePath: paths.keystore,
+      })
+      privkeyHex = decrypted.privkeyHex
+      const derived = privateKeyToAccount(privkeyHex).address
+      if (derived.toLowerCase() !== agentAddress.toLowerCase()) {
+        sDecrypt.stop('decrypt produced unexpected agent address')
+        cancel(
+          `Decrypted privkey points to ${derived} but you said ${agentAddress}. Aborting to prevent stale config.`,
+        )
+        await operator.close?.()
+        return
+      }
+      sDecrypt.stop(`decrypted (source: ${decrypted.source})`)
+    } catch (e) {
+      cancel(`decrypt failed: ${(e as Error).message}`)
+      await operator.close?.()
+      return
+    }
+    await operator.close?.()
+  } else {
+    cancel(`Unknown keystore version: ${version}. This blob may be corrupted.`)
+    return
+  }
 
   const cfg = defineConfig({
     identity: {
@@ -128,7 +201,7 @@ export async function runRestore(opts: { ref: string; cwd?: string }): Promise<v
         tokenId: parsed.tokenId.toString(),
         network: parsed.network,
       },
-      operator: operatorAddress,
+      operator: operatorAddressOnChain,
       agent: agentAddress,
     },
     network: parsed.network,
@@ -137,6 +210,7 @@ export async function runRestore(opts: { ref: string; cwd?: string }): Promise<v
     plugins: ['onchain', 'comms', 'system'],
     tools: {},
     imports: { claudeCode: true },
+    operator: null,
   })
   await writeConfigTs(configPath, cfg, {
     header: '// Regenerated by `anima restore`. Edit freely; type-safe.',
@@ -148,12 +222,18 @@ export async function runRestore(opts: { ref: string; cwd?: string }): Promise<v
       '',
       `  agent id   ${agentId}`,
       `  agent EOA  ${agentAddress}`,
-      `  operator   ${operatorAddress}`,
+      `  operator   ${operatorAddressOnChain}`,
       `  iNFT       #${parsed.tokenId.toString()} at ${parsed.contract}`,
       `             ${explorerTokenUrl(parsed.network, parsed.contract, parsed.tokenId)}`,
+      `  config     ${configPath}`,
       `  keystore   ${paths.keystore}`,
       '',
       'Next: `anima` to chat, or `anima topup --compute 5` if ledger is dry.',
-    ].join('\n'),
+      version === 1
+        ? 'Then: `anima migrate-keystore` to upgrade to v2 (drops the passphrase).'
+        : '',
+    ]
+      .filter(Boolean)
+      .join('\n'),
   )
 }

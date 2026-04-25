@@ -1,22 +1,22 @@
-import { cancel, intro, isCancel, outro, password, spinner } from '@clack/prompts'
+import { cancel, intro, note, outro, spinner } from '@clack/prompts'
 import {
   type AnimaConfig,
   NETWORK_CHAIN_ID,
   agentPaths,
   explorerTxUrl,
+  fetchAndDecryptKeystore,
   iNFTAgentId,
-  loadKeystore,
   openComputeLedger,
-  persistKeystoreToStorage,
 } from '@s0nderlabs/anima-core'
 import type { Address, Hex } from 'viem'
+import { loadOrPickOperatorSigner } from './operator-picker'
 import { readWizardState, updateWizardState } from './wizard-state'
 
 /**
- * Resume a partial `anima init` that crashed after mint. Only agent-only
- * steps are re-runnable here (keystore persistence, compute ledger, subname,
- * text records). If mint or agent-funding didn't complete, resume can't
- * recover — the user must run `anima init` fresh and re-mint.
+ * Resume a partial `anima init` that crashed after mint + funding. Phase 6.6
+ * requires that the keystore was uploaded to 0G Storage before resume can
+ * proceed — otherwise the agent privkey is lost (it only existed in the
+ * original wizard's RAM).
  */
 export async function runResumeInit(opts: {
   config: AnimaConfig
@@ -46,67 +46,55 @@ export async function runResumeInit(opts: {
 
   if (!state.steps.mintTx || !state.steps.agentFundedTx) {
     cancel(
-      'Mint or agent-funding did not complete. Resume only supports agent-side steps. Start fresh with `anima init` (pick Overwrite) and re-mint.',
+      'Mint or agent-funding did not complete. Resume only supports steps after funding. Start fresh with `anima init` (pick Overwrite) and re-mint.',
     )
     return
   }
 
-  const pass = await password({
-    message: `Unlock keystore for agent ${agentAddress}`,
-  })
-  if (isCancel(pass)) {
-    cancel('Aborted.')
-    return
-  }
-
-  let keystore: Awaited<ReturnType<typeof loadKeystore>>
-  try {
-    keystore = await loadKeystore(paths.keystore, pass)
-  } catch (e) {
-    cancel(`Keystore unlock failed: ${(e as Error).message}`)
-    return
-  }
-  if (keystore.address.toLowerCase() !== agentAddress.toLowerCase()) {
-    cancel(
-      `Keystore address ${keystore.address} != config agent ${agentAddress}. Inconsistent state.`,
-    )
-    return
-  }
-
-  // Step: persist keystore to 0G Storage.
   if (!state.steps.keystorePersistedTx) {
-    const s = spinner()
-    s.start('Persisting encrypted keystore to 0G Storage')
-    try {
-      const { readFile } = await import('node:fs/promises')
-      const keystoreBytes = new Uint8Array(await readFile(paths.keystore))
-      const { rootHash, updateTx } = await persistKeystoreToStorage({
-        network,
-        agentPrivkey: keystore.privkeyHex as Hex,
-        tokenId,
-        contractAddress,
-        keystoreBytes,
-      })
-      await updateWizardState(paths.dir, draft => {
-        draft.steps.keystorePersistedTx = updateTx
-        draft.steps.keystoreRootHash = rootHash
-      })
-      s.stop(`keystore anchored (root ${rootHash.slice(0, 12)}…)`)
-    } catch (e) {
-      s.stop(`keystore persistence failed: ${(e as Error).message.slice(0, 120)}`)
-    }
+    cancel(
+      [
+        'Keystore was never uploaded to 0G Storage. The agent privkey only',
+        "existed in the original wizard's RAM, so it is unrecoverable now.",
+        'Start fresh with `anima init` and re-mint into a new iNFT.',
+      ].join(' '),
+    )
+    return
   }
 
-  // Step: open compute ledger. We use a Starter default on resume since we
-  // don't know the original ledger-size pick. User can `anima topup --compute`
-  // to grow it afterward.
+  const operator = await loadOrPickOperatorSigner({ network, hint: config.operator })
+  if (!operator) {
+    cancel('No operator wallet available; cannot decrypt keystore to resume.')
+    return
+  }
+
+  const sUnlock = spinner()
+  sUnlock.start('Fetching keystore from 0G Storage + decrypting via operator')
+  let agentPrivkey: Hex
+  try {
+    const decrypted = await fetchAndDecryptKeystore({
+      network,
+      contractAddress,
+      tokenId,
+      signer: operator,
+      agentAddress,
+      cachePath: paths.keystore,
+    })
+    agentPrivkey = decrypted.privkeyHex
+    sUnlock.stop(`unlocked (keystore source: ${decrypted.source})`)
+  } catch (e) {
+    sUnlock.stop(`unlock failed: ${(e as Error).message.slice(0, 160)}`)
+    await operator.close?.()
+    return
+  }
+
   if (!state.steps.ledgerOpenedTx) {
     const s = spinner()
     s.start('Opening 0G Compute ledger (3 0G minimum, top up later)')
     try {
       const status = await openComputeLedger({
         network,
-        privkeyHex: keystore.privkeyHex as Hex,
+        privkeyHex: agentPrivkey,
         initialBalance: 3,
         providerAddress: config.brain.provider ?? undefined,
       })
@@ -124,6 +112,14 @@ export async function runResumeInit(opts: {
   // Subname records are not resumable: the state file intentionally doesn't
   // persist the requested label, so if text records are incomplete we tell
   // the user to re-run `anima init` and pick the same label manually.
+  if (!state.steps.subnameClaimedTx) {
+    note(
+      'If you wanted a subname, re-run `anima init` (it can re-pick the same label).',
+      'subname not resumable',
+    )
+  }
+
+  await operator.close?.()
 
   outro(
     [
@@ -131,7 +127,7 @@ export async function runResumeInit(opts: {
       `  agent     ${agentAddress}`,
       `  iNFT      #${tokenId.toString()} at ${contractAddress}`,
       `  tx        ${explorerTxUrl(network, state.steps.mintTx as Hex)}`,
-      `  keystore  ${paths.keystore}`,
+      `  keystore  ${paths.keystore} (cache of 0G Storage blob)`,
       `  chain id  ${NETWORK_CHAIN_ID[network]}`,
       '',
       'Resume finished. `anima` to chat, `anima status` for health.',

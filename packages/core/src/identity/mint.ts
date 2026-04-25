@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import { type Address, type Hex, keccak256, parseEventLogs } from 'viem'
 import { MIN_GAS_PRICE } from '../chain'
 import type { OperatorSigner } from '../operator'
@@ -22,8 +21,14 @@ export interface MintAgentOpts {
    * holding the operator's key.
    */
   agentAddress: Address
-  /** Path to the encrypted agent keystore. Hash becomes the `keystore` IntelligentData slot. */
-  keystorePath: string
+  /**
+   * Optional bytes32 to set in the keystore IntelligentData slot at mint time.
+   * Phase 6.6 mints with `bootstrapHashFor('keystore')` and lets the agent
+   * push the real 0G Storage root hash via `update()` after the encrypted
+   * blob is uploaded. Pass an explicit hash here only if the upload happens
+   * pre-mint (e.g. cold-start sandbox flow).
+   */
+  keystoreRootHash?: Hex
 }
 
 export async function mintAgent(opts: MintAgentOpts): Promise<{
@@ -33,8 +38,7 @@ export async function mintAgent(opts: MintAgentOpts): Promise<{
   operatorAddress: Address
 }> {
   const contractAddress = ANIMA_AGENT_NFT_ADDRESS[opts.network]
-  const keystoreBytes = await readFile(opts.keystorePath)
-  const keystoreHash = keccak256(new Uint8Array(keystoreBytes)) as Hex
+  const keystoreHash = opts.keystoreRootHash ?? (bootstrapHashFor('keystore') as Hex)
   const entries = buildMintEntries({ keystore: keystoreHash })
 
   const operatorAddress = await opts.operator.address()

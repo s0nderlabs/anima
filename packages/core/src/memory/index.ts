@@ -22,10 +22,27 @@ export {
 } from './index-file'
 export { readTopic, writeTopic, topicPath } from './topic'
 export { makeMemorySaveTool, type MemorySaveArgs } from './save-tool'
+export { makeMemoryReadTool, type MemoryReadArgs } from './read-tool'
 export {
   syncMemory,
-  defaultSyncTargets,
+  defaultMemorySyncTargets,
   type SyncMemoryOpts,
   type SyncMemoryResult,
   type SyncTarget,
 } from './sync'
+export {
+  MEMORY_BLOB_VERSION,
+  deriveMemoryKey,
+  encryptMemoryBytes,
+  decryptMemoryBytes,
+} from './encryption'
+export {
+  syncActivityLog,
+  type SyncActivityOpts,
+  type SyncActivityResult,
+} from './activity-sync'
+export {
+  MemorySyncManager,
+  type MemorySyncManagerOpts,
+  type FlushResult,
+} from './sync-manager'

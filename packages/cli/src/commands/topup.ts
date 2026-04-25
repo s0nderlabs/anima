@@ -4,14 +4,14 @@ import {
   agentPaths,
   depositToLedger,
   explorerTxUrl,
+  fetchAndDecryptKeystore,
   getLedgerBalance,
   iNFTAgentId,
-  loadKeystore,
   waitForReceiptResilient,
 } from '@s0nderlabs/anima-core'
 import { type Address, formatEther, parseEther } from 'viem'
 import { findAndLoadConfig } from '../config/load'
-import { pickOperatorSigner } from './init/operator-picker'
+import { loadOrPickOperatorSigner } from './init/operator-picker'
 
 export interface TopupOpts {
   /** Top up the agent EOA from operator wallet, amount in 0G. */
@@ -42,7 +42,6 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
   })
   const paths = agentPaths.agent(finalAgentId)
 
-  // Default mode (no flags): show balances + prompt
   let mode: 'agent' | 'compute' | null = null
   let amount = 0
   if (opts.agent !== undefined) {
@@ -91,7 +90,7 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
   }
 
   if (mode === 'agent') {
-    const operator = await pickOperatorSigner({ network })
+    const operator = await loadOrPickOperatorSigner({ network, hint: config.operator })
     if (!operator) return
 
     const s = spinner()
@@ -118,24 +117,35 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
     return
   }
 
-  // mode === 'compute'
-  const pass = await password({ message: `Unlock keystore for agent ${agentAddress}` })
-  if (isCancel(pass)) {
-    cancel('Aborted.')
-    return
-  }
-  let agentKey: Awaited<ReturnType<typeof loadKeystore>>
+  // mode === 'compute' — needs the agent's privkey to deposit to its ledger.
+  // Phase 6.6: fetch encrypted keystore, ask operator to sign typed data, decrypt.
+  const operator = await loadOrPickOperatorSigner({ network, hint: config.operator })
+  if (!operator) return
+
+  const sUnlock = spinner()
+  sUnlock.start('Fetching encrypted keystore + decrypting via operator wallet')
+  let agentPrivkey: `0x${string}`
   try {
-    agentKey = await loadKeystore(paths.keystore, pass)
+    const decrypted = await fetchAndDecryptKeystore({
+      network,
+      contractAddress: config.identity.iNFT.contract as Address,
+      tokenId: BigInt(config.identity.iNFT.tokenId),
+      signer: operator,
+      agentAddress,
+      cachePath: paths.keystore,
+    })
+    agentPrivkey = decrypted.privkeyHex
+    sUnlock.stop(`unlocked (keystore source: ${decrypted.source})`)
   } catch (e) {
-    cancel(`Keystore unlock failed: ${(e as Error).message}`)
+    sUnlock.stop(`unlock failed: ${(e as Error).message.slice(0, 160)}`)
+    await operator.close?.()
     return
   }
 
   const sBal = spinner()
   sBal.start('Reading current ledger balance')
   try {
-    const bal = await getLedgerBalance({ network, privkeyHex: agentKey.privkeyHex })
+    const bal = await getLedgerBalance({ network, privkeyHex: agentPrivkey })
     sBal.stop(
       bal
         ? `current ledger ${formatEther(bal.totalBalance)} 0G total / ${formatEther(bal.availableBalance)} 0G available`
@@ -148,10 +158,12 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
   const sDep = spinner()
   sDep.start(`Depositing ${amount} 0G into compute ledger`)
   try {
-    await depositToLedger({ network, privkeyHex: agentKey.privkeyHex, amount })
+    await depositToLedger({ network, privkeyHex: agentPrivkey, amount })
     sDep.stop('deposit complete')
     outro(`ledger topped up by ${amount} 0G`)
   } catch (e) {
     sDep.stop(`deposit failed: ${(e as Error).message.slice(0, 120)}`)
+  } finally {
+    await operator.close?.()
   }
 }

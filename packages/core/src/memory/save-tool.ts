@@ -99,17 +99,21 @@ function partitionForType(type: MemoryType): MemoryPartition {
 }
 
 function toSlug(name: string, type: MemoryType): string {
-  const prefix = type.startsWith('user-')
-    ? type.replace(/^user-/, '')
-    : type.startsWith('agent-')
-      ? type.replace(/^agent-/, '')
-      : type
+  // Type sub-prefix: drop the partition root from compound types so a
+  // `user-favorite-color` save lands at `user/favorite-color.md`, not
+  // `user/user-favorite-color.md`. Bare `user`/`agent` types also collapse
+  // (no compound subtype) — they get just the slug, no prefix.
+  let prefix = ''
+  if (type.startsWith('user-')) prefix = type.replace(/^user-/, '')
+  else if (type.startsWith('agent-')) prefix = type.replace(/^agent-/, '')
+  // For bare 'user' or 'agent', prefix stays empty.
+
   const base = name
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-|-$/g, '')
     .slice(0, 48)
-  return `${prefix}-${base}`
+  return prefix ? `${prefix}-${base}` : base
 }
 
 function appendBody(prev: string, add: string): string {

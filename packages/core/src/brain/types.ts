@@ -4,7 +4,16 @@ import type { ToolCall, ToolSchema } from '../tools/types'
 export interface BrainMessage {
   role: 'system' | 'user' | 'assistant' | 'tool'
   content: string
+  /** Required on `tool` role: the id of the assistant tool_call this responds to. */
   toolCallId?: string
+  /**
+   * Required on `assistant` role messages that issued tool_calls. Without this
+   * the next round-trip's `tool` message has no preceding `tool_calls` to
+   * reference, and the OpenAI-compat endpoint rejects with HTTP 400
+   * "messages with role 'tool' must be a response to a preceeding message
+   * with 'tool_calls'".
+   */
+  toolCalls?: Array<{ id: string; name: string; args: unknown }>
 }
 
 export interface BrainInferInput {

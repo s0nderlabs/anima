@@ -8,7 +8,7 @@
 import { createZGComputeNetworkBroker } from '@0glabs/0g-serving-broker'
 import { JsonRpcProvider, Wallet } from 'ethers'
 import type { ToolSchema } from '../tools/types'
-import { type FrozenPrefix, renderFrozenPrefix } from './frozen-prefix'
+import { type FrozenPrefix, renderFrozenPrefix, renderUserContext } from './frozen-prefix'
 import type { Brain, BrainInferInput, BrainMessage, BrainTurn } from './types'
 
 type Broker = Awaited<ReturnType<typeof createZGComputeNetworkBroker>>
@@ -43,12 +43,24 @@ export class OGComputeBrain implements Brain {
   private readonly history: BrainMessage[]
   private readonly wallet: Wallet
   private readonly renderedPrefix: string
+  private userContextText: string | null
 
   constructor(private readonly opts: OGComputeBrainOpts) {
     this.history = opts.history ? [...opts.history] : []
     const provider = new JsonRpcProvider(opts.rpcUrl)
     this.wallet = new Wallet(opts.privkeyHex, provider)
     this.renderedPrefix = renderFrozenPrefix(opts.prefix)
+    this.userContextText = renderUserContext(opts.prefix)
+  }
+
+  /**
+   * Refresh the per-turn user-context payload from the latest local state.
+   * Called by the chat loop right before every `infer()` so MEMORY.md updates
+   * land in the next turn without rebuilding the system prompt (preserves
+   * prefix cache hits).
+   */
+  refreshUserContext(prefix: FrozenPrefix): void {
+    this.userContextText = renderUserContext(prefix)
   }
 
   async init(): Promise<void> {
@@ -89,8 +101,14 @@ export class OGComputeBrain implements Brain {
     const messages: BrainMessage[] = [
       { role: 'system', content: this.renderedPrefix },
       ...this.history,
-      { role: 'user', content: userText },
     ]
+    // Per-turn user-context (MEMORY.md, etc.) injected just before the live
+    // user message. Treated as a separate user turn so MEMORY.md churn doesn't
+    // invalidate the system-prompt cache.
+    if (this.userContextText) {
+      messages.push({ role: 'user', content: this.userContextText })
+    }
+    messages.push({ role: 'user', content: userText })
 
     let turnResult: BrainTurn | null = null
     const MAX_ROUND_TRIPS = 5
@@ -106,6 +124,7 @@ export class OGComputeBrain implements Brain {
       messages.push({
         role: 'assistant',
         content: resp.content ?? '',
+        toolCalls: resp.toolCalls,
       })
 
       for (const call of resp.toolCalls) {
@@ -143,6 +162,20 @@ export class OGComputeBrain implements Brain {
       messages: messages.map(m => {
         if (m.role === 'tool') {
           return { role: 'tool', tool_call_id: m.toolCallId, content: m.content }
+        }
+        if (m.role === 'assistant' && m.toolCalls && m.toolCalls.length > 0) {
+          return {
+            role: 'assistant',
+            content: m.content || null,
+            tool_calls: m.toolCalls.map(tc => ({
+              id: tc.id,
+              type: 'function',
+              function: {
+                name: tc.name,
+                arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args),
+              },
+            })),
+          }
         }
         return { role: m.role, content: m.content }
       }),

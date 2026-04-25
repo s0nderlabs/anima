@@ -29,6 +29,23 @@ export interface INFTRef {
   network: AnimaNetwork
 }
 
+export type OperatorSourceKind = 'walletconnect' | 'keychain' | 'keystore-file' | 'raw-privkey'
+
+/**
+ * Persisted hint about which operator source to use when commands like
+ * `anima` (chat), `anima topup`, and `anima restore` need to talk to the
+ * operator wallet again. Stores enough metadata to reconstruct the signer
+ * without re-prompting the user from scratch (passphrases / QR scans still
+ * happen because they're per-session).
+ */
+export interface OperatorSourceHint {
+  source: OperatorSourceKind
+  /** Only for `keychain`: the macOS Keychain service name to read. */
+  keychainService?: string
+  /** Only for `keystore-file`: absolute or `~`-prefixed path to the JSON keystore. */
+  keystorePath?: string
+}
+
 export interface AnimaConfig {
   identity: {
     iNFT: INFTRef | null
@@ -51,6 +68,12 @@ export interface AnimaConfig {
   imports: {
     claudeCode: boolean
   }
+  /**
+   * Phase 6.6: which operator source to use when reconnecting. Optional so
+   * legacy v0.5.0 configs still parse — commands fall back to the interactive
+   * picker when this is missing.
+   */
+  operator?: OperatorSourceHint | null
 }
 
 export type AnimaConfigInput = Partial<AnimaConfig> & Pick<AnimaConfig, 'network'>
@@ -61,6 +84,7 @@ const DEFAULT_CONFIG: Omit<AnimaConfig, 'network' | 'storage'> = {
   plugins: ['onchain', 'comms', 'system'],
   tools: {},
   imports: { claudeCode: true },
+  operator: null,
 }
 
 export function defineConfig(input: AnimaConfigInput): AnimaConfig {
@@ -73,6 +97,7 @@ export function defineConfig(input: AnimaConfigInput): AnimaConfig {
     plugins: input.plugins ?? DEFAULT_CONFIG.plugins,
     tools: input.tools ?? DEFAULT_CONFIG.tools,
     imports: input.imports ?? DEFAULT_CONFIG.imports,
+    operator: input.operator ?? DEFAULT_CONFIG.operator,
   }
 }
 

@@ -33,9 +33,9 @@ test('memory.save persists to user partition for user-typed content', async () =
 
     const paths = agentPaths.agent(agentId)
     const idx = await readFile(paths.memoryIndex, 'utf8')
-    expect(idx).toContain('user/user-operator-likes-rust.md')
+    expect(idx).toContain('user/operator-likes-rust.md')
 
-    const file = await readFile(`${paths.userMemoryDir}/user-operator-likes-rust.md`, 'utf8')
+    const file = await readFile(`${paths.userMemoryDir}/operator-likes-rust.md`, 'utf8')
     expect(file).toContain('name: operator likes rust')
     expect(file).toContain('type: user')
     expect(file).toContain('rust is their favorite')

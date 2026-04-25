@@ -67,8 +67,25 @@ export {
   topicPath,
   makeMemorySaveTool,
   type MemorySaveArgs,
+  makeMemoryReadTool,
+  type MemoryReadArgs,
   INDEX_LINE_LIMIT,
   INDEX_BYTE_LIMIT,
+  syncMemory,
+  defaultMemorySyncTargets,
+  type SyncMemoryOpts,
+  type SyncMemoryResult,
+  type SyncTarget,
+  MEMORY_BLOB_VERSION,
+  deriveMemoryKey,
+  encryptMemoryBytes,
+  decryptMemoryBytes,
+  syncActivityLog,
+  type SyncActivityOpts,
+  type SyncActivityResult,
+  MemorySyncManager,
+  type MemorySyncManagerOpts,
+  type FlushResult,
 } from './memory'
 
 export type { Storage } from './storage'
@@ -93,6 +110,13 @@ export {
   loadKeystore,
   type EncryptedKeystore,
   type AgentWalletMaterial,
+  OPERATOR_KEYSTORE_VERSION,
+  encryptAgentKey,
+  decryptAgentKey,
+  encodeKeystoreBytes,
+  decodeKeystoreBytes,
+  sniffKeystoreVersion,
+  type OperatorEncryptedKeystore,
 } from './wallet'
 
 export type { AgentIdentity, IdentityProvider } from './identity'
@@ -120,6 +144,13 @@ export {
   type MintAgentOpts,
   persistKeystoreToStorage,
   restoreKeystoreFromStorage,
+  uploadKeystore,
+  fetchKeystore,
+  fetchAndDecryptKeystore,
+  type UploadKeystoreOpts,
+  type UploadKeystoreResult,
+  type FetchKeystoreOpts,
+  type FetchKeystoreResult,
 } from './identity'
 
 export {
@@ -134,6 +165,9 @@ export {
   isLabelTaken,
   mainnetReadOnlyClient,
   type AnimaRegistrarClientOpts,
+  SUBNAME_LABEL_RE,
+  validateSubnameLabel,
+  type SubnameValidation,
 } from './naming'
 
 export {
@@ -149,3 +183,10 @@ export { waitForReceiptResilient } from './identity/receipt'
 export { MIN_GAS_PRICE, makeViemClients, ogChain, type ViemClients } from './chain'
 
 export { Runtime, type RuntimeDeps, ActivityLog, type ActivityEntry } from './runtime'
+
+export {
+  encryptToPubkey,
+  decryptWithPrivkey,
+  generateBootstrapKeypair,
+  type Option3Envelope,
+} from './migration'

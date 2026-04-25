@@ -5,3 +5,12 @@ export {
   loadKeystore,
   type AgentWalletMaterial,
 } from './eoa'
+export {
+  OPERATOR_KEYSTORE_VERSION,
+  encryptAgentKey,
+  decryptAgentKey,
+  encodeKeystoreBytes,
+  decodeKeystoreBytes,
+  sniffKeystoreVersion,
+  type OperatorEncryptedKeystore,
+} from './operator-keystore-crypto'

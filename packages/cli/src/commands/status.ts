@@ -16,7 +16,14 @@ export async function runStatus(opts?: { cwd?: string }): Promise<void> {
   console.log(`network   ${config.network} (chain ${NETWORK_CHAIN_ID[config.network]})`)
   console.log(`rpc       ${NETWORK_RPC[config.network]}`)
   console.log(`plugins   ${config.plugins.join(', ')}`)
-  console.log(`iNFT      ${config.identity.iNFT ?? '(not minted)'}`)
+  if (config.identity.iNFT) {
+    const { contract, tokenId, network } = config.identity.iNFT
+    console.log(`iNFT      #${tokenId} at ${contract} (${network})`)
+  } else {
+    console.log('iNFT      (not minted)')
+  }
+  if (config.identity.operator) console.log(`operator  ${config.identity.operator}`)
+  if (config.identity.agent) console.log(`agent EOA ${config.identity.agent}`)
   console.log(`brain     ${config.brain.provider ?? '(not picked)'}`)
 
   const ids = await listAgentIds()
