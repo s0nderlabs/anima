@@ -40,8 +40,13 @@ anima.config.ts
 # Test fixtures with private keys
 test/fixtures/keys/
 
-# Local integration tests (real API calls, may contain secrets/findings)
-test/local/
+# Local integration tests (real API calls, may contain secrets/findings).
+# tmux-*.ts drivers + the _tmux.ts helper ARE committed — they're CI gates
+# that drive real `anima` sessions via tmux send-keys. Everything else
+# (phase scripts, fund-audit, swap-keystore, findings dumps) stays local.
+test/local/*
+!test/local/tmux-*.ts
+!test/local/_tmux.ts
 
 # Editor
 .vscode/

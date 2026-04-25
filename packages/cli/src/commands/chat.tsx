@@ -123,15 +123,17 @@ export async function runChat(opts?: { cwd?: string }): Promise<void> {
   })
   const activity = new ActivityLog(paths.activityLog)
 
-  // Render TUI state has to exist before brain construction so the onToolCall
-  // closure can reference it without a forward reference. Tool indicators
-  // need state.pushRow as soon as a tool fires (claude-code / hermes pattern).
+  // Brain init must happen BEFORE createCliRenderer. clack/prompts spinner
+  // calls setRawMode(false) + stdin.pause() on stop, which undoes the
+  // stdin.resume() that opentui's setupTerminal sets up. If brain init
+  // (and its spinner) ran AFTER createCliRenderer, the stop would flip
+  // stdin back into a state where opentui can't read keypresses, AND the
+  // event loop would empty (no stdin keepalive) so the process exits.
+  // The fix: every clack interaction finishes before opentui takes the wheel.
   const { render } = await import('@opentui/solid')
   const { createCliRenderer } = await import('@opentui/core')
   const { createChatState } = await import('../ui/state')
   const { ChatApp } = await import('../ui/app')
-
-  const renderer = await createCliRenderer({ exitOnCtrlC: false })
 
   const state = createChatState({
     initialSystem: 'connected. type messages and press enter.',
@@ -139,6 +141,8 @@ export async function runChat(opts?: { cwd?: string }): Promise<void> {
     brainLabel: shortAddr(config.brain.provider!),
   })
 
+  const bootSpinner = spinner()
+  bootSpinner.start(`Connecting to 0G Compute (${shortAddr(config.brain.provider!)})`)
   const brain = new OGComputeBrain({
     privkeyHex: agentPrivkey,
     rpcUrl: NETWORK_RPC[config.network],
@@ -163,8 +167,6 @@ export async function runChat(opts?: { cwd?: string }): Promise<void> {
       } as BrainMessage
     },
   })
-  const bootSpinner = spinner()
-  bootSpinner.start(`Connecting to 0G Compute (${shortAddr(config.brain.provider!)})`)
   try {
     await brain.init()
     bootSpinner.stop('Connected')
@@ -172,6 +174,8 @@ export async function runChat(opts?: { cwd?: string }): Promise<void> {
     bootSpinner.stop(`Connection failed: ${(e as Error).message.slice(0, 120)}`)
     process.exit(1)
   }
+
+  const renderer = await createCliRenderer({ exitOnCtrlC: false })
 
   const handleSubmit = async (text: string): Promise<void> => {
     const trimmed = text.trim()
@@ -275,6 +279,11 @@ export async function runChat(opts?: { cwd?: string }): Promise<void> {
     return false
   }
 
+  // @opentui/solid's render() resolves once the component mounts; it does not
+  // block. On macOS the renderer's animation loop runs in a worker thread, so
+  // the main thread has no JS task keeping the event loop alive after render
+  // returns. Anchor: a never-resolving promise after render(); handleExit is
+  // the only escape via process.exit.
   const handleExit = (): void => {
     try {
       renderer.destroy()
@@ -290,6 +299,10 @@ export async function runChat(opts?: { cwd?: string }): Promise<void> {
     () => <ChatApp state={state} onSubmit={handleSubmit} onExit={handleExit} />,
     renderer,
   )
+
+  await new Promise<void>(() => {
+    // Block forever; only handleExit (via process.exit) escapes this.
+  })
 }
 
 async function runModelPicker(
