@@ -1,6 +1,7 @@
 import { Indexer, MemData, StorageNode, Uploader, getFlowContract } from '@0gfoundation/0g-ts-sdk'
 import { JsonRpcProvider, Wallet } from 'ethers'
 import type { Hex } from 'viem'
+import { MIN_GAS_PRICE, STORAGE_SUBMIT_GAS } from '../chain'
 import { NETWORK_RPC } from '../config'
 import type { AnimaNetwork } from '../config'
 import type { Storage } from './types'
@@ -21,7 +22,7 @@ export async function downloadBlobByRoot(
 ): Promise<Uint8Array | null> {
   const indexer = new Indexer(INDEXER_URL[network])
   try {
-    const [blob, err] = await indexer.downloadToBlob(rootHash, false)
+    const [blob, err] = await indexer.downloadToBlob(rootHash, { proof: false })
     if (err || !blob) return null
     return new Uint8Array(await blob.arrayBuffer())
   } catch {
@@ -152,8 +153,32 @@ export class OGStorage implements Storage {
         lastErr = e instanceof Error ? e : new Error(String(e))
       }
     }
+    // Translate the cryptic SDK error when the agent EOA can't afford gas.
+    // ethers reports `estimateGas` reverts as `require(false)` because the node
+    // returns no revert reason; in that case we check the wallet balance and
+    // surface an actionable message instead of the raw stack.
+    const lastMsg = lastErr?.message ?? 'unknown'
+    if (
+      /execution reverted/i.test(lastMsg) ||
+      /require\(false\)/i.test(lastMsg) ||
+      /insufficient funds/i.test(lastMsg)
+    ) {
+      const [bal, feeData] = await Promise.all([
+        this.signer.provider!.getBalance(this.signer.address),
+        this.signer.provider!.getFeeData(),
+      ])
+      const gasPrice = feeData.gasPrice ?? feeData.maxFeePerGas ?? MIN_GAS_PRICE
+      const minNeeded = gasPrice * STORAGE_SUBMIT_GAS
+      if (bal < minNeeded) {
+        const balG = Number(bal) / 1e18
+        const needG = Number(minNeeded) / 1e18
+        throw new Error(
+          `0G Storage submit failed: agent EOA ${this.signer.address} has only ${balG.toFixed(6)} 0G but needs ~${needG.toFixed(6)} 0G for gas at the current price. Top up the agent: \`anima topup --agent 0.5\`.`,
+        )
+      }
+    }
     throw new Error(
-      `0G Storage upload failed against all ${ranked.length} discovered nodes. Last error: ${lastErr?.message ?? 'unknown'}`,
+      `0G Storage upload failed against all ${ranked.length} discovered nodes. Last error: ${lastMsg}`,
     )
   }
 
@@ -163,7 +188,7 @@ export class OGStorage implements Storage {
 
   async getBlob(cid: string): Promise<Uint8Array | null> {
     try {
-      const [blob, err] = await this.indexer.downloadToBlob(cid, false)
+      const [blob, err] = await this.indexer.downloadToBlob(cid, { proof: false })
       if (err || !blob) return null
       return new Uint8Array(await blob.arrayBuffer())
     } catch {

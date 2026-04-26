@@ -4,6 +4,28 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-04-26
+
+### Fixed
+
+- **Chat TUI tool-call render crash**. The `Span` helper in `app.tsx` used `const Tag = 'span' as any; return <Tag fg=...>` — solid's JSX compiler bakes element names statically, dynamic `Tag` triggered `Comp is not a function`. The throw propagated synchronously through the reactive setter call → `state.pushRow` → out of `onToolCall` → out of `brain.infer`'s await → into `handleSubmit`'s catch, which then pushed an error sys row that re-triggered the same bug, dropping the row. Symptom looked exactly like a hung backend. Caught only after mirroring catch errors to `chat.log` via `console.error`. Fix: use `<span fg=…>` directly with `// @ts-expect-error` per call (runtime accepts; SpanProps omits `fg` in TS). Documented every workaround that fails (dynamic Tag, module-level alias, module augmentation, inline ANSI).
+- **Multi-turn chat rows beyond turn 1 not reaching the renderer**. `app.tsx`'s `rowsWithPrev` `createMemo` produced fresh `{row, prev}` wrappers per state change, killing solid's identity-keyed `<For>` iteration. Replaced with direct `<For each={state.rows()}>` and a `firstOfBlock` flag computed once at push time in `state.pushRow`. Eliminates the O(N) reactive prev-walk per render too.
+- **Slash commands (`/help`, `/yolo`, `/sync`, `/model`) left status stuck on `'thinking'`**, leaving the spinner spinning forever. `handleSubmit` now resets `status='idle'` on the slash early-return.
+- **`og.ts:uploadViaDiscoveredNodes` translates `require(false)` reverts** when the agent EOA is too poor to land a `Flow.submit()`. After all 20 discovered storage nodes return the bare-revert, the catch reads `signer.getBalance()` + `provider.getFeeData()` in parallel and, if `balance < gasPrice * STORAGE_SUBMIT_GAS`, throws an actionable message: `0G Storage submit failed: agent EOA 0x… has only X 0G but needs ~Y 0G for gas. Top up: \`anima topup --agent 0.5\`.` Falls through to the original error otherwise. Caught when per-turn sync started failing mid-session after 75 successful submits — agent had drained to 262 µ0G, mainnet gas at 4 gwei, each submit needed ~1 m0G.
+
+### Changed
+
+- **Tool rows are first-class state shapes**, not stuffed into `'system'`. New `TurnRow.role` discriminants `'tool-call'` and `'tool-result'` with optional `toolName`, `args`, `failed` fields. TUI renders `⏺ tool.name(args)` (purple) and indented `⎿ result` (or red `✗ error`). Consecutive `assistant`/`tool-call`/`tool-result` rows from a single turn share the `anima` label via `firstOfBlock`.
+- **Animated braille spinner** while status is `'thinking'`. `setInterval(80ms)` cycles `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏` via a `spinnerFrame` signal, gated by a `createEffect` that only runs the timer when status is `'thinking'` (was burning 12.5 idle notifications/sec). Replaces the prior static-character hint.
+- **Chat-error mirror to `chat.log`**. `handleSubmit` catch now `console.error`s the full stack alongside the in-chat sys row, so render-layer bugs that swallow the row before it reaches the screen still leave a post-mortem trail.
+- **0G TS SDK upgrade 1.2.4 → 1.2.6**. API: `indexer.downloadToBlob(rootHash, false)` is now `indexer.downloadToBlob(rootHash, { proof: false })`. Updated both `downloadBlobByRoot` and `OGStorage.getBlob`.
+- **Sync-error rows are not deduped**. An earlier prototype throttled identical sync errors to one per session; reverted — suppressing repeating errors is cheating, not signal hygiene. Repetition itself communicates "the upstream issue persists."
+
+### Added
+
+- **`STORAGE_SUBMIT_GAS = 250_000n`** exported from `packages/core/src/chain.ts` next to `MIN_GAS_PRICE`. Empirical gas budget for `Flow.submit()`; powers the balance-aware error and is available for future preflight checks.
+- **`TurnRow.firstOfBlock`** computed at push time. Lets the renderer show speaker-block continuity without walking neighbors per render.
+
 ## [0.7.0] - 2026-04-26
 
 ### Added
@@ -232,6 +254,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.7.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.7.1
 [0.7.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.7.0
 [0.6.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.6.1
 [0.6.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.6.0

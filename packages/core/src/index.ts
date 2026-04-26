@@ -182,7 +182,13 @@ export {
   type WalletConnectOperatorSignerOptions,
 } from './operator'
 export { waitForReceiptResilient } from './identity/receipt'
-export { MIN_GAS_PRICE, makeViemClients, ogChain, type ViemClients } from './chain'
+export {
+  MIN_GAS_PRICE,
+  STORAGE_SUBMIT_GAS,
+  makeViemClients,
+  ogChain,
+  type ViemClients,
+} from './chain'
 
 export { Runtime, type RuntimeDeps, ActivityLog, type ActivityEntry } from './runtime'
 

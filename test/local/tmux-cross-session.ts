@@ -31,7 +31,7 @@ const TAG = randomTag()
 const TOPIC = `test-token-${TAG}`
 const SECRET = `for this test session my unique token is ${TAG} — please remember this exact token under topic "${TOPIC}".`
 const RECALL_QUESTION = `what was my unique token for topic "${TOPIC}"?`
-const ASSISTANT_ROW = /^\s+anim\s/m
+const ASSISTANT_ROW = /^\s+anima\s/m
 
 function randomTag(): string {
   const adjectives = ['silver', 'midnight', 'orange', 'glassy', 'humming', 'velvet']
@@ -72,7 +72,7 @@ async function main(): Promise<void> {
   let exitCode = 0
   try {
     console.log(`[plant] secret = "${SECRET}"`)
-    await waitForText(sA, /ctrl\+c to exit/, 60_000)
+    await waitForText(sA, /ctrl\+c exit/, 60_000)
     console.log('[ok] session A booted')
 
     await chatTurn(sA, SECRET)
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
 
     const sB = tmuxSession(SESSION_B, 'bun packages/cli/bin/anima')
     try {
-      await waitForText(sB, /ctrl\+c to exit/, 60_000)
+      await waitForText(sB, /ctrl\+c exit/, 60_000)
       console.log('[ok] session B booted (fresh process, same iNFT)')
 
       const reply = await chatTurn(sB, RECALL_QUESTION)

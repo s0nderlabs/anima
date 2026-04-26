@@ -226,7 +226,12 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     tools: tools.schemas(),
     prefix,
     onToolCall: async call => {
-      state.pushRow({ role: 'system', text: renderToolCallBadge(call) })
+      state.pushRow({
+        role: 'tool-call',
+        text: '',
+        toolName: call.name,
+        args: summarizeArgs(call.args),
+      })
       const pre = await hooks.runPreToolCall({ call })
       if (pre.short) {
         await activity.append({
@@ -235,8 +240,9 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
           data: { call, result: pre.short, blocked: true },
         })
         state.pushRow({
-          role: 'system',
-          text: renderToolResultBadge(call.name, pre.short),
+          role: 'tool-result',
+          text: summarizeToolResult(pre.short),
+          failed: pre.short.ok === false,
         })
         return { role: 'tool', content: JSON.stringify(pre.short) } as BrainMessage
       }
@@ -249,8 +255,9 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
         data: { call: effectiveCall, result },
       })
       state.pushRow({
-        role: 'system',
-        text: renderToolResultBadge(call.name, result),
+        role: 'tool-result',
+        text: summarizeToolResult(result),
+        failed: result.ok === false,
       })
       return {
         role: 'tool',
@@ -305,7 +312,13 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     const trimmed = text.trim()
     if (trimmed.startsWith('/')) {
       const handled = await handleSlash(trimmed)
-      if (handled) return
+      if (handled) {
+        // Slash commands skip brain.infer; reset thinking → idle so the
+        // spinner row stops. (The keyboard handler in app.tsx flips
+        // status='thinking' on every Enter, regardless of payload.)
+        state.setStatus('idle')
+        return
+      }
     }
     try {
       // Refresh per-turn user-context (MEMORY.md may have grown last turn).
@@ -344,8 +357,9 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
         })
       }
       // Per-turn auto-sync: upload changed memory + activity-log to 0G Storage,
-      // anchor in iNFT. Fire-and-forget; chat doesn't wait. Errors surface as
-      // an inline system row so the operator notices but the conversation flows.
+      // anchor in iNFT. Fire-and-forget; chat doesn't wait. Errors surface
+      // as a system row every turn — repetition is the signal that a real
+      // upstream issue persists, not noise to suppress.
       sync
         .flushTurn()
         .then(res => {
@@ -363,7 +377,13 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
           })
         })
     } catch (e) {
-      state.pushRow({ role: 'system', text: `error: ${(e as Error).message.slice(0, 300)}` })
+      // Mirror the error to chat.log too — render-layer bugs can swallow the
+      // sys row before it hits the screen, and chat.log is the only artifact
+      // the operator can read post-mortem.
+      const errMsg = e instanceof Error ? e.message : String(e ?? 'unknown error')
+      const dumped = e instanceof Error ? (e.stack ?? e.message) : errMsg
+      console.error('[handleSubmit] error:', dumped)
+      state.pushRow({ role: 'system', text: `error: ${errMsg.slice(0, 300)}` })
       state.setStatus('error')
     }
   }
@@ -487,19 +507,20 @@ function shortAddr(a: string): string {
   return `${a.slice(0, 6)}…${a.slice(-4)}`
 }
 
-function renderToolCallBadge(call: { name: string; args: unknown }): string {
-  const args = summarizeArgs(call.args)
-  return `▸ ${call.name}(${args})`
-}
-
-function renderToolResultBadge(name: string, result: unknown): string {
+/**
+ * Squash a ToolResult down to a single-line summary for the chat row. The TUI
+ * adds the `⎿` indent + color from the role, so this returns just the content:
+ *   - failed   → the error message (truncated)
+ *   - ok+path  → the file path the tool acted on
+ *   - ok+data  → "ok"
+ *   - done     → "done" (legacy: pre-ok results)
+ */
+function summarizeToolResult(result: unknown): string {
   const r = result as { ok?: boolean; error?: string; data?: { path?: string } } | null | undefined
-  if (!r || r.ok === undefined) return `  ↳ ${name} done`
-  if (r.ok === false) {
-    return `  ↳ ${name} failed · ${(r.error ?? '').slice(0, 120)}`
-  }
+  if (!r || r.ok === undefined) return 'done'
+  if (r.ok === false) return (r.error ?? 'failed').slice(0, 200)
   const path = typeof r.data?.path === 'string' ? r.data.path : null
-  return path ? `  ↳ ${name} ok · ${path}` : `  ↳ ${name} ok`
+  return path ? path : 'ok'
 }
 
 /**

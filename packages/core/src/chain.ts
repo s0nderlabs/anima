@@ -14,6 +14,9 @@ import { type AnimaNetwork, NETWORK_CHAIN_ID, NETWORK_RPC } from './config'
 /** 0G networks enforce a minimum fee. 2.5 gwei matches the observed RPC floor. */
 export const MIN_GAS_PRICE = 2_500_000_000n
 
+/** Empirical gas budget for `0G Storage Flow.submit()`. Used by preflight balance checks. */
+export const STORAGE_SUBMIT_GAS = 250_000n
+
 export function ogChain(network: AnimaNetwork): Chain {
   return defineChain({
     id: NETWORK_CHAIN_ID[network],

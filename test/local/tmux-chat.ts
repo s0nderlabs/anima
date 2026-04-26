@@ -12,7 +12,7 @@
 import { capturePane, runTmuxTest, sendKeys, sleep, waitForText } from './_tmux'
 
 const PROMPT = 'hello, are you there?'
-const ASSISTANT_ROW = /^\s+anim\s/m
+const ASSISTANT_ROW = /^\s+anima\s/m
 const SYNC_ROW = /synced .* → https:\/\//
 const RESPONSE_TIMEOUT_MS = 60_000
 const SYNC_TIMEOUT_MS = 90_000
@@ -27,7 +27,7 @@ await runTmuxTest(
     // screen, so we anchor on the TUI status bar that only renders after the
     // renderer mounts AND is still alive (the regression class kills it
     // mid-render so the bar never settles).
-    await waitForText(s, /ctrl\+c to exit/, 60_000)
+    await waitForText(s, /ctrl\+c exit/, 60_000)
     console.log('[ok] TUI rendered + alive')
 
     await sendKeys(s, `'${PROMPT}'`)
