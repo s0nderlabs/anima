@@ -4,14 +4,16 @@
  */
 
 const argv = process.argv.slice(2)
-const sub = argv[0]
+// First arg starting with `--` means the user invoked the default subcommand
+// (chat) with flags, e.g. `anima --yolo`. Treat it as if `chat` were implicit.
+const sub = argv[0]?.startsWith('--') ? 'chat' : argv[0]
 
 async function main(): Promise<void> {
   switch (sub) {
     case undefined:
     case 'chat': {
       const { runChat } = await import('./commands/chat')
-      await runChat()
+      await runChat({ yolo: argv.includes('--yolo') })
       return
     }
     case 'init': {
@@ -102,11 +104,11 @@ async function main(): Promise<void> {
 function printHelp(): void {
   console.log(
     [
-      'anima — sovereign agent runtime CLI',
+      'anima: sovereign agent runtime CLI',
       '',
       'Commands:',
       '  anima init                bootstrap a new agent identity + keystore',
-      '  anima                     interactive chat with your agent (default)',
+      '  anima [--yolo]            interactive chat with your agent (default; --yolo skips approvals)',
       '  anima status              show agent + wallet + config state',
       '  anima logs                tail the activity log  (flags: --tail N, --agent <id>)',
       '  anima restore <ref>       recover an agent from an iNFT (ref: eip155:16661:0x..:N)',

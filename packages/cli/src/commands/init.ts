@@ -30,8 +30,9 @@ import {
   mintAgent,
   openComputeLedger,
   placeholderAgentId,
+  saveKeystoreLocally,
   subnameNode,
-  uploadKeystore,
+  uploadAndAnchorKeystore,
   validateSubnameLabel,
   waitForReceiptResilient,
 } from '@s0nderlabs/anima-core'
@@ -134,7 +135,7 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
       {
         value: 3,
         label: 'Starter  3 0G',
-        hint: 'contract minimum — just trying it',
+        hint: 'contract minimum, just trying it',
       },
       {
         value: 10,
@@ -204,7 +205,7 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   if (operatorBalance < costs.totalOperator) {
     const need = costs.totalOperator - operatorBalance
     note(
-      `Operator balance ${formatEther(operatorBalance)} 0G — need ${formatEther(need)} 0G more.`,
+      `Operator balance ${formatEther(operatorBalance)} 0G, need ${formatEther(need)} 0G more.`,
       'insufficient funds',
     )
     const gate = await fundingGate({
@@ -278,6 +279,34 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   }
   const paths = agentPaths.agent(finalAgentId)
 
+  // Save the agent keystore to disk BEFORE funding the agent EOA. Operator
+  // signs once now to derive the AEAD key; the encrypted blob lives at
+  // <agentDir>/keystore.json. Even if every subsequent step fails (storage
+  // upload, chain anchor, subname), the operator can recover the agent
+  // privkey from this file. See `feedback-init-must-save-keystore-before-
+  // funding.md` for why this ordering is mandatory.
+  const sLocal = spinner()
+  sLocal.start('Encrypting agent keystore to operator wallet (local insurance)')
+  let encryptedBytes: Uint8Array
+  try {
+    const saved = await saveKeystoreLocally({
+      signer: operator,
+      agentAddress: agent.address as Address,
+      agentPrivkey: agent.privkeyHex as Hex,
+      cachePath: paths.keystore,
+    })
+    encryptedBytes = saved.bytes
+    await updateWizardState(paths.dir, draft => {
+      draft.steps.keystoreSaved = true
+    })
+    sLocal.stop(`keystore saved locally at ${paths.keystore}`)
+  } catch (e) {
+    sLocal.stop(`local keystore save failed: ${(e as Error).message.slice(0, 120)}`)
+    cancel('Aborted before funding (operator wallet could not derive AEAD key).')
+    await operator.close?.()
+    return
+  }
+
   const sFund = spinner()
   const fundingAmount = parseEther('0.1') + parseEther(String(ledgerSize))
   sFund.start(`Funding agent ${agent.address} with ${formatEther(fundingAmount)} 0G`)
@@ -303,43 +332,44 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   }
 
   const sPersist = spinner()
-  sPersist.start('Encrypting agent keystore to operator wallet + uploading to 0G Storage')
+  sPersist.start('Uploading keystore to 0G Storage + anchoring root hash on chain')
   let keystorePersisted = false
   try {
-    const { rootHash, updateTx } = await uploadKeystore({
+    const { rootHash, updateTx } = await uploadAndAnchorKeystore({
       network,
-      signer: operator,
-      agentAddress: agent.address as Address,
       agentPrivkey: agent.privkeyHex as Hex,
       tokenId: mintedTokenId!,
       contractAddress: contractAddress!,
-      cachePath: paths.keystore,
+      bytes: encryptedBytes,
     })
     await updateWizardState(paths.dir, draft => {
       draft.steps.keystorePersistedTx = updateTx
       draft.steps.keystoreRootHash = rootHash
-      draft.steps.keystoreSaved = true
     })
     keystorePersisted = true
     sPersist.stop(`keystore anchored (root ${rootHash.slice(0, 12)}…)`)
   } catch (e) {
-    sPersist.stop(`keystore persistence failed: ${(e as Error).message.slice(0, 120)}`)
+    sPersist.stop(`keystore upload/anchor failed: ${(e as Error).message.slice(0, 120)}`)
   }
 
   if (!keystorePersisted) {
     note(
       [
-        `iNFT #${mintedTokenId!.toString()} is minted and the agent EOA is funded with`,
-        `${formatEther(fundingAmount)} 0G, but the agent privkey only existed in this`,
-        `wizard's RAM and is now unrecoverable. The funds in ${agent.address}`,
-        'are stranded — there is no way to derive the privkey to spend them.',
+        `iNFT #${mintedTokenId!.toString()} is minted, agent EOA is funded with ${formatEther(fundingAmount)} 0G,`,
+        `and the encrypted keystore is on disk at ${paths.keystore}.`,
         '',
-        'Re-run `anima init` to mint a fresh iNFT (the old one stays owned by the',
-        'operator and can be reused for a new agent EOA via a future tool).',
+        'The 0G Storage upload + chain anchor failed, so this machine has',
+        'a working agent but no on-chain recovery path yet. The funds at',
+        `${agent.address} are NOT stranded; operator wallet ${operatorAddress}`,
+        'can decrypt the local keystore and resume the agent.',
+        '',
+        'Re-run `anima init --resume` to retry the storage upload and anchor,',
+        'or proceed with chat using the local keystore (sync will retry on',
+        'every chat turn anyway).',
       ].join('\n'),
-      'unrecoverable failure — agent EOA orphaned',
+      'storage anchor failed (recoverable)',
     )
-    cancel('Aborted before writing config (init failed mid-flow).')
+    cancel('Aborted before writing config (storage anchor pending).')
     await operator.close?.()
     return
   }
@@ -505,7 +535,7 @@ async function seedStarterMemoryFiles(opts: SeedStarterOpts): Promise<void> {
   const persona =
     '---\nname: persona\ndescription: Voice + behavior style.\ntype: agent-persona\n---\n# Persona\n\nI am Anima, a sovereign agent runtime on 0G. I anchor my state on chain every turn, decrypt my keystore via my operator wallet at session start, and use 0G Compute (TEE-attested) for reasoning. I am direct, concise, and factual.\n'
   const profile =
-    '---\nname: profile\ndescription: User profile (operator-scoped, never anchored on chain).\ntype: user\n---\n# User profile\n\n(empty — fills as we chat)\n'
+    '---\nname: profile\ndescription: User profile (operator-scoped, never anchored on chain).\ntype: user\n---\n# User profile\n\n(empty, fills as we chat)\n'
 
   await writeFile(join(agentMem, 'identity.md'), identity, 'utf8')
   await writeFile(join(agentMem, 'persona.md'), persona, 'utf8')
@@ -513,5 +543,5 @@ async function seedStarterMemoryFiles(opts: SeedStarterOpts): Promise<void> {
 
   // Seed an empty MEMORY.md so per-turn sync has something to anchor and the
   // brain's first turn sees a parseable index.
-  await writeFile(opts.paths.memoryIndex, '# Anima — Memory Index\n\n', 'utf8')
+  await writeFile(opts.paths.memoryIndex, '# Anima Memory Index\n\n', 'utf8')
 }

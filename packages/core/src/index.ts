@@ -1,4 +1,4 @@
-// @s0nderlabs/anima-core — always-on infrastructure for the anima runtime.
+// @s0nderlabs/anima-core: always-on infrastructure for the anima runtime.
 export const VERSION = '0.0.0'
 
 export * from './config'
@@ -145,6 +145,8 @@ export {
   persistKeystoreToStorage,
   restoreKeystoreFromStorage,
   uploadKeystore,
+  saveKeystoreLocally,
+  uploadAndAnchorKeystore,
   fetchKeystore,
   fetchAndDecryptKeystore,
   type UploadKeystoreOpts,
@@ -190,3 +192,36 @@ export {
   generateBootstrapKeypair,
   type Option3Envelope,
 } from './migration'
+
+export {
+  HookBus,
+  type HookName,
+  type HookHandler,
+  type PreToolCallContext,
+  type PreToolCallResult,
+  type PostToolCallContext,
+  loadPlugins,
+  type PluginContext,
+  type NativePlugin,
+  type PluginLoadResult,
+  type PluginLoaderDeps,
+  makeToolSearchTool,
+  type ToolSearchArgs,
+} from './plugins'
+
+export {
+  detectDangerousCommand,
+  DANGEROUS_PATTERNS,
+  PathGuard,
+  type PathGuardOpts,
+  type PathGuardResult,
+  redactEnv,
+  type EnvRedactResult,
+  PermissionService,
+  type PermissionMode,
+  type PermissionDecision,
+  type PermissionRequest,
+  type PermissionPrompter,
+  type PermissionServiceOpts,
+  type DangerousMatch,
+} from './permission'

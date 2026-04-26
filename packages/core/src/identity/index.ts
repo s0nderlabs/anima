@@ -31,6 +31,8 @@ export {
 } from './keystore-storage'
 export {
   uploadKeystore,
+  saveKeystoreLocally,
+  uploadAndAnchorKeystore,
   fetchKeystore,
   fetchAndDecryptKeystore,
   type UploadKeystoreOpts,

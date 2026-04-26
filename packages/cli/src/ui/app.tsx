@@ -29,6 +29,16 @@ const ROLE_LABELS: Record<TurnRow['role'], string> = {
   tool: 'tool',
 }
 
+function summarizeApproval(req: {
+  kind: string
+  command?: string
+  path?: string
+  reason: string
+}): string {
+  const subject = req.command ?? req.path ?? '(unspecified)'
+  return `[approval] ${req.reason}, ${req.kind}: ${subject}`
+}
+
 export function ChatApp(props: AppProps) {
   const dims = useTerminalDimensions()
 
@@ -36,6 +46,30 @@ export function ChatApp(props: AppProps) {
     if (evt.ctrl && evt.name === 'c') {
       evt.preventDefault()
       props.onExit()
+      return
+    }
+    // Approval modal mode: swallow keys, route y/s/n to decision.
+    const pending = props.state.pendingApproval()
+    if (pending) {
+      if (evt.name === 'return') return
+      if (evt.sequence) {
+        const ch = evt.sequence.toLowerCase()
+        if (ch === 'y' || ch === '1') {
+          pending.resolve('allow-once')
+          props.state.setPendingApproval(null)
+          return
+        }
+        if (ch === 's' || ch === '2') {
+          pending.resolve('allow-session')
+          props.state.setPendingApproval(null)
+          return
+        }
+        if (ch === 'n' || ch === 'd' || ch === '3' || evt.name === 'escape') {
+          pending.resolve('deny')
+          props.state.setPendingApproval(null)
+          return
+        }
+      }
       return
     }
     if (evt.name === 'return') {
@@ -71,6 +105,19 @@ export function ChatApp(props: AppProps) {
         </For>
       </box>
 
+      <Show when={props.state.pendingApproval()}>
+        <box
+          flexDirection="column"
+          borderStyle="rounded"
+          borderColor="#f59e0b"
+          paddingLeft={1}
+          paddingRight={1}
+        >
+          <text fg="#f59e0b">{summarizeApproval(props.state.pendingApproval()!.request)}</text>
+          <text fg="#9ca3af">[y] allow once [s] allow session [n] deny</text>
+        </box>
+      </Show>
+
       <box
         flexDirection="row"
         borderStyle="rounded"
@@ -87,7 +134,8 @@ export function ChatApp(props: AppProps) {
 
       <box flexDirection="row" paddingLeft={1} paddingRight={1}>
         <text fg="#6b7280">
-          {props.state.identityLabel} · brain: {props.state.brainLabel} · ctrl+c to exit
+          {props.state.identityLabel} · brain: {props.state.brainLabel} · perms:{' '}
+          {props.state.approvalsMode()} · ctrl+c to exit
         </text>
         <Show when={props.state.usage()}>
           <text fg="#6b7280">{formatUsage(props.state.usage())}</text>

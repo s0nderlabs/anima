@@ -1,3 +1,4 @@
+import type { PermissionDecision, PermissionMode, PermissionRequest } from '@s0nderlabs/anima-core'
 import { createSignal } from 'solid-js'
 
 export interface TurnRow {
@@ -6,10 +7,16 @@ export interface TurnRow {
   text: string
 }
 
+export interface PendingApproval {
+  request: PermissionRequest
+  resolve: (decision: PermissionDecision) => void
+}
+
 interface CreateChatStateOpts {
   initialSystem: string
   identityLabel: string
   brainLabel: string
+  approvalsMode: PermissionMode
 }
 
 export function createChatState(opts: CreateChatStateOpts) {
@@ -19,6 +26,8 @@ export function createChatState(opts: CreateChatStateOpts) {
   const [input, setInput] = createSignal('')
   const [status, setStatus] = createSignal<'idle' | 'thinking' | 'error'>('idle')
   const [usage, setUsage] = createSignal<{ total?: number; cached?: number } | null>(null)
+  const [pendingApproval, setPendingApproval] = createSignal<PendingApproval | null>(null)
+  const [approvalsMode, setApprovalsMode] = createSignal<PermissionMode>(opts.approvalsMode)
 
   let idCounter = 1
   const nextId = () => `row-${idCounter++}`
@@ -32,9 +41,13 @@ export function createChatState(opts: CreateChatStateOpts) {
     input,
     status,
     usage,
+    pendingApproval,
+    approvalsMode,
     setInput,
     setStatus,
     setUsage,
+    setPendingApproval,
+    setApprovalsMode,
     pushRow,
     identityLabel: opts.identityLabel,
     brainLabel: opts.brainLabel,

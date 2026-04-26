@@ -19,12 +19,21 @@ import { AnimaAgentNFTClient, AnimaAgentNFTReader, bootstrapHashFor } from './co
  * Source-of-truth for the agent privkey is the encrypted blob anchored in
  * the iNFT's `keystore` IntelligentData slot (root hash on-chain, ciphertext
  * on 0G Storage). The local file at `~/.anima/agents/<id>/keystore.json` is
- * just a download cache — deletable at will, will redownload on next use.
+ * just a download cache, deletable at will, will redownload on next use.
  *
  * Keys never leave RAM in plaintext. The ciphertext is decryptable only by
  * the operator's wallet signature (sign-derived-key, see operator-keystore-
  * crypto.ts).
  */
+
+/** Write an encrypted keystore JSON to `cachePath`, mkdir-p'ing the parent. */
+async function writeKeystoreCache(
+  cachePath: string,
+  keystore: OperatorEncryptedKeystore,
+): Promise<void> {
+  await mkdir(dirname(cachePath), { recursive: true })
+  await writeFile(cachePath, JSON.stringify(keystore, null, 2), 'utf8')
+}
 
 export interface UploadKeystoreOpts {
   network: AnimaNetwork
@@ -44,30 +53,77 @@ export interface UploadKeystoreResult {
 }
 
 /**
- * Encrypt the agent privkey to the operator wallet, upload to 0G Storage,
- * and anchor the resulting root hash into the iNFT keystore slot.
+ * Encrypt the agent privkey to the operator wallet and save the ciphertext
+ * to a local file. Performs ZERO chain or storage operations.
  *
- * Operator wallet signs once (the EIP-712 typed data) to derive the AEAD
- * key. Agent wallet signs the storage upload + slot update (operator
- * pre-approved agent via setApprovalForAll inside `mintAgent`). One blob
- * upload, one chain tx.
+ * **Call this BEFORE funding the agent EOA.** The encrypted keystore on disk
+ * is the durable insurance against any subsequent failure: once it exists,
+ * the operator wallet can always decrypt + recover the agent privkey, even
+ * if the storage upload, chain anchor, or any later step blows up.
+ *
+ * (Pre-Apr-2026: `uploadKeystore` did encrypt + upload + anchor + cache in
+ * one call, with the local cache write LAST, so a storage failure would
+ * orphan agent funds. That cost a real $1.84. See feedback memory
+ * `feedback-init-must-save-keystore-before-funding.md`.)
  */
-export async function uploadKeystore(opts: UploadKeystoreOpts): Promise<UploadKeystoreResult> {
+export async function saveKeystoreLocally(opts: {
+  signer: OperatorSigner
+  agentAddress: Address
+  agentPrivkey: Hex
+  cachePath: string
+}): Promise<{ keystore: OperatorEncryptedKeystore; bytes: Uint8Array }> {
   const keystore = await encryptAgentKey({
     signer: opts.signer,
     agentAddress: opts.agentAddress,
     agentPrivkey: opts.agentPrivkey,
   })
+  await writeKeystoreCache(opts.cachePath, keystore)
   const bytes = encodeKeystoreBytes(keystore)
+  return { keystore, bytes }
+}
 
+/**
+ * Upload an already-encrypted keystore blob to 0G Storage and anchor the
+ * root hash to the iNFT's `keystore` slot. Retries the upload up to 3 times
+ * with exponential backoff because the 0G Storage SDK has documented
+ * flakiness (intermittent `Spread syntax requires ...iterable` errors when
+ * the indexer's segment list comes back malformed).
+ *
+ * The agent EOA is the gas payer for both the upload and the slot update.
+ * Caller must have funded it with at least ~0.05 0G beforehand.
+ */
+export async function uploadAndAnchorKeystore(opts: {
+  network: AnimaNetwork
+  agentPrivkey: Hex
+  tokenId: bigint
+  contractAddress: Address
+  bytes: Uint8Array
+}): Promise<{ rootHash: Hex; updateTx: Hex }> {
   const storage = new OGStorage({ network: opts.network, privkeyHex: opts.agentPrivkey })
-  const rootHash = (await storage.putBlob(bytes)) as Hex
-  if (!rootHash.startsWith('0x') || rootHash.length !== 66) {
+  let rootHash: Hex | null = null
+  let lastErr: Error | null = null
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) {
+      await new Promise(resolve => setTimeout(resolve, 2000 * 2 ** (attempt - 1)))
+    }
+    try {
+      const r = (await storage.putBlob(opts.bytes)) as Hex
+      if (!r.startsWith('0x') || r.length !== 66) {
+        throw new Error(
+          `0G Storage returned a root hash that doesn't fit bytes32 (${r.length} chars); cannot anchor to iNFT slot`,
+        )
+      }
+      rootHash = r
+      break
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e))
+    }
+  }
+  if (!rootHash) {
     throw new Error(
-      `0G Storage returned a root hash that doesn't fit bytes32 (${rootHash.length} chars); cannot anchor to iNFT slot`,
+      `0G Storage upload failed after 3 attempts. Last error: ${lastErr?.message ?? 'unknown'}`,
     )
   }
-
   const client = new AnimaAgentNFTClient({
     network: opts.network,
     contractAddress: opts.contractAddress,
@@ -76,12 +132,32 @@ export async function uploadKeystore(opts: UploadKeystoreOpts): Promise<UploadKe
   const updateTx = await client.updateSlots(opts.tokenId, [
     { slot: 'keystore', dataHash: rootHash },
   ])
+  return { rootHash, updateTx }
+}
 
-  if (opts.cachePath) {
-    await mkdir(dirname(opts.cachePath), { recursive: true })
-    await writeFile(opts.cachePath, JSON.stringify(keystore, null, 2), 'utf8')
-  }
-
+/**
+ * Legacy one-shot wrapper kept for `migrate-keystore` and any caller that
+ * needs the old encrypt + upload + anchor + cache flow in a single call.
+ *
+ * **Init flow should NOT call this**: it has the orphan-funds gap. Use
+ * `saveKeystoreLocally` BEFORE funding, then `uploadAndAnchorKeystore`
+ * AFTER funding instead.
+ */
+export async function uploadKeystore(opts: UploadKeystoreOpts): Promise<UploadKeystoreResult> {
+  const keystore = await encryptAgentKey({
+    signer: opts.signer,
+    agentAddress: opts.agentAddress,
+    agentPrivkey: opts.agentPrivkey,
+  })
+  const bytes = encodeKeystoreBytes(keystore)
+  if (opts.cachePath) await writeKeystoreCache(opts.cachePath, keystore)
+  const { rootHash, updateTx } = await uploadAndAnchorKeystore({
+    network: opts.network,
+    agentPrivkey: opts.agentPrivkey,
+    tokenId: opts.tokenId,
+    contractAddress: opts.contractAddress,
+    bytes,
+  })
   return { rootHash, updateTx, keystore }
 }
 
@@ -132,7 +208,7 @@ export async function fetchKeystore(opts: FetchKeystoreOpts): Promise<FetchKeyst
       // without re-running the 0G Storage Merkle pipeline.
       return { rootHash, keystore: parsed, owner, source: 'local-cache' }
     } catch {
-      // Cache miss / parse fail / ENOENT — fall through to 0G download.
+      // Cache miss / parse fail / ENOENT, fall through to 0G download.
     }
   }
 
@@ -142,8 +218,7 @@ export async function fetchKeystore(opts: FetchKeystoreOpts): Promise<FetchKeyst
 
   if (opts.cachePath) {
     try {
-      await mkdir(dirname(opts.cachePath), { recursive: true })
-      await writeFile(opts.cachePath, JSON.stringify(keystore, null, 2), 'utf8')
+      await writeKeystoreCache(opts.cachePath, keystore)
     } catch {
       // Cache write failures are non-fatal; we still return the blob.
     }

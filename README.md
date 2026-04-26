@@ -46,7 +46,8 @@ Parent domain `anima.0g` is registered on SPACE ID on mainnet; `anima init` issu
 ## Commands
 
 - `anima init` — first-time onboarding wizard (see below)
-- `anima` (or `anima chat`) — interactive chat with your agent. Per-turn auto-sync to 0G + chain anchor. Slash commands: `/sync`, `/help`.
+- `anima` (or `anima chat`) — interactive chat with your agent. Per-turn auto-sync to 0G + chain anchor. Slash commands: `/sync`, `/yolo`, `/help`.
+- `anima --yolo` — same chat, but with the approval system disabled for the session (auto-approves dangerous tool calls). Status bar shows `perms: off`.
 - `anima status` — agent + wallet + config state
 - `anima logs` — tail the activity log (`--tail N`, `--agent <id>`)
 - `anima restore <iNFT-ref>` — recover an agent on a new machine from its iNFT (refs: `eip155:16661:0x...:N` or `0g-mainnet:0x...:N`)
@@ -57,6 +58,27 @@ Parent domain `anima.0g` is registered on SPACE ID on mainnet; `anima init` issu
 - `anima migrate-keystore` — one-time v0.5 (passphrase) → v0.6 (operator-wallet) keystore upgrade
 - `anima deploy` — Local→Sandbox migration via Option 3 ECIES handoff (Phase 11 wires the actual sandbox call)
 - `anima init --resume` — pick up a partial init from the last incomplete step
+
+## Tools the agent can call
+
+The brain ships with a battery-included tool surface (Phase 9.0). Each tool runs through a permission gate (`approvals.mode` in `~/.anima/config.ts`, default `prompt`):
+
+| Tool | Description |
+|------|-------------|
+| `memory.save` / `memory.read` | Durable agent memory on 0G Storage |
+| `tool.search` | Hydrate deferred tool schemas (Claude Code-style) |
+| `fs.read` / `fs.write` / `fs.patch` / `fs.search` | UTF-8 text filesystem ops scoped to the workspace, refusing credential paths and the agent's own state tree |
+| `shell.run` | Run a shell command. Permission-gated; wallet/API-key env vars are stripped from the subprocess |
+| `todo` | In-session task list |
+| `clarify` | Ask the operator a question |
+| `skills.list` / `skills.view` | Discover and read SKILL.md files under `~/.anima/skills/` and (when `imports.claudeCode: true`) `~/.claude/skills/` |
+
+Approval modes:
+- `prompt` (default) — dangerous patterns (`rm -rf`, `git reset --hard`, `chmod 777`, fork bomb, etc.) and any `shell.run` request render an in-TUI modal: `[y] allow once  [s] allow session  [n] deny`.
+- `strict` — dangerous patterns hard-deny without prompting.
+- `off` (YOLO) — auto-approve everything; toggle inline with `/yolo` or boot with `anima --yolo`.
+
+The hard-deny `PathGuard` (credential dirs + agent state tree) applies in every mode, including YOLO.
 
 ## Operator wallet sources
 

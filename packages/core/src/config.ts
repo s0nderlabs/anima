@@ -70,10 +70,21 @@ export interface AnimaConfig {
   }
   /**
    * Phase 6.6: which operator source to use when reconnecting. Optional so
-   * legacy v0.5.0 configs still parse — commands fall back to the interactive
+   * legacy v0.5.0 configs still parse; commands fall back to the interactive
    * picker when this is missing.
    */
   operator?: OperatorSourceHint | null
+  /**
+   * Phase 9.0: permission system. `prompt` (default) prompts on dangerous
+   * commands; `strict` always denies them; `off` is YOLO (no prompts).
+   * `--yolo` CLI flag and `/yolo` TUI slash both flip the active service to
+   * 'off' for the current session without rewriting the file.
+   */
+  approvals?: {
+    mode: 'strict' | 'prompt' | 'off'
+    /** Always-approved patterns (regex against `kind|command|path` signature). */
+    allowlist?: string[]
+  }
 }
 
 export type AnimaConfigInput = Partial<AnimaConfig> & Pick<AnimaConfig, 'network'>
@@ -85,6 +96,7 @@ const DEFAULT_CONFIG: Omit<AnimaConfig, 'network' | 'storage'> = {
   tools: {},
   imports: { claudeCode: true },
   operator: null,
+  approvals: { mode: 'prompt', allowlist: [] },
 }
 
 export function defineConfig(input: AnimaConfigInput): AnimaConfig {
@@ -98,6 +110,7 @@ export function defineConfig(input: AnimaConfigInput): AnimaConfig {
     tools: input.tools ?? DEFAULT_CONFIG.tools,
     imports: input.imports ?? DEFAULT_CONFIG.imports,
     operator: input.operator ?? DEFAULT_CONFIG.operator,
+    approvals: input.approvals ?? DEFAULT_CONFIG.approvals,
   }
 }
 

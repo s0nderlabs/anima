@@ -4,6 +4,32 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-04-26
+
+### Added
+
+- **Phase 9.0: plugin loader, deferred-tool surface, permission floor, and 9 P1 tools.** `@s0nderlabs/anima-plugin-system` now ships with `fs.read`, `fs.write`, `fs.patch`, `fs.search`, `shell.run`, `todo`, `clarify`, `skills.list`, `skills.view`. Loader path: `chat.tsx` → `loadPlugins(['system'], { resolve })` (the resolver is wired from the CLI package context so bun finds the workspace dep) → plugin's `register(ctx)` calls `ctx.registerTool` per tool. Tools become first-class brain capabilities with `▸ name(args)` / `↳ name ok` indicators in the TUI.
+- **Deferred-tool semantics in `ToolRegistry`** mirroring Claude Code: `ToolDef` gains optional `alwaysLoad`, `shouldDefer`, `searchHint`. By default tools eager-load; `shouldDefer: true` hides the schema until `tool.search` matches it via `select:name` or free-text keywords, at which point `unlock(name)` makes it visible. Phase 9.0 ships eager only — the deferred path is wired and tested for Phase 9.4 browser tools.
+- **`tool.search` meta-tool** (always-loaded). Brain calls it to hydrate deferred schemas: `select:fs.read,fs.write` for exact picks, free-text `"filesystem read"` for keyword search across name/description/searchHint.
+- **`HookBus` + 10 lifecycle hook points** (`pre_tool_call`, `post_tool_call`, `pre_llm_call`, `post_llm_call`, `pre_api_request`, `post_api_request`, `on_session_start`, `on_session_end`, `on_session_finalize`, `on_session_reset`). Phase 9.0 wires `pre_tool_call` (used by the permission gate to short-circuit destructive calls) and `post_tool_call` (audit observers). Other hook names exist as no-op stubs for future phases.
+- **`PermissionService` (`packages/core/src/permission/`).** Three modes: `strict` (dangerous patterns hard-deny), `prompt` (default; dangerous OR shell.run consults the operator), `off` (YOLO, allow silently). Hermes's dangerous-command regex set ported (~36 patterns: `rm -rf`, `chmod 777`, fork bomb, `dd`, SQL `DROP`, `git reset --hard`, self-termination via pgrep, etc.). Patterns are pre-compiled case-insensitive at module load (was visible in profile when run per-call).
+- **`PathGuard`**: `fs.read`, `fs.write`, `fs.patch`, `fs.search` refuse paths under `~/.ssh`, `~/.aws`, `~/.config/gcloud`, dotenv files anywhere, `/etc/`, `/boot/`, `/dev/`, `/sys/`, `/proc/`, and the agent's own state tree (`~/.anima/agents/<id>/`). Hard floor; YOLO does not bypass.
+- **`redactEnv`**: `shell.run` strips wallet/api-key vars from `process.env` before spawning the subprocess. Catches `ANIMA_*_PRIVKEY*`, `*_PRIVKEY*`, `OPENAI_API_KEY`, `GH_TOKEN`, `AWS_*`, `STRIPE_SECRET_KEY`, etc. Removed names returned in the tool result so the brain can see what was stripped.
+- **`--yolo` CLI flag and `/yolo` TUI slash.** `bun packages/cli/bin/anima --yolo` boots in YOLO mode (status bar shows `perms: off`); `/yolo` toggles between `prompt` and `off` mid-session. Approval modal renders in `app.tsx` with `[y] allow once  [s] allow session  [n] deny`; opentui keyboard handler intercepts y/s/n while a request is pending.
+- **Approvals in `AnimaConfig`**: `approvals.mode: 'strict' | 'prompt' | 'off'` (default `prompt`) plus `approvals.allowlist: string[]`. Persisted in `~/.anima/config.ts`; the `--yolo` flag overrides for one session without rewriting the file.
+- **`test/local/tmux-yolo.ts`** drives anima in YOLO mode interactively (status bar boot row + `/yolo` toggle), no brain credits burned. Joins the existing tmux driver suite as a regression gate for the permission system.
+- **`test/local/e2e-phase9-plugins.ts`** integration script: plugin load, tool.search unlock semantics, PermissionService modes, fs.* path guard, shell.run env redaction, skills round-trip — all asserted at the dispatch layer with a temp workspace, no chain calls.
+- **Plugin debug log**: when `ANIMA_DEBUG_PLUGINS=1` (or any plugin load error fires), chat writes `<agent-dir>/plugin-debug.log` with `pluginNames`, `loadResult`, and the registered tool list. Caught the v0.7.0 cycle's plugin-resolution bug (see Fixed below) when the brain reported "I only have 2 tools" and the log confirmed it.
+
+### Fixed
+
+- **Plugin dynamic import resolved from the wrong package context.** `loadPlugins` did `await import(\`@s0nderlabs/anima-plugin-${name}\`)` from inside `packages/core/src/plugins/context.ts`. The `core` package does not depend on `@s0nderlabs/anima-plugin-system` (that dep lives in `cli`), so bun's resolver returned `Cannot find module`, the plugin silently failed to load, and only `memory.save` / `memory.read` / `tool.search` were registered. The brain told the user "I only have those 2 tools" and was correct. Fix: `chat.tsx` now passes a `resolve` callback to `loadPlugins` so the dynamic import happens from the CLI package's scope where the workspace dep is resolvable. Caught only by an interactive tmux drive that observed the brain's actual reply — no automated layer below the chat surfaced it. Lesson saved as `feedback-tui-test-must-observe-brain.md` in the project memory.
+
+### Changed
+
+- **Tool naming convention locked to dotted namespace** (`fs.read`, `shell.run`, `memory.save`). Enables glob toggles in `config.tools` like `'fs.*': false` and avoids name collisions across plugins.
+- **`/e2e full` Phase 4 walkthrough table** now includes "Plugin tool round-trip" and "Approval modal" rows that demand observed `▸ <tool>(...)` and `↳ <tool> ok/failed` indicators in the captured tmux pane. Status-bar smoke is no longer sufficient for chat-facing features.
+
 ## [0.6.1] - 2026-04-25
 
 ### Fixed
@@ -206,6 +232,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.7.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.7.0
 [0.6.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.6.1
 [0.6.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.6.0
 [0.5.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.5.0

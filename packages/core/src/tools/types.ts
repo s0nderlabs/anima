@@ -31,6 +31,23 @@ export interface ToolDef<TArgs = unknown> {
   /** zod schema the runtime uses to both validate AND build JSONSchema for the brain. */
   schema: z.ZodType<TArgs>
   handler: (args: TArgs) => Promise<ToolResult> | ToolResult
+  /**
+   * When set with `shouldDefer`, overrides the deferral so the tool's schema
+   * still ships every turn. Has no effect when `shouldDefer` is false/unset.
+   */
+  alwaysLoad?: boolean
+  /**
+   * Hide this tool's schema by default; the brain only sees it after
+   * `tool.search` matches it (mirrors Claude Code's shouldDefer). Combine with
+   * `alwaysLoad: true` to force eager loading even though the tool is meant
+   * to be searchable.
+   */
+  shouldDefer?: boolean
+  /**
+   * 3-10 word hint used by `tool.search` keyword matching when this tool is
+   * deferred. Should describe domain ("filesystem read text"), not phrasing.
+   */
+  searchHint?: string
 }
 
 export interface ToolResult {

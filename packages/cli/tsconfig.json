@@ -10,6 +10,6 @@
     "jsx": "preserve",
     "jsxImportSource": "@opentui/solid"
   },
-  "references": [{ "path": "../core" }],
+  "references": [{ "path": "../core" }, { "path": "../plugin-system" }],
   "include": ["src/**/*.ts", "src/**/*.tsx"]
 }
