@@ -12,5 +12,9 @@ export {
   type NativePlugin,
   type PluginLoadResult,
   type PluginLoaderDeps,
+  type DelegateBrainFactory,
+  type DelegateBrainFactoryOpts,
+  type DelegateBrainHandle,
+  type DelegateBrainTurn,
 } from './context'
 export { makeToolSearchTool, type ToolSearchArgs } from './tool-search'

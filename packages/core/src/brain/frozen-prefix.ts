@@ -1,5 +1,6 @@
 import { stringifyIndex } from '../memory/index-file'
 import type { MemoryIndex } from '../memory/types'
+import type { SkillRef } from '../skills/types'
 
 /**
  * Phase 6.7 system-prompt body (Hermes-inspired). Focuses on identity,
@@ -31,13 +32,17 @@ Do NOT save: task progress, completed-work logs, ephemeral TODOs, derivable info
 
 For agent-intrinsic things you learn about yourself (capability discoveries, peer relationships, rules you've internalized), use type \`agent-*\`. For user-specific facts, use type \`user\` (or \`feedback\`/\`project\`/\`reference\`). When in doubt, default to \`user\` — privacy-by-default.`
 
-export const MEMORY_READ_GUIDANCE = `When the user asks about prior facts (e.g. "what did i tell you about X", "do you remember Y", "what are my preferences"), call \`memory.read\` to fetch the relevant memory file by title or slug from the MEMORY.md index BEFORE answering. Don't hallucinate — if a fact isn't in your memory, say so honestly.`
+export const MEMORY_READ_GUIDANCE = `When the user asks about prior facts (e.g. "what did i tell you about X", "do you remember Y", "what are my preferences"), call \`memory.read\` to fetch the relevant memory file by title or slug from the MEMORY.md index BEFORE answering. Don't hallucinate, if a fact isn't in your memory, say so honestly.`
+
+export const SKILLS_GUIDANCE =
+  'You have access to skills (small playbooks) discovered from ~/.anima/skills, ~/.claude/skills, and installed Claude Code plugins. The index below shows id + description for each. When a skill matches the task, call `skills.view` with its id to read the body, then follow the steps. Skills with filePattern/bashPattern triggers auto-load when matching tool calls fire; you may also load any skill manually.'
 
 export interface FrozenPrefix {
   systemPrompt: string
   memoryIndexText: string | null
   identityText: string | null
   personaText: string | null
+  skillIndexText: string | null
   toolGuidance: string[]
   timestamp: string | null
 }
@@ -51,6 +56,8 @@ export interface BuildPrefixArgs {
   persona?: string | null
   /** Names of currently-loaded tools so we can append matching guidance. */
   loadedToolNames?: string[]
+  /** Discovered skills surfaced as an index (id + description). */
+  skills?: readonly SkillRef[] | null
   /** ISO timestamp of session start. Default: current time. */
   timestamp?: string | null
 }
@@ -66,6 +73,7 @@ export function buildFrozenPrefix({
   identity,
   persona,
   loadedToolNames,
+  skills,
   timestamp,
 }: BuildPrefixArgs): FrozenPrefix {
   const sys = systemPrompt ?? DEFAULT_SYSTEM_PROMPT
@@ -73,15 +81,30 @@ export function buildFrozenPrefix({
   const guidance = (loadedToolNames ?? [])
     .map(name => TOOL_GUIDANCE_MAP[name])
     .filter((s): s is string => !!s)
+  if (skills && skills.length > 0 && !guidance.includes(SKILLS_GUIDANCE)) {
+    guidance.push(SKILLS_GUIDANCE)
+  }
+  const skillIndexText = renderSkillIndex(skills ?? [])
   const ts = timestamp === undefined ? new Date().toISOString() : timestamp
   return {
     systemPrompt: sys,
     memoryIndexText: idxText,
     identityText: identity ?? null,
     personaText: persona ?? null,
+    skillIndexText,
     toolGuidance: guidance,
     timestamp: ts,
   }
+}
+
+function renderSkillIndex(skills: readonly SkillRef[]): string | null {
+  if (skills.length === 0) return null
+  const lines = skills.map(s => {
+    const label = s.frontmatter.name && s.frontmatter.name !== s.id ? s.frontmatter.name : s.id
+    const desc = s.description.trim().split('\n')[0]?.slice(0, 200) ?? ''
+    return `- \`${s.id}\` (${label}): ${desc}`
+  })
+  return lines.join('\n')
 }
 
 /**
@@ -102,6 +125,9 @@ export function renderFrozenPrefix(p: FrozenPrefix): string {
   }
   if (p.personaText) {
     parts.push(`# Persona (voice + style)\n\n${p.personaText.trimEnd()}`)
+  }
+  if (p.skillIndexText) {
+    parts.push(`# Skills (call skills.view <id> to read body)\n\n${p.skillIndexText}`)
   }
   if (p.timestamp) {
     parts.push(`# Session\n\nSession started: ${p.timestamp}`)

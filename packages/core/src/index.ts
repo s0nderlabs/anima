@@ -14,7 +14,7 @@ export type {
 export { EventQueue, newEventId, listeners, routeLoop } from './events'
 
 export type { ToolCall, ToolDef, ToolResult, ToolSchema, JSONSchema } from './tools'
-export { ToolRegistry, zodToJsonSchema } from './tools'
+export { ToolRegistry, zodToJsonSchema, coerceBool } from './tools'
 
 export type {
   Brain,
@@ -224,6 +224,10 @@ export {
   type NativePlugin,
   type PluginLoadResult,
   type PluginLoaderDeps,
+  type DelegateBrainFactory,
+  type DelegateBrainFactoryOpts,
+  type DelegateBrainHandle,
+  type DelegateBrainTurn,
   makeToolSearchTool,
   type ToolSearchArgs,
 } from './plugins'
@@ -244,3 +248,34 @@ export {
   type PermissionServiceOpts,
   type DangerousMatch,
 } from './permission'
+
+export type { SkillFrontmatter, SkillRef, SkillSource } from './skills'
+export {
+  scanSkills,
+  parseFrontmatter as parseSkillFrontmatter,
+  matchTriggers as matchSkillTriggers,
+  matchFilePattern,
+  matchBashPattern,
+  type SkillScannerOptions,
+  type SkillTriggerMatch,
+} from './skills'
+
+export {
+  discoverMcpServers,
+  McpManager,
+  McpStdioClient,
+  type McpDiscoveryOptions,
+  type McpServerConfig,
+  type McpServerStdio,
+  type McpServerHttp,
+  type McpToolMeta,
+  type McpDiscoveryResult,
+} from './mcp'
+
+export {
+  discoverClaudeExtras,
+  type ClaudeExtrasOptions,
+  type ClaudeCommand,
+  type ClaudeAgent,
+  type ClaudeExtrasDiscoveryResult,
+} from './claude-plugins'

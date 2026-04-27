@@ -119,6 +119,11 @@ describe('loadPlugins', () => {
       agentDir: '/tmp/agent',
       agentId: 'agent-x',
       network: '0g-mainnet',
+      configPath: '/tmp/agent/config.ts',
+      imports: { claudeCode: false },
+      skillsDisabled: { current: [] },
+      activityLogPath: '/tmp/agent/activity.jsonl',
+      workspaceRoot: '/tmp/agent',
       resolve: async () => ({ default: plugin }),
     })
     expect(result.loaded).toEqual(['fake'])
@@ -136,6 +141,11 @@ describe('loadPlugins', () => {
       agentDir: '/tmp/agent',
       agentId: 'agent-x',
       network: '0g-mainnet',
+      configPath: '/tmp/agent/config.ts',
+      imports: { claudeCode: false },
+      skillsDisabled: { current: [] },
+      activityLogPath: '/tmp/agent/activity.jsonl',
+      workspaceRoot: '/tmp/agent',
       resolve: async () => {
         throw new Error('module not found')
       },

@@ -14,7 +14,7 @@ export type PermissionMode = 'strict' | 'prompt' | 'off'
 export type PermissionDecision = 'allow-once' | 'allow-session' | 'deny'
 
 export interface PermissionRequest {
-  kind: 'shell.run' | 'fs.write' | 'fs.patch'
+  kind: 'shell.run' | 'shell.process' | 'code.execute' | 'fs.write' | 'fs.patch'
   command?: string
   path?: string
   /** Description of why approval is needed (e.g. "delete in root path"). */
@@ -84,12 +84,12 @@ export class PermissionService {
       return { allowed: true, via: 'allow' }
     }
 
-    // mode === 'prompt': dangerous patterns + every shell.run consult the prompter.
+    // mode === 'prompt': dangerous patterns + every shell-class invocation consult the prompter.
     if (dangerous.match) {
       const decision = await this.prompter({ ...req, reason: dangerous.description })
       return this.applyDecision(decision, sigKey)
     }
-    if (req.kind === 'shell.run') {
+    if (req.kind === 'shell.run' || req.kind === 'shell.process' || req.kind === 'code.execute') {
       const decision = await this.prompter(req)
       return this.applyDecision(decision, sigKey)
     }

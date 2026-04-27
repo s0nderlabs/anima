@@ -22,9 +22,15 @@ function unwrapObjectShape(schema: z.ZodType): Record<string, z.ZodType> | null 
 }
 
 function unwrapOptional(schema: z.ZodType): { schema: z.ZodType; optional: boolean } {
-  const s = schema as unknown as { _def: { typeName: string; innerType?: z.ZodType } }
+  const s = schema as unknown as {
+    _def: { typeName: string; innerType?: z.ZodType; schema?: z.ZodType }
+  }
   if (s._def?.typeName === 'ZodOptional' || s._def?.typeName === 'ZodDefault') {
     return { schema: s._def.innerType!, optional: true }
+  }
+  if (s._def?.typeName === 'ZodEffects') {
+    const inner = unwrapOptional(s._def.schema!)
+    return inner
   }
   return { schema, optional: false }
 }
@@ -83,6 +89,10 @@ function zodTypeToJson(schema: z.ZodType): unknown {
       }
     case 'ZodObject':
       return objectShapeToJson(s._def.shape?.() ?? {}, description)
+    case 'ZodEffects': {
+      const inner = (s._def as unknown as { schema: z.ZodType }).schema
+      return zodTypeToJson(inner)
+    }
     default:
       return { description: description ?? 'unspecified' }
   }

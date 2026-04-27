@@ -4,7 +4,10 @@ import {
   ActivityLog,
   type AnimaConfig,
   type BrainMessage,
+  type ClaudeAgent,
+  type ClaudeCommand,
   HookBus,
+  McpManager,
   MemorySyncManager,
   NETWORK_RPC,
   OGComputeBrain,
@@ -12,11 +15,15 @@ import {
   type PermissionMode,
   type PermissionRequest,
   PermissionService,
+  type PostToolCallContext,
   type PreToolCallContext,
   type PreToolCallResult,
+  type SkillRef,
   ToolRegistry,
   agentPaths,
   buildFrozenPrefix,
+  discoverClaudeExtras,
+  discoverMcpServers,
   explorerTxUrl,
   fetchAndDecryptKeystore,
   iNFTAgentId,
@@ -24,8 +31,10 @@ import {
   makeMemoryReadTool,
   makeMemorySaveTool,
   makeToolSearchTool,
+  matchSkillTriggers,
   newEventId,
   readIndexFile,
+  scanSkills,
 } from '@s0nderlabs/anima-core'
 import { type Address, type Hex, formatEther } from 'viem'
 import { findAndLoadConfig } from '../config/load'
@@ -102,7 +111,54 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   // The dynamic `import()` MUST happen from the CLI package context: that's
   // where the workspace deps `@s0nderlabs/anima-plugin-*` live. Passing this
   // resolver pins the import site to chat.tsx so bun's resolver finds them.
+  // Claude Code extras (commands + agents) discovery happens BEFORE plugin
+  // load so delegate.task can surface agents.
+  let claudeCommands: ClaudeCommand[] = []
+  let claudeAgents: ClaudeAgent[] = []
+  try {
+    const extras = await discoverClaudeExtras({
+      importsClaudeCode: config.imports?.claudeCode ?? true,
+    })
+    claudeCommands = extras.commands
+    claudeAgents = extras.agents
+  } catch {
+    // Discovery failed; continue without commands/agents.
+  }
+  const commandIndex = new Map<string, ClaudeCommand>()
+  for (const cmd of claudeCommands) {
+    if (!commandIndex.has(cmd.name)) commandIndex.set(cmd.name, cmd)
+    if (!commandIndex.has(cmd.id)) commandIndex.set(cmd.id, cmd)
+  }
+
+  // Sub-brain factory for delegate.task (Phase 9.3). The factory creates a
+  // fresh OGComputeBrain on the SAME provider/model with a custom system
+  // prompt. Tools default to none for delegated work; the parent calls
+  // delegate.task only when isolation matters.
+  const delegateFactory: import('@s0nderlabs/anima-core').DelegateBrainFactory = async ({
+    systemPrompt,
+    tools: subTools,
+  }) => {
+    const subBrain = new OGComputeBrain({
+      privkeyHex: agentPrivkey,
+      rpcUrl: NETWORK_RPC[config.network],
+      providerAddress: config.brain.provider!,
+      tools: subTools,
+      prefix: buildFrozenPrefix({
+        systemPrompt,
+        memoryIndex: null,
+        identity: null,
+        persona: null,
+        loadedToolNames: [],
+        skills: [],
+        timestamp: null,
+      }),
+    })
+    await subBrain.init()
+    return subBrain as unknown as import('@s0nderlabs/anima-core').DelegateBrainHandle
+  }
+
   const pluginNames = (config.plugins ?? []).filter(p => p === 'system')
+  const skillsDisabled = { current: [...(config.skills?.disabled ?? [])] }
   const loadResult = await loadPlugins(pluginNames, {
     tools,
     hooks,
@@ -110,6 +166,15 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     agentDir: paths.dir,
     agentId,
     network: config.network,
+    configPath,
+    imports: { claudeCode: config.imports?.claudeCode ?? true },
+    skillsDisabled,
+    activityLogPath: paths.activityLog,
+    workspaceRoot: process.cwd(),
+    delegateFactory,
+    claudeAgents,
+    brainSupportsVision: false,
+    brainModelLabel: config.brain.model ?? config.brain.provider,
     resolve: async name => {
       switch (name) {
         case 'system':
@@ -137,6 +202,36 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     ).catch(() => {})
   }
 
+  // MCP discovery: scan ~/.anima/.mcp.json + ~/.claude/.mcp.json + plugin
+  // cache, spawn each stdio server, register tools as deferred. Failures are
+  // logged but never block startup.
+  let mcpManager: McpManager | null = null
+  try {
+    const { servers } = await discoverMcpServers({
+      importsClaudeCode: config.imports?.claudeCode ?? true,
+    })
+    if (servers.length > 0) {
+      mcpManager = new McpManager(servers)
+      const mcpResult = await mcpManager.registerAll(def =>
+        tools.register(def as Parameters<typeof tools.register>[0]),
+      )
+      if (mcpResult.failed.length > 0 || process.env.ANIMA_DEBUG_PLUGINS) {
+        const { writeFile } = await import('node:fs/promises')
+        const { join } = await import('node:path')
+        await writeFile(
+          join(paths.dir, 'mcp-debug.log'),
+          JSON.stringify(
+            { ts: Date.now(), servers: servers.map(s => s.name), result: mcpResult },
+            null,
+            2,
+          ),
+        ).catch(() => {})
+      }
+    }
+  } catch {
+    // Discovery itself failed (probably I/O); proceed without MCP.
+  }
+
   const sync = new MemorySyncManager({
     network: config.network,
     agentId,
@@ -152,10 +247,19 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   // steady-state diffing kicks in without a wasted RPC call.
 
   await mkdir(paths.memoryDir, { recursive: true })
-  const memoryIndex = await readIndexFile(paths.memoryIndex).catch(() => null)
-  const identityText = await readMemoryFileOrNull(`${paths.memoryDir}/agent/identity.md`)
-  const personaText = await readMemoryFileOrNull(`${paths.memoryDir}/agent/persona.md`)
+  const [memoryIndex, identityText, personaText, scannedSkills] = await Promise.all([
+    readIndexFile(paths.memoryIndex).catch(() => null),
+    readMemoryFileOrNull(`${paths.memoryDir}/agent/identity.md`),
+    readMemoryFileOrNull(`${paths.memoryDir}/agent/persona.md`),
+    scanSkills({ importsClaudeCode: config.imports?.claudeCode ?? true }).catch(
+      () => [] as SkillRef[],
+    ),
+  ])
   const loadedToolNames = tools.schemas().map(s => s.function.name)
+  const disabledSkillSet = new Set(skillsDisabled.current)
+  const skillsRef: { current: SkillRef[] } = {
+    current: scannedSkills.filter(s => !disabledSkillSet.has(s.id)),
+  }
   const buildPrefix = async () => {
     const idx = await readIndexFile(paths.memoryIndex).catch(() => null)
     return buildFrozenPrefix({
@@ -163,6 +267,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       identity: identityText,
       persona: personaText,
       loadedToolNames,
+      skills: skillsRef.current,
     })
   }
   const prefix = buildFrozenPrefix({
@@ -170,6 +275,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     identity: identityText,
     persona: personaText,
     loadedToolNames,
+    skills: skillsRef.current,
   })
   const activity = new ActivityLog(paths.activityLog)
 
@@ -214,6 +320,23 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
         ok: false,
         error: `Denied by approval system: ${result.reason ?? 'no reason'} (mode=${permission.getMode()}).`,
       },
+    }
+  })
+
+  // Skills auto-trigger: when a tool call matches a skill's filePattern or
+  // bashPattern, surface a system row so the operator sees the auto-load AND
+  // queue the SKILL.md body for next-turn injection via brain.injectContext().
+  const pendingSkillInjections = new Set<string>()
+  hooks.add<PostToolCallContext, void>('post_tool_call', async ({ call, result }) => {
+    if (result.ok === false) return
+    const matches = matchSkillTriggers({ name: call.name, args: call.args }, skillsRef.current)
+    for (const match of matches) {
+      if (pendingSkillInjections.has(match.skill.id)) continue
+      pendingSkillInjections.add(match.skill.id)
+      state.pushRow({
+        role: 'system',
+        text: `↳ skill auto-loaded: ${match.skill.id} (matched ${match.reason}). use skills.view to read body.`,
+      })
     }
   })
 
@@ -427,10 +550,64 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       return true
     }
     if (cmd === '/help') {
+      const builtins =
+        '  /sync   force memory + activity flush to 0G\n  /model  switch brain (run anima model after exiting)\n  /yolo   toggle approval prompts off/on for this session\n  /help   this message'
+      const claudeBlock =
+        commandIndex.size === 0
+          ? ''
+          : `\n\nClaude Code commands (auto-loaded):\n${[
+              ...new Set([...commandIndex.values()].map(c => c.name)),
+            ]
+              .sort()
+              .map(name => {
+                const c = commandIndex.get(name)!
+                return `  /${c.name}  ${c.description.slice(0, 80)}`
+              })
+              .join('\n')}`
       state.pushRow({
         role: 'system',
-        text: 'slash commands:\n  /sync   force memory + activity flush to 0G\n  /model  switch brain (run anima model after exiting)\n  /yolo   toggle approval prompts off/on for this session\n  /help   this message',
+        text: `slash commands:\n${builtins}${claudeBlock}`,
       })
+      return true
+    }
+    // Claude Code command match. Strip leading `/`, take first whitespace
+    // segment as the command name, treat the rest as the user-supplied args.
+    if (cmd.startsWith('/')) {
+      const rest = cmd.slice(1).trim()
+      if (!rest) return false
+      const space = rest.indexOf(' ')
+      const name = space === -1 ? rest : rest.slice(0, space)
+      const args = space === -1 ? '' : rest.slice(space + 1).trim()
+      const command = commandIndex.get(name)
+      if (!command) return false
+      const trimmedBody = command.body.trim()
+      const inlined = args
+        ? `# Command: /${command.name}${command.argumentHint ? ` (${command.argumentHint})` : ''}\n# User args: ${args}\n\n${trimmedBody}`
+        : `# Command: /${command.name}\n\n${trimmedBody}`
+      state.pushRow({
+        role: 'system',
+        text: `↳ command: /${command.name} (${command.id}, ${command.body.length} bytes inlined as user message)`,
+      })
+      // Send the command body as a user message so the brain executes it.
+      try {
+        const refreshed = await buildPrefix()
+        brain.refreshUserContext(refreshed)
+        const turn = await brain.infer({
+          event: {
+            id: newEventId(),
+            source: 'stdin',
+            payload: { label: 'user-message', data: inlined },
+            ts: Date.now(),
+          },
+        })
+        state.pushRow({ role: 'assistant', text: turn.content ?? '(no content)' })
+        state.setStatus('idle')
+      } catch (e) {
+        state.pushRow({
+          role: 'system',
+          text: `command error: ${(e as Error).message.slice(0, 200)}`,
+        })
+      }
       return true
     }
     return false
@@ -444,6 +621,16 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   const handleExit = (): void => {
     try {
       renderer.destroy()
+    } catch {}
+    try {
+      mcpManager?.closeAll()
+    } catch {}
+    // Best-effort: kill any background processes registered via shell.process.
+    try {
+      const { killAllProcesses } = require('@s0nderlabs/anima-plugin-system') as {
+        killAllProcesses: () => void
+      }
+      killAllProcesses()
     } catch {}
     // Best-effort drain: if a flush is mid-flight, await it. Caps at 30s so
     // we never hang the CLI on a wedged RPC.
@@ -543,6 +730,19 @@ function describePermissionCheck(call: { name: string; args: unknown }): Permiss
     const args = (call.args ?? {}) as { command?: string }
     const command = typeof args.command === 'string' ? args.command : ''
     return { kind: 'shell.run', command, reason: 'shell command execution' }
+  }
+  if (call.name === 'code.execute') {
+    const args = (call.args ?? {}) as { code?: string; language?: string }
+    const command = `[${args.language ?? '?'}] ${typeof args.code === 'string' ? args.code : ''}`
+    return { kind: 'code.execute', command, reason: 'arbitrary code execution' }
+  }
+  if (call.name === 'shell.process') {
+    const args = (call.args ?? {}) as { action?: string; command?: string; id?: string }
+    if (args.action === 'start') {
+      const command = typeof args.command === 'string' ? args.command : ''
+      return { kind: 'shell.process', command, reason: 'background process start' }
+    }
+    return null
   }
   if (call.name === 'fs.write' || call.name === 'fs.patch') {
     const args = (call.args ?? {}) as { path?: string }

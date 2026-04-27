@@ -1,7 +1,38 @@
+import type { ClaudeAgent } from '../claude-plugins/types'
 import type { Listener } from '../events/listeners'
 import type { ToolRegistry } from '../tools/registry'
-import type { ToolDef } from '../tools/types'
+import type { ToolDef, ToolSchema } from '../tools/types'
 import type { HookBus, HookHandler, HookName } from './hooks'
+
+/**
+ * Factory chat.tsx supplies for `delegate.task` to spin up a sub-brain. The
+ * implementation typically wraps `OGComputeBrain` with a custom system prompt
+ * + restricted tool surface.
+ */
+export interface DelegateBrainFactoryOpts {
+  systemPrompt: string
+  tools: ToolSchema[]
+}
+
+export interface DelegateBrainTurn {
+  content: string | null
+  finishReason?: string
+  toolCalls?: Array<{ id: string; name: string; args: unknown }>
+  usage?: {
+    totalTokens?: number
+    cachedTokens?: number
+    promptTokens?: number
+    completionTokens?: number
+  }
+}
+
+export interface DelegateBrainHandle {
+  infer(input: {
+    event: { id: string; source: 'stdin'; payload: { label: string; data: string }; ts: number }
+  }): Promise<DelegateBrainTurn>
+}
+
+export type DelegateBrainFactory = (opts: DelegateBrainFactoryOpts) => Promise<DelegateBrainHandle>
 
 /**
  * Context handed to a plugin's `register(ctx)` function. Plugins use this
@@ -19,6 +50,32 @@ export interface PluginContext {
   agentDir: string
   /** Per-agent unique id (matches `iNFTAgentId(...)` for non-stub agents). */
   agentId: string
+  /** Absolute path to ~/.anima/config.ts. Plugins that persist user-level state write here. */
+  configPath: string
+  /** Imports surface from config (e.g. claudeCode toggle for skills + MCP discovery). */
+  imports: { claudeCode: boolean }
+  /**
+   * Mutable cell holding the user-disabled skill ids. Plugin tools that
+   * change the list update this, and the chat rebuilds the skill index from
+   * the current value next turn.
+   */
+  skillsDisabled: { current: string[] }
+  /** Path to the agent's activity log (~/.anima/agents/<id>/activity.jsonl). */
+  activityLogPath: string
+  /** Workspace cwd. Used by tools that spawn subprocesses. */
+  workspaceRoot: string
+  /**
+   * Sub-brain factory (Phase 9.3 delegate.task). Chat.tsx supplies a closure
+   * that builds an OGComputeBrain with broker creds. Tools without a brain
+   * dependency ignore this.
+   */
+  delegateFactory?: DelegateBrainFactory
+  /** Claude Code agents discovered from the local plugin cache. */
+  claudeAgents: ClaudeAgent[]
+  /** Whether the configured brain supports image inputs. */
+  brainSupportsVision: boolean
+  /** Brain model label (string). Surfaces in tool error messages. */
+  brainModelLabel: string | null
 }
 
 export interface NativePlugin {
@@ -38,6 +95,15 @@ export interface PluginLoaderDeps {
   agentDir: string
   agentId: string
   network: '0g-mainnet' | '0g-testnet'
+  configPath: string
+  imports: { claudeCode: boolean }
+  skillsDisabled: { current: string[] }
+  activityLogPath: string
+  workspaceRoot: string
+  delegateFactory?: DelegateBrainFactory
+  claudeAgents?: ClaudeAgent[]
+  brainSupportsVision?: boolean
+  brainModelLabel?: string | null
   /**
    * Resolver for `name` → ESM module path. Defaults to dynamic import of
    * `@s0nderlabs/anima-plugin-<name>`. Tests pass a stub.
@@ -58,6 +124,15 @@ export async function loadPlugins(
     network: deps.network,
     agentDir: deps.agentDir,
     agentId: deps.agentId,
+    configPath: deps.configPath,
+    imports: deps.imports,
+    skillsDisabled: deps.skillsDisabled,
+    activityLogPath: deps.activityLogPath,
+    workspaceRoot: deps.workspaceRoot,
+    delegateFactory: deps.delegateFactory,
+    claudeAgents: deps.claudeAgents ?? [],
+    brainSupportsVision: deps.brainSupportsVision ?? false,
+    brainModelLabel: deps.brainModelLabel ?? null,
   }
   for (const name of names) {
     try {

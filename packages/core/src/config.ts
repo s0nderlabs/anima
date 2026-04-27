@@ -85,6 +85,14 @@ export interface AnimaConfig {
     /** Always-approved patterns (regex against `kind|command|path` signature). */
     allowlist?: string[]
   }
+  /**
+   * Phase 9.1: skills system. `disabled` is the persistent list of skill ids
+   * that should never auto-load or appear in the index. Updated by
+   * `skills.manage` and persisted to ~/.anima/config.ts.
+   */
+  skills?: {
+    disabled?: string[]
+  }
 }
 
 export type AnimaConfigInput = Partial<AnimaConfig> & Pick<AnimaConfig, 'network'>
@@ -97,6 +105,7 @@ const DEFAULT_CONFIG: Omit<AnimaConfig, 'network' | 'storage'> = {
   imports: { claudeCode: true },
   operator: null,
   approvals: { mode: 'prompt', allowlist: [] },
+  skills: { disabled: [] },
 }
 
 export function defineConfig(input: AnimaConfigInput): AnimaConfig {
@@ -111,6 +120,7 @@ export function defineConfig(input: AnimaConfigInput): AnimaConfig {
     imports: input.imports ?? DEFAULT_CONFIG.imports,
     operator: input.operator ?? DEFAULT_CONFIG.operator,
     approvals: input.approvals ?? DEFAULT_CONFIG.approvals,
+    skills: input.skills ?? DEFAULT_CONFIG.skills,
   }
 }
 

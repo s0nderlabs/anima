@@ -157,7 +157,7 @@ export class OGComputeBrain implements Brain {
       this.opts.providerAddress,
       typeof last.content === 'string' ? last.content : JSON.stringify(last.content),
     )
-    const body = {
+    const body: Record<string, unknown> = {
       model: this.model,
       messages: messages.map(m => {
         if (m.role === 'tool') {
@@ -179,9 +179,13 @@ export class OGComputeBrain implements Brain {
         }
         return { role: m.role, content: m.content }
       }),
-      tools: this.opts.tools,
-      tool_choice: 'auto' as const,
       max_tokens: this.opts.maxOutputTokens ?? 1024,
+    }
+    // 0G's broker (DashScope) rejects an empty tools array (`[] is too short`).
+    // Only include the fields when at least one tool is in the schema list.
+    if (this.opts.tools.length > 0) {
+      body.tools = this.opts.tools
+      body.tool_choice = 'auto'
     }
     const resp = await fetch(`${this.endpoint}/chat/completions`, {
       method: 'POST',

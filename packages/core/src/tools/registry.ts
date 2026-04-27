@@ -61,7 +61,7 @@ export class ToolRegistry {
       function: {
         name: t.name,
         description: t.description,
-        parameters: zodToJsonSchema(t.schema),
+        parameters: t.parametersOverride ?? zodToJsonSchema(t.schema),
       },
     }))
   }

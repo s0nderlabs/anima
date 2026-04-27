@@ -48,6 +48,14 @@ export interface ToolDef<TArgs = unknown> {
    * deferred. Should describe domain ("filesystem read text"), not phrasing.
    */
   searchHint?: string
+  /**
+   * Optional JSON Schema override for tools whose param shape isn't expressed
+   * as a top-level `z.object({})` (MCP tools, dynamically-discovered remote
+   * tools). When set, `registry.schemas()` and `tool.search` use this verbatim
+   * instead of running `zodToJsonSchema(schema)`. The `schema.safeParse()`
+   * still gates dispatch.
+   */
+  parametersOverride?: JSONSchema
 }
 
 export interface ToolResult {

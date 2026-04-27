@@ -4,6 +4,42 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-04-28
+
+### Added
+
+- **Skills system (Phase 9.1).** New `packages/core/src/skills/` module with SKILL.md frontmatter parser (name, description, version, license, metadata.filePattern, metadata.bashPattern, argument-hint), 4-path discovery (`~/.anima/skills/`, `~/.anima/plugins/<n>/skills/`, `~/.claude/skills/`, `~/.claude/plugins/cache/<m>/<p>/<v>/skills/`), and an auto-trigger hook in chat that emits a `↳ skill auto-loaded:` row when a tool call's path matches a skill's `filePattern` glob or its command matches a `bashPattern` regex. The skill index (id + description for each skill) is rendered into the cacheable system prefix so the brain knows what playbooks exist before any tool call. Scanner falls back to dir name + first body line when SKILL.md has no YAML frontmatter, so canonical skills like `tmux` (which have no frontmatter) are still discoverable. New `skills.manage` tool persists enable/disable state into `~/.anima/config.ts` under `skills.disabled[]`, with regex that handles both `defineConfig({})` and `export default {}` config shapes.
+- **MCP stdio harness (Phase 9.2 Bundle 7).** New `packages/core/src/mcp/` module with a hand-rolled JSON-RPC stdio client, server discovery from `~/.anima/.mcp.json` + `~/.claude/.mcp.json` + every `~/.claude/plugins/cache/<m>/<p>/<v>/.mcp.json`, `${CLAUDE_PLUGIN_ROOT}` substitution, and an `McpManager` that spawns each stdio server in parallel at chat init, calls `initialize` + `tools/list`, and registers each remote tool as a deferred ToolDef under `mcp.<server>.<tool>`. Verified live: 4 of 6 configured servers (pragma, inb0x, string, nativ) registered 109 tools end-to-end on first boot; brain dispatched `mcp.pragma.get_all_balances` and surfaced a real Monad portfolio. HTTP servers (e.g. supabase) flagged as "not yet supported" pending Phase 9.4 polish.
+- **Claude Code commands + agents discovery (Phase 9.2 Bundle 8).** New `packages/core/src/claude-plugins/` module parses every `commands/*.md` and `agents/*.md` from `~/.claude/plugins/cache/<m>/<p>/<v>/`. Commands surface as in-chat slash handlers; the brain inlines the body as a user message when invoked. Agents are addressable by short name through `delegate.task`. `/help` lists both built-in and inherited slash commands.
+- **Four new LLM-using tools (Phase 9.3 Bundle 9).** `session.search` scans the agent's activity-log JSONL for substring or regex matches across wake events, tool calls, results, and brain responses. `delegate.task` spawns a fresh `OGComputeBrain` on the same provider with a custom system prompt (or the body of a Claude Code agent) and returns its single-turn reply, isolating focused work without polluting the parent context. `vision.analyze` returns a clear "vision-capable provider required" error until 0G ships a multimodal model. `code.execute` runs a snippet via bash/python3/node/bun with stdin pipe, configurable timeout (max 120s), and the same `redactEnv` floor as `shell.run`.
+- **Ten browser tools wrapping `agent-browser` (Phase 9.4 Bundle 10).** `browser.navigate`, `browser.snapshot`, `browser.click`, `browser.type`, `browser.scroll`, `browser.back`, `browser.press`, `browser.get_images`, `browser.console`, `browser.vision`. All deferred-by-default (`shouldDefer: true`) so they only enter the brain prompt after `tool.search` matches them. `redactEnv` strips wallet keys before the spawned subprocess. Verified live driving a real headless Chromium to news.ycombinator.com and extracting the top story title, matching `curl` of HN exactly.
+- **`shell.process` for long-running subprocesses (Phase 9.4 Bundle 11).** Single tool with action discriminator: `start` (returns id), `output` (read accumulated stdout/stderr, optional clear), `list` (all tracked), `kill` (signal). Map evicts exited entries on `output { clear: true }` and on `kill` of an already-exited proc to bound memory. `killAllProcesses` runs on chat exit so dev servers don't outlive the session.
+- **`coerceBool` zod helper.** Tolerates `"true"`/`"false"`/`"1"`/`"0"`/`"yes"`/`"no"` strings + actual booleans + 0/1 numbers. Necessary because qwen3.6-plus serializes tool-call boolean args as JSON strings, which `z.boolean()` rejects. Applied to every boolean field in browser/session-search/shell-process schemas. `zodToJsonSchema` learned to unwrap `ZodEffects` so the JSON Schema sent to the brain still shows `type: 'boolean'`.
+- **`ToolDef.parametersOverride`.** Optional JSON Schema override for tools whose param shape isn't expressed as a top-level `z.object()` (MCP tools whose remote schemas vary widely). When set, both `registry.schemas()` and `tool.search` skip `zodToJsonSchema` and use the override verbatim.
+- **`PluginContext` extensions.** Every plugin's `register(ctx)` now receives `configPath`, `imports.claudeCode`, `skillsDisabled` mutable cell, `activityLogPath`, `workspaceRoot`, `delegateFactory`, `claudeAgents[]`, `brainSupportsVision`, `brainModelLabel`. `DelegateBrainFactory` / `DelegateBrainHandle` types exported from core.
+
+### Fixed
+
+- **Permission floor extended to `code.execute` and `shell.process`.** Both effectively run shell commands but bypassed `describePermissionCheck`. Now flow through the same strict / prompt / off resolver as `shell.run`. `PermissionRequest.kind` adds `'code.execute'` and `'shell.process'`. dangerous-pattern detection runs on `code.execute` snippets and `shell.process` start commands the same way it runs on `shell.run` invocations.
+- **`OGComputeBrain` no longer sends an empty `tools: []` array.** 0G's broker (DashScope upstream) rejects with `"[] is too short - 'tools'"` HTTP 400, which broke `delegate.task`'s sub-brain whenever the parent passed no tools. The `tools` and `tool_choice` fields are now omitted entirely when the schema list is empty. Discovered live during the delegate.task drive on mainnet specter.
+- **Scanner no longer drops skills without YAML frontmatter.** Previously `loadSkill` returned null when both `name` and `description` frontmatter fields were missing, which silently invisible-listed canonical skills like `tmux` (whose `SKILL.md` starts with `# tmux` directly). Scanner now falls back to the directory name + first non-empty non-heading body line. Regression test added.
+- **`redactEnv` applied to every subprocess spawn.** `code.execute`, `shell.process`, and all 10 `browser.*` tools now strip wallet/API-key/keychain envs from the spawned process environment before exec. Brings them to parity with `shell.run`'s existing security floor (which the docstrings already claimed).
+- **Memory file reads + skill scan run in parallel at chat boot.** Previously four sequential awaits (memory index, identity.md, persona.md, skill scan) added ~150-300ms to first-prompt latency on cold cache. Now `Promise.all` over all four.
+- **`shell.process` Map leak.** Module-level `processes` Map never evicted exited entries (only cleared `proc` on `kill`), so a long session calling `start` 100 times accumulated up to 30MB of zombie buffers. Now evicted on `output { clear: true }` and on `kill` of an already-exited proc.
+
+### Changed
+
+- `OGComputeBrain.infer()` body construction split: `tools` + `tool_choice` only included when the schema list is non-empty, preventing broker 400s on empty-tool sub-brains.
+- `agentIndex` Map removed from `chat.tsx` (was built but never read; `delegate.task` resolves agents off `claudeAgents[]` directly via plugin context).
+- `delegate.ts` no longer redefines `DelegateBrainFactoryOpts` / `DelegateBrainHandle` / `DelegateBrainFactory`; imports them from `@s0nderlabs/anima-core`. Dead `parentPrefix` field dropped from `DelegateDeps`.
+- `mcp/discovery.ts` no longer re-exports `dirname` from `node:path` (gratuitous re-export removed).
+
+### Verification
+
+- 192 unit tests pass (10 new across skills/, mcp/, claude-plugins/, tools/zod-helpers).
+- typecheck clean, biome lint clean.
+- Live tmux drive on mainnet specter (iNFT #4, qwen3.6-plus) confirmed all 28 native tools fire with `⏺ name(args)` + `⎿ ok/✗` indicators: `memory.save`, `memory.read`, `tool.search`, `fs.read`, `fs.write`, `fs.patch`, `fs.search`, `shell.run`, `shell.process` (all 4 actions), `code.execute` (python/bash/node/bun), `todo`, `clarify`, `skills.list`, `skills.view`, `skills.manage` (list/disable/enable + config persist), `session.search`, `delegate.task` (`agent:` and `system_prompt:` paths), `vision.analyze` (correct not-available error), `browser.*` (all 10), plus skill auto-trigger via `*.test.ts` filePattern and `mcp.pragma.get_all_balances` returning a real Monad portfolio. Real-website verified: anima drove headless Chromium to `https://news.ycombinator.com` and reported the actual top story title, matching `curl` exactly.
+
 ## [0.8.1] - 2026-04-27
 
 ### Fixed
@@ -296,6 +332,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.9.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.9.0
 [0.8.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.8.1
 [0.8.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.8.0
 [0.7.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.7.1
