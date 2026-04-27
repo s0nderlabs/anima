@@ -1,63 +1,30 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { cancel, intro, isCancel, note, outro, password, spinner } from '@clack/prompts'
 import {
-  type AnimaNetwork,
   type EncryptedKeystore,
-  NETWORK_CHAIN_ID,
   agentPaths,
   decryptKey,
   defineConfig,
   explorerTokenUrl,
   fetchAndDecryptKeystore,
   iNFTAgentId,
-  networkFromChainId,
   restoreKeystoreFromStorage,
   sniffKeystoreVersion,
 } from '@s0nderlabs/anima-core'
 import { type Address, bytesToHex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { writeConfigTs } from '../config/render'
+import { type ParsedINFTRef, parseINFTRef } from './_inft-ref'
 import { pickOperatorSigner } from './init/operator-picker'
-
-interface ParsedRef {
-  network: AnimaNetwork
-  contract: Address
-  tokenId: bigint
-}
-
-function parseRef(ref: string): ParsedRef {
-  const parts = ref.split(':')
-  if (parts.length === 4 && parts[0] === 'eip155') {
-    const chainId = Number(parts[1])
-    const contract = parts[2] as Address
-    const tokenId = BigInt(parts[3]!)
-    const network = networkFromChainId(chainId)
-    if (!network) {
-      const known = Object.values(NETWORK_CHAIN_ID).join(' or ')
-      throw new Error(`Unknown chain id ${chainId} (expected ${known})`)
-    }
-    return { network, contract, tokenId }
-  }
-  if (parts.length === 3 && (parts[0] === '0g-mainnet' || parts[0] === '0g-testnet')) {
-    return {
-      network: parts[0] as AnimaNetwork,
-      contract: parts[1] as Address,
-      tokenId: BigInt(parts[2]!),
-    }
-  }
-  throw new Error(
-    `Unrecognized iNFT ref '${ref}'. Expected 'eip155:<chain>:<contract>:<tokenId>' or '0g-mainnet:<contract>:<tokenId>'.`,
-  )
-}
 
 export async function runRestore(opts: { ref: string; cwd?: string }): Promise<void> {
   const configPath = agentPaths.config
 
   intro('anima restore')
 
-  let parsed: ParsedRef
+  let parsed: ParsedINFTRef
   try {
-    parsed = parseRef(opts.ref)
+    parsed = parseINFTRef(opts.ref)
   } catch (e) {
     cancel((e as Error).message)
     return

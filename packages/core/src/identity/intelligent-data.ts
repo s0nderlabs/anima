@@ -41,3 +41,9 @@ export interface UpdateSlot {
 export function slotIndex(slot: IntelligentDataSlot): number {
   return INTELLIGENT_DATA_SLOTS.indexOf(slot)
 }
+
+export function slotByIndex(idx: number): IntelligentDataSlot {
+  const name = INTELLIGENT_DATA_SLOTS[idx]
+  if (!name) throw new Error(`unknown slot index ${idx} (max ${INTELLIGENT_DATA_SLOTS.length - 1})`)
+  return name
+}

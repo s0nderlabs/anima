@@ -4,6 +4,29 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-04-27
+
+### Added
+
+- **`anima inspect` — read what's anchored on chain for an iNFT.** New CLI command that reads slot hashes off the iNFT, fetches each encrypted blob from 0G Storage (with discovered-nodes RPC fallback), decrypts via the operator-derived memory key, and prints plaintext for every IntelligentData slot. The "audit your agent on chain" demo moment from session 12 now ships as a first-class command. Modes:
+  - **default** — own agent: unlock keystore via operator wallet, decrypt all 6 slots (memory-index, identity, persona, profile, keystore-skipped, activity-log), render readable. Verified live on mainnet against iNFT #4: all 6 slots fetched, 5 decrypted (memory-index 613B, identity 415B, persona 125B, activity-log 100KB), profile correctly flagged empty, keystore correctly annotated as operator-encrypted.
+  - **`--slot <name>`** — filter to a single slot.
+  - **`--tx <hash>`** — decode a `Flow.update()` tx, show which slots were anchored at that tx, and which have been superseded by later txs.
+  - **`--raw`** — skip operator unlock entirely; just dump root hashes + ciphertext sizes + 64-byte hex preview. For when you don't want to authenticate.
+  - **`--diff`** — compare local memory files at `~/.anima/agents/<id>/memory/` (plus `activity.jsonl`) against decrypted chain plaintext via `keccak256` content hash. Status per slot: `in-sync`, `differ`, `local-only`, `chain-only`, `both-missing`, `cannot-decrypt`. Surfaces drift before transfers / after `git pull` / when something feels off. Live verified: 4/4 anchored slots returned `in-sync` against the active config.
+  - **`--json`** — structured output for scripting; bigints stringified.
+  - **`--full`** — print entire plaintext (default truncates each slot to 40 lines).
+  - **`--out <dir>`** — dump every decrypted slot to `<dir>/<slot>.md` plus a `README.md` index. Lets the operator pull their full agent memory off chain to disk. Live verified: `--slot identity --out /tmp/dump` produced `identity.md` (415B) plus `README.md` summary.
+  - **positional `<ref>`** — `0g-mainnet:0xCONTRACT:tokenId` or `eip155:<chain>:0xCONTRACT:tokenId` audits a foreign iNFT (raw view only since you don't hold the operator key).
+- **`packages/core/src/identity/inspect.ts` library.** Pure read-only auditing API: `inspectAgent(opts)` (all-slots), `inspectSlot(opts)` (one-slot), `inspectTx(opts)` (tx decode + current-state diff), `diffAgent(opts)` (chain ↔ local hash diff). Result types `SlotInspection`, `TxInspection`, `SlotDiff` plus `DecryptStatus` discriminator (`ok | no-key | keystore-skipped | decrypt-failed | empty | fetch-failed`). Re-exported through `@s0nderlabs/anima-core` so any consumer can audit chain state without re-implementing the chain → storage → decrypt walk.
+- **`downloadBlobViaDiscoveredNodes(indexerUrl, rootHash)` exported from `@s0nderlabs/anima-core/storage`.** Pulls the JSON-RPC fallback that powered `test/local/decode-onchain-memory.ts` into the public surface: `indexer_getShardedNodes` enumerates nodes, `zgs_getFileInfo(rootHash, false)` filters to finalized ones, `zgs_downloadSegmentByTxSeq(seq, 0, chunks)` fetches chunks, then concat + size-trim. Used as a fallback when the SDK indexer's `trusted` set is empty (mainnet has been returning `trusted: null` since Apr 2026).
+- **`test/local/tmux-inspect.ts` driver** verifying 5 modes end-to-end in tmux: `--raw`, `--raw --slot identity`, `--slot bogus` (rejection), foreign-ref positional, `--json --slot identity` (output is parseable). Each invocation runs in its own tmux session because `runOneShot` resolves on the first `TEST_EXIT` marker; back-to-back calls in one session race against the previous run's marker.
+
+### Changed
+
+- **`downloadBlobByRoot` now falls through to discovered-nodes** when the SDK indexer path returns no blob. Any caller of `downloadBlobByRoot` (notably `fetchKeystore` → `anima restore`) automatically benefits: the indexer's degraded `trusted: null` state no longer stops a recovery cold.
+- **CLI dispatch**: `anima inspect` registered next to `anima sync` / `anima restore`; help text lists the new command and its flag set.
+
 ## [0.7.1] - 2026-04-26
 
 ### Fixed

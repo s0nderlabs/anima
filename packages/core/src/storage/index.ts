@@ -5,6 +5,7 @@ export {
   type OGStorageOpts,
   INDEXER_URL,
   downloadBlobByRoot,
+  downloadBlobViaDiscoveredNodes,
 } from './og'
 export {
   encrypt,

@@ -87,6 +87,61 @@ async function main(): Promise<void> {
       await runDeploy()
       return
     }
+    case 'inspect': {
+      const { runInspect, isValidSlot } = await import('./commands/inspect')
+      const remaining = argv.slice(1)
+      const positional: string[] = []
+      const flags: Record<string, string | boolean> = {}
+      for (let i = 0; i < remaining.length; i++) {
+        const a = remaining[i]!
+        if (a === '--raw' || a === '--diff' || a === '--json' || a === '--full') {
+          flags[a.slice(2)] = true
+        } else if (a === '--slot' || a === '--tx' || a === '--out') {
+          const v = remaining[++i]
+          if (!v) {
+            console.error(`anima inspect: ${a} requires a value`)
+            process.exit(1)
+          }
+          flags[a.slice(2)] = v
+        } else if (a.startsWith('--')) {
+          console.error(`anima inspect: unknown flag ${a}`)
+          process.exit(1)
+        } else {
+          positional.push(a)
+        }
+      }
+      if (positional.length > 1) {
+        console.error('anima inspect: at most one positional ref allowed')
+        process.exit(1)
+      }
+      const slotFlag = flags.slot
+      let slotName: import('@s0nderlabs/anima-core').IntelligentDataSlot | undefined
+      if (typeof slotFlag === 'string') {
+        if (!isValidSlot(slotFlag)) {
+          console.error(
+            'anima inspect: --slot must be one of memory-index, identity, persona, profile, keystore, activity-log',
+          )
+          process.exit(1)
+        }
+        slotName = slotFlag
+      }
+      const txFlag = flags.tx
+      if (typeof txFlag === 'string' && !/^0x[0-9a-fA-F]{64}$/.test(txFlag)) {
+        console.error('anima inspect: --tx must be a 32-byte hex hash')
+        process.exit(1)
+      }
+      await runInspect({
+        ref: positional[0],
+        slot: slotName,
+        tx: typeof txFlag === 'string' ? (txFlag as `0x${string}`) : undefined,
+        raw: flags.raw === true,
+        diff: flags.diff === true,
+        json: flags.json === true,
+        full: flags.full === true,
+        out: typeof flags.out === 'string' ? flags.out : undefined,
+      })
+      return
+    }
     case '-h':
     case '--help':
     case 'help': {
@@ -117,6 +172,7 @@ function printHelp(): void {
       '  anima sync                force flush memory + activity-log to 0G + anchor on chain',
       '  anima migrate-keystore    upgrade v0.5.0 passphrase keystore to v0.6 operator-wallet',
       '  anima deploy              migrate Local agent to 0G Sandbox via Option 3 handoff',
+      '  anima inspect [ref]       audit on-chain memory slots (flags: --slot, --tx, --raw, --diff, --json, --full, --out <dir>)',
       '  anima help                show this message',
       '',
     ].join('\n'),

@@ -15,6 +15,12 @@ export const INDEXER_URL: Record<AnimaNetwork, string> = {
  * Download a blob from 0G Storage by its merkle root hash.
  * Read-only: does NOT require a signer or funds. Used by `anima restore` to
  * recover an encrypted keystore from storage without needing a local key.
+ *
+ * Two-step fallback: try the SDK indexer first (which uses the indexer's
+ * `trusted` node set); if that comes back empty (mainnet's indexer has been
+ * returning `trusted: null` since Apr 2026), walk the discovered-nodes RPC
+ * directly. Anyone holding the root hash can fetch their data even when the
+ * indexer is degraded.
  */
 export async function downloadBlobByRoot(
   network: AnimaNetwork,
@@ -23,11 +29,94 @@ export async function downloadBlobByRoot(
   const indexer = new Indexer(INDEXER_URL[network])
   try {
     const [blob, err] = await indexer.downloadToBlob(rootHash, { proof: false })
-    if (err || !blob) return null
-    return new Uint8Array(await blob.arrayBuffer())
+    if (!err && blob) return new Uint8Array(await blob.arrayBuffer())
   } catch {
-    return null
+    // Fall through to discovered-nodes path.
   }
+  return await downloadBlobViaDiscoveredNodes(INDEXER_URL[network], rootHash)
+}
+
+/**
+ * Discovered-nodes download path: list nodes via `indexer_getShardedNodes`,
+ * filter to ones reporting `finalized=true` for this rootHash via
+ * `zgs_getFileInfo`, then fetch all chunks via `zgs_downloadSegmentByTxSeq`
+ * and concat. Each storage node serves ~256-byte chunks; max ~388 chunks per
+ * call, so for blobs <100KB one call suffices.
+ *
+ * Walks every finalized candidate; first one that returns a usable segment
+ * wins. Some nodes report finalized but stutter on the segment fetch.
+ */
+export async function downloadBlobViaDiscoveredNodes(
+  indexerUrl: string,
+  rootHash: string,
+): Promise<Uint8Array | null> {
+  const nodesResp = await fetch(indexerUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'indexer_getShardedNodes',
+      params: [],
+      id: 1,
+    }),
+  }).catch(() => null)
+  if (!nodesResp || !nodesResp.ok) return null
+  const idx = (await nodesResp.json().catch(() => null)) as {
+    result?: { discovered?: Array<{ url: string }> | null }
+  } | null
+  const nodes = idx?.result?.discovered ?? []
+  if (nodes.length === 0) return null
+
+  type FileInfo = { tx?: { seq: number; size: number }; finalized?: boolean }
+  type Candidate = { url: string; txSeq: number; size: number }
+  const probes = await Promise.allSettled(
+    nodes.map(async (n): Promise<Candidate | null> => {
+      const r = await fetch(n.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'zgs_getFileInfo',
+          params: [rootHash, false],
+          id: 1,
+        }),
+      })
+      const j = (await r.json()) as { result?: FileInfo }
+      const info = j.result
+      if (info?.finalized && info.tx?.seq !== undefined && info.tx.size !== undefined) {
+        return { url: n.url, txSeq: info.tx.seq, size: info.tx.size }
+      }
+      return null
+    }),
+  )
+  const candidates: Candidate[] = probes
+    .map(p => (p.status === 'fulfilled' ? p.value : null))
+    .filter((c): c is Candidate => c !== null)
+  if (candidates.length === 0) return null
+
+  const CHUNK_BYTES = 256
+  for (const cand of candidates) {
+    try {
+      const chunkCount = Math.ceil(cand.size / CHUNK_BYTES)
+      const r = await fetch(cand.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'zgs_downloadSegmentByTxSeq',
+          params: [cand.txSeq, 0, chunkCount],
+          id: 1,
+        }),
+      })
+      const dl = (await r.json()) as { result?: string }
+      if (!dl.result) continue
+      const padded = Buffer.from(dl.result, 'base64')
+      return new Uint8Array(padded.subarray(0, cand.size))
+    } catch {
+      // Try next candidate.
+    }
+  }
+  return null
 }
 
 export interface OGStorageOpts {

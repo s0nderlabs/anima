@@ -54,6 +54,7 @@ Parent domain `anima.0g` is registered on SPACE ID on mainnet; `anima init` issu
 - `anima topup --agent N` — operator sends N 0G to the agent EOA (infra gas)
 - `anima topup --compute N` — agent deposits N 0G into the 0G Compute ledger
 - `anima sync` — force flush memory + activity-log to 0G Storage and anchor on chain
+- `anima inspect` — read what's anchored on chain for an iNFT. Default decrypts every IntelligentData slot via the operator wallet and prints the plaintext. Flags: `--slot <name>` (filter), `--tx <hash>` (decode an `update()` tx + show which slots have been superseded), `--raw` (no decrypt, root hashes + ciphertext sizes only), `--diff` (compare local memory files vs chain plaintext via keccak256), `--json` (structured output), `--full` (skip the 40-line truncation), `--out <dir>` (dump every decrypted slot to disk). Foreign iNFTs auditable via positional ref: `anima inspect 0g-mainnet:0xCONTRACT:tokenId` (raw view only).
 - `anima model` — re-pick brain provider/model
 - `anima migrate-keystore` — one-time v0.5 (passphrase) → v0.6 (operator-wallet) keystore upgrade
 - `anima deploy` — Local→Sandbox migration via Option 3 ECIES handoff (Phase 11 wires the actual sandbox call)

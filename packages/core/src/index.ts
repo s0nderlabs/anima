@@ -95,6 +95,7 @@ export {
   type OGStorageOpts,
   INDEXER_URL,
   downloadBlobByRoot,
+  downloadBlobViaDiscoveredNodes,
   encrypt as encryptBytes,
   decrypt as decryptBytes,
   packEnvelope,
@@ -153,6 +154,17 @@ export {
   type UploadKeystoreResult,
   type FetchKeystoreOpts,
   type FetchKeystoreResult,
+  inspectAgent,
+  inspectSlot,
+  inspectTx,
+  diffAgent,
+  type InspectAgentOpts,
+  type InspectAgentResult,
+  type SlotInspection,
+  type DecryptStatus,
+  type SlotDiff,
+  type DiffAgentOpts,
+  type TxInspection,
 } from './identity'
 
 export {

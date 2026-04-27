@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import { type Address, type Hex, keccak256 } from 'viem'
 import type { AnimaNetwork } from '../config'
 import { AnimaAgentNFTClient, AnimaAgentNFTReader } from '../identity/contract'
@@ -11,6 +10,7 @@ import { agentPaths } from '../paths'
 import { OGStorage } from '../storage/og'
 import { syncActivityLog } from './activity-sync'
 import { deriveMemoryKey, encryptMemoryBytes } from './encryption'
+import { readOrNull } from './fs-util'
 import { type SyncTarget, defaultMemorySyncTargets } from './sync'
 
 /**
@@ -159,15 +159,5 @@ export class MemorySyncManager {
       txHash = await this.nft.updateSlots(this.opts.tokenId, updates)
     }
     return { changedSlots, txHash, uploads }
-  }
-}
-
-async function readOrNull(path: string): Promise<Uint8Array | null> {
-  try {
-    const buf = await readFile(path)
-    return new Uint8Array(buf)
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw e
   }
 }

@@ -1,7 +1,7 @@
-import { readFile } from 'node:fs/promises'
 import { type Hex, keccak256 } from 'viem'
 import type { OGStorage } from '../storage/og'
 import { encryptMemoryBytes } from './encryption'
+import { readOrNull } from './fs-util'
 
 /**
  * Phase 6.7 activity-log sync.
@@ -49,14 +49,4 @@ export async function syncActivityLog(opts: SyncActivityOpts): Promise<SyncActiv
     )
   }
   return { rootHash, plaintextHash, uploaded: true }
-}
-
-async function readOrNull(path: string): Promise<Uint8Array | null> {
-  try {
-    const buf = await readFile(path)
-    return new Uint8Array(buf)
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw e
-  }
 }

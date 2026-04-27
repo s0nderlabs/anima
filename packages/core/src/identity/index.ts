@@ -40,3 +40,16 @@ export {
   type FetchKeystoreOpts,
   type FetchKeystoreResult,
 } from './keystore-blob'
+export {
+  inspectAgent,
+  inspectSlot,
+  inspectTx,
+  diffAgent,
+  type InspectAgentOpts,
+  type InspectAgentResult,
+  type SlotInspection,
+  type DecryptStatus,
+  type SlotDiff,
+  type DiffAgentOpts,
+  type TxInspection,
+} from './inspect'

@@ -46,3 +46,4 @@ export {
   type MemorySyncManagerOpts,
   type FlushResult,
 } from './sync-manager'
+export { readOrNull } from './fs-util'

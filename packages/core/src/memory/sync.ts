@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { type Hex, keccak256 } from 'viem'
 import type { AnimaAgentNFTClient } from '../identity/contract'
@@ -6,6 +5,7 @@ import type { IntelligentDataSlot, UpdateSlot } from '../identity/intelligent-da
 import { agentPaths } from '../paths'
 import type { OGStorage } from '../storage/og'
 import { deriveMemoryKey, encryptMemoryBytes } from './encryption'
+import { readOrNull } from './fs-util'
 
 export interface SyncTarget {
   slot: IntelligentDataSlot
@@ -82,14 +82,4 @@ export async function syncMemory(opts: SyncMemoryOpts): Promise<SyncMemoryResult
   }
   const txHash = await opts.nft.updateSlots(opts.tokenId, updates)
   return { updates, txHash, uploads }
-}
-
-async function readOrNull(path: string): Promise<Uint8Array | null> {
-  try {
-    const buf = await readFile(path)
-    return new Uint8Array(buf)
-  } catch (e) {
-    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null
-    throw e
-  }
 }
