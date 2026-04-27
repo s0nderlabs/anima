@@ -1,6 +1,7 @@
 import { cancel, isCancel, select, spinner } from '@clack/prompts'
 import { type AnimaNetwork, NETWORK_RPC, OGComputeBrain } from '@s0nderlabs/anima-core'
 import { formatEther } from 'viem'
+import { withSilencedConsole } from '../../util/silence-console'
 
 export interface ModelPick {
   provider: string
@@ -34,10 +35,12 @@ export async function pickBrainModel(opts: {
   try {
     // Throwaway key — listService is a read; no funds consumed.
     const throwawayKey = `0x${'1'.repeat(64)}`
-    services = (await OGComputeBrain.listServicesFor({
-      privkeyHex: throwawayKey as `0x${string}`,
-      rpcUrl: NETWORK_RPC[opts.network],
-    })) as unknown as Svc[]
+    services = (await withSilencedConsole(() =>
+      OGComputeBrain.listServicesFor({
+        privkeyHex: throwawayKey as `0x${string}`,
+        rpcUrl: NETWORK_RPC[opts.network],
+      }),
+    )) as unknown as Svc[]
     s.stop(`Fetched ${services.length} providers`)
   } catch (e) {
     s.stop(`Catalog fetch failed: ${(e as Error).message.slice(0, 120)}`)

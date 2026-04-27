@@ -1,5 +1,5 @@
 import { type Address, type Hex, keccak256, parseEventLogs } from 'viem'
-import { MIN_GAS_PRICE } from '../chain'
+import { getGasPriceWithFloor } from '../chain'
 import type { OperatorSigner } from '../operator'
 import { agentPaths } from '../paths'
 import { AGENT_NFT_ABI } from './abi'
@@ -46,15 +46,26 @@ export async function mintAgent(opts: MintAgentOpts): Promise<{
   const publicClient = await opts.operator.publicClient(opts.network)
   const chain = opts.operator.chain(opts.network)
 
+  // One gas-price read covers both writes; mint and approval fire back-to-back
+  // and the network floor cannot move meaningfully between them.
+  const gasPrice = await getGasPriceWithFloor(publicClient)
+  // walletClient already has the operator account set as default (json-rpc for
+  // WalletConnect, LocalAccount for privkey-based sources). Passing it through
+  // explicitly so viem doesn't fall through to its no-account path. Do NOT
+  // call operator.account() and pass that here for WC: it returns a
+  // LocalAccount whose signTransaction routes to eth_signTransaction, which
+  // MM Mobile rejects with -32004.
+  if (!walletClient.account) throw new Error('walletClient is missing default account')
   const mintHash = await walletClient.writeContract({
     address: contractAddress,
     abi: AGENT_NFT_ABI,
     functionName: 'mint',
     args: [operatorAddress, entries],
     chain,
-    account: await opts.operator.account(),
-    maxFeePerGas: MIN_GAS_PRICE,
-    maxPriorityFeePerGas: MIN_GAS_PRICE,
+    account: walletClient.account,
+    gas: 800_000n,
+    maxFeePerGas: gasPrice,
+    maxPriorityFeePerGas: gasPrice,
   })
   const mintReceipt = await waitForReceiptResilient(publicClient, mintHash)
   if (mintReceipt.status !== 'success') throw new Error(`mint reverted in tx ${mintHash}`)
@@ -75,9 +86,10 @@ export async function mintAgent(opts: MintAgentOpts): Promise<{
     functionName: 'setApprovalForAll',
     args: [opts.agentAddress, true],
     chain,
-    account: await opts.operator.account(),
-    maxFeePerGas: MIN_GAS_PRICE,
-    maxPriorityFeePerGas: MIN_GAS_PRICE,
+    account: walletClient.account,
+    gas: 200_000n,
+    maxFeePerGas: gasPrice,
+    maxPriorityFeePerGas: gasPrice,
   })
   await waitForReceiptResilient(publicClient, approvalHash)
 

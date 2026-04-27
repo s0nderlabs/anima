@@ -99,10 +99,25 @@ export async function runRestore(opts: { ref: string; cwd?: string }): Promise<v
     const operator = picked.signer
     const pickedAddr = await operator.address()
     if (pickedAddr.toLowerCase() !== operatorAddressOnChain.toLowerCase()) {
-      note(
-        `Picked operator ${pickedAddr} does not match iNFT owner ${operatorAddressOnChain}. The decrypt will fail; you must connect the same operator that minted this iNFT.`,
-        'operator mismatch',
+      // Hard abort: decrypt is provably impossible from a different wallet,
+      // and keeping the WC session open while we ask the user to retype the
+      // agent address gives the WC event bus time to fire `chainChanged` /
+      // `accountsChanged`, which crashes universal-provider with an uncaught
+      // TypeError when the chain isn't in our config. Cancel + disconnect now.
+      await operator.close?.()
+      cancel(
+        [
+          'Operator wallet mismatch.',
+          `  iNFT owner:  ${operatorAddressOnChain}`,
+          `  you connected: ${pickedAddr}`,
+          '',
+          'You must connect the same wallet that owns this iNFT, then retry.',
+          'If the iNFT-owning key only exists in your local keystore (e.g.',
+          'macOS Keychain), import it into your mobile wallet first, or pick',
+          'a different operator source on the next run.',
+        ].join('\n'),
       )
+      return
     }
 
     const sUnlock = spinner()

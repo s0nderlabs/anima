@@ -11,7 +11,7 @@ import {
   toBytes,
 } from 'viem'
 import type { PrivateKeyAccount } from 'viem/accounts'
-import { MIN_GAS_PRICE, makeViemClients, ogChain } from '../chain'
+import { getGasPriceWithFloor, makeViemClients, ogChain } from '../chain'
 import { type AnimaNetwork, NETWORK_RPC } from '../config'
 import { AGENT_NFT_ABI } from './abi'
 import {
@@ -108,6 +108,13 @@ export class AnimaAgentNFTClient extends AnimaAgentNFTReader {
   }
 
   async mint(params: MintParams): Promise<MintResult> {
+    // Explicit `gas` because some WC wallets (MetaMask Mobile in particular)
+    // ignore viem's `eth_estimateGas` result and substitute their own much
+    // smaller estimate, which OOGs the mint mid-execution. 800k covers a
+    // 6-slot mint with comfortable headroom (actual usage ~300-400k).
+    // `gasPrice` is read live so we follow the network's current floor
+    // instead of relying on a stale hardcode.
+    const gasPrice = await getGasPriceWithFloor(this.publicClient)
     const hash = await this.walletClient.writeContract({
       address: this.contractAddress,
       abi: AGENT_NFT_ABI,
@@ -115,8 +122,9 @@ export class AnimaAgentNFTClient extends AnimaAgentNFTReader {
       args: [params.to, params.iDatas],
       chain: this.chain,
       account: this.account,
-      maxFeePerGas: MIN_GAS_PRICE,
-      maxPriorityFeePerGas: MIN_GAS_PRICE,
+      gas: 800_000n,
+      maxFeePerGas: gasPrice,
+      maxPriorityFeePerGas: gasPrice,
     })
     const receipt = await waitForReceiptResilient(this.publicClient, hash)
     if (receipt.status !== 'success') {
@@ -137,6 +145,11 @@ export class AnimaAgentNFTClient extends AnimaAgentNFTReader {
     if (updates.length === 0) throw new Error('updateSlots: empty updates')
     const slots = updates.map(u => BigInt(slotIndex(u.slot)))
     const hashes = updates.map(u => u.dataHash)
+    // Per-slot anchor costs ~30-50k gas. Cap at 600k for up to 6 slots with
+    // headroom; matches the explicit-gas pattern from `mint` so WC wallets
+    // that auto-substitute gas don't OOG.
+    const gas = BigInt(updates.length) * 100_000n + 200_000n
+    const gasPrice = await getGasPriceWithFloor(this.publicClient)
     const hash = await this.walletClient.writeContract({
       address: this.contractAddress,
       abi: AGENT_NFT_ABI,
@@ -144,8 +157,9 @@ export class AnimaAgentNFTClient extends AnimaAgentNFTReader {
       args: [tokenId, slots, hashes],
       chain: this.chain,
       account: this.account,
-      maxFeePerGas: MIN_GAS_PRICE,
-      maxPriorityFeePerGas: MIN_GAS_PRICE,
+      gas,
+      maxFeePerGas: gasPrice,
+      maxPriorityFeePerGas: gasPrice,
     })
     const receipt = await waitForReceiptResilient(this.publicClient, hash)
     if (receipt.status !== 'success') {

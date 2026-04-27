@@ -8,7 +8,7 @@ import {
   createPublicClient,
 } from 'viem'
 import type { PrivateKeyAccount } from 'viem/accounts'
-import { MIN_GAS_PRICE, makeViemClients, ogChain } from '../chain'
+import { getGasPriceWithFloor, makeViemClients, ogChain } from '../chain'
 import { NETWORK_RPC } from '../config'
 import { waitForReceiptResilient } from '../identity/receipt'
 import { readRegistryOwner, subnameNode } from './sann'
@@ -84,6 +84,7 @@ export class AnimaRegistrarClient {
    * Returns the transaction hash. The caller pays gas; ownership goes to `owner`.
    */
   async claim(label: string, owner: Address): Promise<Hex> {
+    const gasPrice = await getGasPriceWithFloor(this.publicClient)
     return await this.walletClient.writeContract({
       address: this.registrar,
       abi: REGISTRAR_ABI,
@@ -91,8 +92,9 @@ export class AnimaRegistrarClient {
       args: [label, owner],
       chain: this.chain,
       account: this.account,
-      maxFeePerGas: MIN_GAS_PRICE,
-      maxPriorityFeePerGas: MIN_GAS_PRICE,
+      gas: 250_000n,
+      maxFeePerGas: gasPrice,
+      maxPriorityFeePerGas: gasPrice,
     })
   }
 

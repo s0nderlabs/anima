@@ -15,7 +15,6 @@ import {
 import {
   type AnimaNetwork,
   AnimaRegistrarClient,
-  MIN_GAS_PRICE,
   NETWORK_CHAIN_ID,
   NETWORK_RPC,
   SannClient,
@@ -24,6 +23,7 @@ import {
   explorerTokenUrl,
   explorerTxUrl,
   generateAgentWallet,
+  getGasPriceWithFloor,
   iNFTAgentId,
   isLabelTaken,
   mainnetReadOnlyClient,
@@ -38,6 +38,7 @@ import {
 } from '@s0nderlabs/anima-core'
 import { type Address, type Hex, formatEther, parseEther } from 'viem'
 import { writeConfigTs } from '../config/render'
+import { withSilencedConsole } from '../util/silence-console'
 import { estimateCosts, renderCostSummary } from './init/cost'
 import { fundingGate } from './init/funding-gate'
 import { pickBrainModel } from './init/model-picker'
@@ -244,11 +245,13 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   const sMint = spinner()
   sMint.start(`Minting iNFT on ${network} (keystore slot left as bootstrap until upload)`)
   try {
-    const { result, contractAddress: c } = await mintAgent({
-      network,
-      operator,
-      agentAddress: agent.address as Address,
-    })
+    const { result, contractAddress: c } = await withSilencedConsole(() =>
+      mintAgent({
+        network,
+        operator,
+        agentAddress: agent.address as Address,
+      }),
+    )
     mintedTokenId = result.tokenId
     contractAddress = c
     await updateWizardState(provisional.dir, draft => {
@@ -312,14 +315,19 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   sFund.start(`Funding agent ${agent.address} with ${formatEther(fundingAmount)} 0G`)
   try {
     const opWc = await operator.walletClient(network)
-    const fundTx = await opWc.sendTransaction({
-      to: agent.address as Address,
-      value: fundingAmount,
-      chain: operator.chain(network),
-      account: await operator.account(),
-      maxFeePerGas: MIN_GAS_PRICE,
-      maxPriorityFeePerGas: MIN_GAS_PRICE,
-    })
+    const opAccount = opWc.account
+    if (!opAccount) throw new Error('walletClient is missing default account')
+    const fundGasPrice = await getGasPriceWithFloor(publicClient)
+    const fundTx = await withSilencedConsole(() =>
+      opWc.sendTransaction({
+        to: agent.address as Address,
+        value: fundingAmount,
+        chain: operator.chain(network),
+        account: opAccount,
+        maxFeePerGas: fundGasPrice,
+        maxPriorityFeePerGas: fundGasPrice,
+      }),
+    )
     await waitForReceiptResilient(publicClient, fundTx)
     await updateWizardState(paths.dir, draft => {
       draft.steps.agentFundedTx = fundTx
@@ -335,13 +343,15 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   sPersist.start('Uploading keystore to 0G Storage + anchoring root hash on chain')
   let keystorePersisted = false
   try {
-    const { rootHash, updateTx } = await uploadAndAnchorKeystore({
-      network,
-      agentPrivkey: agent.privkeyHex as Hex,
-      tokenId: mintedTokenId!,
-      contractAddress: contractAddress!,
-      bytes: encryptedBytes,
-    })
+    const { rootHash, updateTx } = await withSilencedConsole(() =>
+      uploadAndAnchorKeystore({
+        network,
+        agentPrivkey: agent.privkeyHex as Hex,
+        tokenId: mintedTokenId!,
+        contractAddress: contractAddress!,
+        bytes: encryptedBytes,
+      }),
+    )
     await updateWizardState(paths.dir, draft => {
       draft.steps.keystorePersistedTx = updateTx
       draft.steps.keystoreRootHash = rootHash
@@ -393,12 +403,14 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     const sLedger = spinner()
     sLedger.start(`Opening 0G Compute ledger with ${ledgerSize} 0G`)
     try {
-      const status = await openComputeLedger({
-        network,
-        privkeyHex: agent.privkeyHex as Hex,
-        initialBalance: ledgerSize,
-        providerAddress: modelPick?.provider,
-      })
+      const status = await withSilencedConsole(() =>
+        openComputeLedger({
+          network,
+          privkeyHex: agent.privkeyHex as Hex,
+          initialBalance: ledgerSize,
+          providerAddress: modelPick?.provider,
+        }),
+      )
       await updateWizardState(paths.dir, draft => {
         draft.steps.ledgerOpenedTx = true
       })
@@ -417,11 +429,10 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     const sSub = spinner()
     sSub.start(`Registering ${requestedSubname}.anima.0g on mainnet`)
     try {
-      const registrar = new AnimaRegistrarClient({ privkeyHex: agent.privkeyHex as Hex })
-      const sann = new SannClient({ privkeyHex: agent.privkeyHex as Hex })
-      if (await registrar.isLabelTaken(requestedSubname)) {
-        sSub.stop(`skipping: ${requestedSubname}.anima.0g was claimed mid-flow`)
-      } else {
+      registeredSubname = await withSilencedConsole(async () => {
+        const registrar = new AnimaRegistrarClient({ privkeyHex: agent.privkeyHex as Hex })
+        const sann = new SannClient({ privkeyHex: agent.privkeyHex as Hex })
+        if (await registrar.isLabelTaken(requestedSubname)) return null
         const claimTx = await registrar.claim(requestedSubname, agent.address as Address)
         await registrar.waitForReceipt(claimTx)
         await updateWizardState(paths.dir, draft => {
@@ -439,10 +450,13 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
         await updateWizardState(paths.dir, draft => {
           draft.steps.textRecordsSetTx = inftTx
         })
-        registeredSubname = requestedSubname
         sSub.stop(
           `${requestedSubname}.anima.0g registered → ${explorerTxUrl('0g-mainnet', claimTx)}`,
         )
+        return requestedSubname
+      })
+      if (registeredSubname === null) {
+        sSub.stop(`skipping: ${requestedSubname}.anima.0g was claimed mid-flow`)
       }
     } catch (e) {
       sSub.stop(`subname registration failed: ${(e as Error).message.slice(0, 120)}`)

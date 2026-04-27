@@ -1,6 +1,6 @@
 {
   "name": "anima",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "private": true,
   "type": "module",
   "description": "First fully on-chain sovereign agent runtime on 0G",

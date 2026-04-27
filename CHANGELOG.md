@@ -4,6 +4,25 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-04-27
+
+### Fixed
+
+- **WalletConnect operator can now mint, transfer, and fund.** `walletClient(network)` now creates the viem wallet client with `account: { address, type: 'json-rpc' }` instead of the prior `LocalAccount` returned from `toAccount({ ... })`. With a local account viem's `sendTransaction` first calls `account.signTransaction(tx)`, which under WC routes to `eth_signTransaction` over the relay. MetaMask Mobile does NOT support `eth_signTransaction` (only `eth_sendTransaction` / `eth_sendRawTransaction` per their JSON-RPC docs) and rejects with `-32004 Method not supported` before any popup ever shows. With a json-rpc account viem hits `eth_sendTransaction` directly: one MM popup, MM signs and broadcasts itself. Verified live on mainnet: WC operator successfully minted iNFT #5, executed `setApprovalForAll`, and funded the agent EOA in three sequential popups.
+- **No more "stacked spinner" visual during init / sync / topup.** 0G Storage SDK and 0G Compute broker SDK both `console.log` directly during their work (selected nodes, tx hashes, "Detected mainnet", upload progress). When clack's spinner is running, every leaked log line pushes the spinner down and the next animation frame draws a new spinner row; on the WC mint test this rendered as ~100 stacked `◒/◐/◓/◑` rows. New `withSilencedConsole(fn)` helper in `packages/cli/src/util/silence-console.ts` mutes `console.log/info/warn/error/debug` for the scope of `fn` and restores afterward (even on throw). Wrapped at every noisy SDK call site: `mintAgent`, fund `sendTransaction`, `uploadAndAnchorKeystore`, `openComputeLedger`, subname registration, `OGComputeBrain.listServicesFor`, `fetchAndDecryptKeystore`, `MemorySyncManager.flushAll`, `getLedgerBalance`, `depositToLedger`. 4 unit tests cover mute/restore-on-success/restore-on-throw/return-value semantics.
+- **Process exits cleanly after `anima init` / `topup` / `sync` / `inspect` / `status` / `model`.** Previously the WC relay websocket + 0G broker handles + 0G Storage indexer connections kept the event loop alive indefinitely, forcing the user to ctrl-C their shell after the wizard printed `Next: ...`. `packages/cli/src/index.ts` now `process.exit(0)` once `main()` resolves. `chat` uses its own internal exit path, so this also lands cleanly there.
+- **Funding `sendTransaction` calls now use `getGasPriceWithFloor` instead of static `MIN_GAS_PRICE`.** `init.ts` operator-to-agent fund and `topup.ts --agent` were the two remaining sites still pinned to the 4 gwei fallback constant. They now read `eth_gasPrice` and clamp to floor, matching the pattern already used by `mint`, `setApprovalForAll`, `updateSlots`, and `claim`. Prevents min-fee rejections if the network floor moves above 4 gwei.
+- **`mint.ts` reads `eth_gasPrice` once** (was twice: once for mint, once for setApprovalForAll, back-to-back). Single read covers both writes since the network floor cannot move meaningfully between them.
+- **`anima restore` hard-aborts on operator/owner mismatch.** Previously printed a `note` and continued past the error, which kept the WC session alive long enough for tail relay events (`chainChanged` / `accountsChanged` for chains we never configured) to crash universal-provider with an uncaught `TypeError`. Now `cancel + operator.close + return` fires the moment the picked operator's address fails to match the iNFT owner.
+
+### Added
+
+- **WC regression test** at `packages/core/src/operator/walletconnect.test.ts` injects a mock provider, drives `walletClient.sendTransaction`, and asserts viem hits `eth_sendTransaction` (the mock throws if `eth_signTransaction` is invoked). Pins the json-rpc-account contract so anyone reverting the fix sees the test fail instead of paying real gas to discover the regression at mint time.
+
+### Changed
+
+- `getGasPriceWithFloor(client)` exported from `@s0nderlabs/anima-core` so call sites outside `core/identity` can read live gas with the same min-fee semantics.
+
 ## [0.8.0] - 2026-04-27
 
 ### Added
@@ -277,6 +296,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.8.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.8.1
+[0.8.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.8.0
 [0.7.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.7.1
 [0.7.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.7.0
 [0.6.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.6.1

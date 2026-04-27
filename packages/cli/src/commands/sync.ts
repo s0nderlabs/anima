@@ -8,6 +8,7 @@ import {
 } from '@s0nderlabs/anima-core'
 import type { Address, Hex } from 'viem'
 import { findAndLoadConfig } from '../config/load'
+import { withSilencedConsole } from '../util/silence-console'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 
 /**
@@ -47,14 +48,16 @@ export async function runSync(): Promise<void> {
   sUnlock.start('Fetching keystore + decrypting via operator')
   let agentPrivkey: Hex
   try {
-    const decrypted = await fetchAndDecryptKeystore({
-      network,
-      contractAddress,
-      tokenId,
-      signer: operator,
-      agentAddress,
-      cachePath: paths.keystore,
-    })
+    const decrypted = await withSilencedConsole(() =>
+      fetchAndDecryptKeystore({
+        network,
+        contractAddress,
+        tokenId,
+        signer: operator,
+        agentAddress,
+        cachePath: paths.keystore,
+      }),
+    )
     agentPrivkey = decrypted.privkeyHex
     sUnlock.stop(`unlocked (source: ${decrypted.source})`)
   } catch (e) {
@@ -67,16 +70,18 @@ export async function runSync(): Promise<void> {
   const sFlush = spinner()
   sFlush.start('Diffing memory + activity, uploading changed blobs, anchoring on chain')
   try {
-    const sync = new MemorySyncManager({
-      network,
-      agentId: finalAgentId,
-      agentPrivkey,
-      agentAddress,
-      contractAddress,
-      tokenId,
+    const res = await withSilencedConsole(async () => {
+      const sync = new MemorySyncManager({
+        network,
+        agentId: finalAgentId,
+        agentPrivkey,
+        agentAddress,
+        contractAddress,
+        tokenId,
+      })
+      await sync.init()
+      return await sync.flushAll()
     })
-    await sync.init()
-    const res = await sync.flushAll()
     if (res.txHash) {
       sFlush.stop(`anchored ${res.changedSlots.length} slot(s)`)
       outro(

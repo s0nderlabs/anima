@@ -179,7 +179,17 @@ function printHelp(): void {
   )
 }
 
-main().catch(e => {
-  console.error('fatal:', (e as Error).message)
-  process.exit(1)
-})
+main()
+  .then(() => {
+    // Force-exit on success because some 0G SDKs (Storage Indexer, Compute
+    // broker, WalletConnect relay) leak open handles (websockets, heartbeat
+    // timers) that we don't have hooks to drain. Without this, one-shot
+    // commands like `anima init` would hang at the prompt indefinitely after
+    // their work completed. `chat` returns only when the user actually quits,
+    // so this also gives chat a clean exit. Exit code 0 = normal success.
+    process.exit(0)
+  })
+  .catch(e => {
+    console.error('fatal:', (e as Error).message)
+    process.exit(1)
+  })

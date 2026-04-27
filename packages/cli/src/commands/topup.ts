@@ -1,16 +1,17 @@
 import { cancel, intro, isCancel, outro, password, select, spinner } from '@clack/prompts'
 import {
-  MIN_GAS_PRICE,
   agentPaths,
   depositToLedger,
   explorerTxUrl,
   fetchAndDecryptKeystore,
+  getGasPriceWithFloor,
   getLedgerBalance,
   iNFTAgentId,
   waitForReceiptResilient,
 } from '@s0nderlabs/anima-core'
 import { type Address, formatEther, parseEther } from 'viem'
 import { findAndLoadConfig } from '../config/load'
+import { withSilencedConsole } from '../util/silence-console'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 
 export interface TopupOpts {
@@ -97,15 +98,20 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
     s.start(`Sending ${amount} 0G from operator to agent ${agentAddress}`)
     try {
       const opWc = await operator.walletClient(network)
-      const tx = await opWc.sendTransaction({
-        to: agentAddress,
-        value: parseEther(String(amount)),
-        chain: operator.chain(network),
-        account: await operator.account(),
-        maxFeePerGas: MIN_GAS_PRICE,
-        maxPriorityFeePerGas: MIN_GAS_PRICE,
-      })
+      const opAccount = opWc.account
+      if (!opAccount) throw new Error('walletClient is missing default account')
       const pub = await operator.publicClient(network)
+      const fundGasPrice = await getGasPriceWithFloor(pub)
+      const tx = await withSilencedConsole(() =>
+        opWc.sendTransaction({
+          to: agentAddress,
+          value: parseEther(String(amount)),
+          chain: operator.chain(network),
+          account: opAccount,
+          maxFeePerGas: fundGasPrice,
+          maxPriorityFeePerGas: fundGasPrice,
+        }),
+      )
       await waitForReceiptResilient(pub, tx)
       s.stop(`funded → ${explorerTxUrl(network, tx)}`)
       outro(`agent ${agentAddress} balance refreshed`)
@@ -122,18 +128,23 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
   const operator = await loadOrPickOperatorSigner({ network, hint: config.operator })
   if (!operator) return
 
+  const inftContract = config.identity.iNFT.contract as Address
+  const inftTokenId = BigInt(config.identity.iNFT.tokenId)
+
   const sUnlock = spinner()
   sUnlock.start('Fetching encrypted keystore + decrypting via operator wallet')
   let agentPrivkey: `0x${string}`
   try {
-    const decrypted = await fetchAndDecryptKeystore({
-      network,
-      contractAddress: config.identity.iNFT.contract as Address,
-      tokenId: BigInt(config.identity.iNFT.tokenId),
-      signer: operator,
-      agentAddress,
-      cachePath: paths.keystore,
-    })
+    const decrypted = await withSilencedConsole(() =>
+      fetchAndDecryptKeystore({
+        network,
+        contractAddress: inftContract,
+        tokenId: inftTokenId,
+        signer: operator,
+        agentAddress,
+        cachePath: paths.keystore,
+      }),
+    )
     agentPrivkey = decrypted.privkeyHex
     sUnlock.stop(`unlocked (keystore source: ${decrypted.source})`)
   } catch (e) {
@@ -145,7 +156,9 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
   const sBal = spinner()
   sBal.start('Reading current ledger balance')
   try {
-    const bal = await getLedgerBalance({ network, privkeyHex: agentPrivkey })
+    const bal = await withSilencedConsole(() =>
+      getLedgerBalance({ network, privkeyHex: agentPrivkey }),
+    )
     sBal.stop(
       bal
         ? `current ledger ${formatEther(bal.totalBalance)} 0G total / ${formatEther(bal.availableBalance)} 0G available`
@@ -158,7 +171,7 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
   const sDep = spinner()
   sDep.start(`Depositing ${amount} 0G into compute ledger`)
   try {
-    await depositToLedger({ network, privkeyHex: agentPrivkey, amount })
+    await withSilencedConsole(() => depositToLedger({ network, privkeyHex: agentPrivkey, amount }))
     sDep.stop('deposit complete')
     outro(`ledger topped up by ${amount} 0G`)
   } catch (e) {

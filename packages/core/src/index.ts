@@ -197,6 +197,7 @@ export { waitForReceiptResilient } from './identity/receipt'
 export {
   MIN_GAS_PRICE,
   STORAGE_SUBMIT_GAS,
+  getGasPriceWithFloor,
   makeViemClients,
   ogChain,
   type ViemClients,
