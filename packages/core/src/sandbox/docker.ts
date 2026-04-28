@@ -24,7 +24,9 @@
  *
  * Lifecycle:
  *  - `wrapSpawn` lazy-starts the container on first call.
- *  - Container runs `oven/bun:1` by default (small, has bun + node + apt).
+ *  - Container runs `nikolaik/python-nodejs:python3.11-nodejs20` by default
+ *    (matches hermes' default; has bash, python3, node, npm, git, curl on
+ *    standard PATH).
  *  - Container is detached (`run -d`), idle-loops on `tail -f /dev/null` so it
  *    stays alive between exec calls.
  *  - `dispose()` kills the container. chat.tsx wires this to process exit
@@ -42,6 +44,7 @@
 
 import { type SpawnOptions, execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
 import type { SandboxBackend, SandboxBackendOpts, SandboxSpawnRequest, WrappedSpawn } from './types'
 
@@ -83,7 +86,13 @@ function detectRuntime(override?: string): RuntimeInfo {
 }
 
 export interface DockerBackendOpts extends SandboxBackendOpts {
-  /** Container image. Default: `oven/bun:1` (small, has bun preinstalled). */
+  /**
+   * Container image. Default: `nikolaik/python-nodejs:python3.11-nodejs20`
+   * (matches hermes-agent's TERMINAL_DOCKER_IMAGE default; has bash, python3,
+   * node, npm, git, curl on standard PATH so every code.execute language and
+   * shell tool works out of the box). Switch to `oven/bun:1` (~250MB vs 700MB)
+   * if you only need bun/ts and don't care about python.
+   */
   image?: string
   /**
    * Mount the host's workspaceRoot into the container at /workspace. Default
@@ -112,7 +121,7 @@ export class DockerBackend implements SandboxBackend {
   private starting: Promise<string> | null = null
 
   constructor(opts: DockerBackendOpts) {
-    this.image = opts.image ?? 'oven/bun:1'
+    this.image = opts.image ?? 'nikolaik/python-nodejs:python3.11-nodejs20'
     this.mountWorkspace = opts.mountWorkspace ?? false
     this.runtime = detectRuntime(opts.runtimePath)
     this.startTimeoutMs = opts.startTimeoutMs ?? 60_000
@@ -173,6 +182,13 @@ export class DockerBackend implements SandboxBackend {
       runArgs.push('-v', `${this.workspaceRoot}:/workspace`)
       runArgs.push('-w', '/workspace')
     }
+    // Mount the host's tmpdir READ-ONLY at the same path inside the container
+    // so code.execute's host-written snippet (mkdtemp + writeFile happen on
+    // host, then `python3 <hostpath>` runs in container) is actually readable.
+    // RO so the container can't write back — the container's own /tmp stays
+    // isolated and `rm /var/folders/...` from inside fails with EROFS.
+    const hostTmp = tmpdir()
+    runArgs.push('-v', `${hostTmp}:${hostTmp}:ro`)
     runArgs.push(this.image, 'tail', '-f', '/dev/null')
 
     const { stdout } = await exec(this.runtime.path, runArgs, {

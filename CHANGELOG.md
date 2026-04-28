@@ -4,6 +4,21 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-04-28
+
+### Added
+
+- **Annotated sandbox config template at install time.** `~/.anima/config.ts` now ships with the active default (`mode: 'none'`) plus commented-out OPTION 2 (os) and OPTION 3 (docker) blocks pre-populated with security tradeoffs explained inline. Mirrors hermes-agent's `cli-config.yaml.example` pattern: documentation IS the UX, not an interactive wizard. Operator opts in by uncommenting + editing.
+- **`ANIMA_SANDBOX_MODE` env var override.** Per-launch switch without editing the config file: `ANIMA_SANDBOX_MODE=docker anima --yolo`. Mirrors hermes' `TERMINAL_ENV` pattern. Valid values: `none`, `os`, `docker`. Wins over `sandbox.mode` in config.
+
+### Fixed
+
+- **DockerBackend: `code.execute` was broken in docker mode.** `code.execute` writes its snippet to a host tmpdir (via `mkdtemp(os.tmpdir() + '/anima-code-...')`) then spawns the interpreter against that path — but the container couldn't see `/var/folders/...` (macOS tmpdir) so every `code.execute` failed with "No such file or directory". DockerBackend now mounts the host's tmpdir READ-ONLY at the same path inside the container, so the snippet is readable. RO so `rm` from inside the container still fails with EROFS and host tmp stays write-isolated. Verified live: `code.execute` python returned `[0, 1, 1, 2, 3, 5, 8, 13]` from inside the container, host canary files still survived a destructive prompt under YOLO.
+
+### Changed
+
+- **Default container image switched to `nikolaik/python-nodejs:python3.11-nodejs20`.** Matches hermes-agent's `TERMINAL_DOCKER_IMAGE` default. Has bash + python3 + node + npm + git on standard PATH so every `code.execute` language and shell tool works out of the box. The previous `oven/bun:1` default (~250 MB) had python3 missing and node off-PATH; nikolaik (~700 MB) is bigger but works. Operators who only need bun/ts can override via `sandbox.dockerImage: 'oven/bun:1'`.
+
 ## [0.10.0] - 2026-04-28
 
 ### Added
@@ -404,6 +419,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.10.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.1
 [0.10.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.0
 [0.9.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.9.2
 [0.9.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.9.1

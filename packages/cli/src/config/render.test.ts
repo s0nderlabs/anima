@@ -1,0 +1,72 @@
+import { describe, expect, test } from 'bun:test'
+import type { AnimaConfig } from '@s0nderlabs/anima-core'
+import { renderConfigTs } from './render'
+
+const baseConfig: AnimaConfig = {
+  identity: { iNFT: null, operator: null, agent: null },
+  network: '0g-mainnet',
+  storage: { network: '0g-mainnet' },
+  brain: { provider: null, model: null },
+  plugins: ['system'],
+  tools: {},
+  imports: { claudeCode: true },
+}
+
+describe('renderConfigTs sandbox block', () => {
+  test('fresh config (no sandbox set) emits default + commented examples for each tier', () => {
+    const out = renderConfigTs(baseConfig)
+    // Active default
+    expect(out).toContain(`sandbox: { mode: 'none' }`)
+    // Commented OPTION 2 (os)
+    expect(out).toContain('OPTION 2: os')
+    expect(out).toContain(`//  sandbox: { mode: 'os' }`)
+    // Commented OPTION 3 (docker)
+    expect(out).toContain('OPTION 3: docker')
+    expect(out).toContain(`//    mode: 'docker'`)
+    expect(out).toContain(`//    dockerImage: 'nikolaik/python-nodejs:python3.11-nodejs20'`)
+    expect(out).toContain('//    dockerMountWorkspace: false')
+    // ANIMA_SANDBOX_MODE override hint
+    expect(out).toContain('ANIMA_SANDBOX_MODE')
+  })
+
+  test('config with sandbox.mode="os" already set emits the chosen value, not the template', () => {
+    const out = renderConfigTs({ ...baseConfig, sandbox: { mode: 'os' } })
+    expect(out).toContain(`"mode": "os"`)
+    // No verbose template when operator already chose
+    expect(out).not.toContain('OPTION 2: os')
+    expect(out).not.toContain('OPTION 3: docker')
+  })
+
+  test('config with sandbox.mode="docker" + image emits the full chosen object', () => {
+    const out = renderConfigTs({
+      ...baseConfig,
+      sandbox: {
+        mode: 'docker',
+        dockerImage: 'custom/img:tag',
+        dockerMountWorkspace: true,
+      },
+    })
+    expect(out).toContain(`"mode": "docker"`)
+    expect(out).toContain(`"dockerImage": "custom/img:tag"`)
+    expect(out).toContain(`"dockerMountWorkspace": true`)
+    expect(out).not.toContain('OPTION')
+  })
+
+  test('output is valid TypeScript (parses as a default-export module)', async () => {
+    const out = renderConfigTs(baseConfig)
+    const { writeFile, rm, mkdtemp } = await import('node:fs/promises')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dir = await mkdtemp(join(tmpdir(), 'anima-render-test-'))
+    const path = join(dir, 'config.ts')
+    try {
+      await writeFile(path, out, 'utf8')
+      const mod = await import(path)
+      expect(mod.default).toBeDefined()
+      expect(mod.default.sandbox).toEqual({ mode: 'none' })
+      expect(mod.default.network).toBe('0g-mainnet')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+})

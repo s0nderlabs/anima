@@ -163,8 +163,14 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
 
   // Phase 9.5: build sandbox backend BEFORE plugins load. Tools that spawn
   // subprocesses (shell.run, code.execute, shell.process_start) wrap their
-  // spawn argv through this backend.
-  const sandboxMode: 'none' | 'os' | 'docker' = config.sandbox?.mode ?? 'none'
+  // spawn argv through this backend. ANIMA_SANDBOX_MODE env var wins over
+  // config (matches hermes' TERMINAL_ENV pattern — per-launch override
+  // without editing config).
+  const envOverride = process.env.ANIMA_SANDBOX_MODE
+  const sandboxMode: 'none' | 'os' | 'docker' =
+    envOverride === 'none' || envOverride === 'os' || envOverride === 'docker'
+      ? envOverride
+      : (config.sandbox?.mode ?? 'none')
   let sandbox: SandboxBackend
   try {
     sandbox = makeSandboxBackend({
