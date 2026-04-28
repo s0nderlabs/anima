@@ -5,6 +5,7 @@ import type { ChatState, TurnRow } from './state'
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const
 const SPINNER_FRAME_MS = 80
+const SCROLL_STEP = 8
 
 // opentui's <span> accepts `fg` at runtime but the SpanProps type omits it,
 // and every workaround we tried fails:
@@ -152,6 +153,9 @@ function ChatRowDispatch(props: { row: TurnRow }) {
 export function ChatApp(props: AppProps) {
   const dims = useTerminalDimensions()
   const [spinnerFrame, setSpinnerFrame] = createSignal(0)
+  // Loose type: @opentui/core's ScrollBox class isn't re-exported via the
+  // jsx namespace, but the runtime instance has scrollBy + scrollTop.
+  let scrollboxRef: { scrollBy: (delta: number) => void; scrollTop: number } | null = null
   // Only tick while we're actually waiting on the brain. Otherwise the signal
   // would notify subscribers 12.5x/sec for nothing — wasteful in the renderer.
   createEffect(() => {
@@ -196,6 +200,12 @@ export function ChatApp(props: AppProps) {
       }
       return
     }
+    // stickyScroll auto-snaps to bottom on new rows; opt+u/d lets the
+    // operator scroll back through past responses mid-conversation.
+    if (evt.option && (evt.name === 'u' || evt.name === 'd')) {
+      scrollboxRef?.scrollBy(evt.name === 'u' ? -SCROLL_STEP : SCROLL_STEP)
+      return
+    }
     // Esc mid-turn aborts the current brain.infer. Caller's handleSubmit
     // catches AbortError and emits a clean "turn interrupted" sys row.
     if (evt.name === 'escape') {
@@ -228,7 +238,7 @@ export function ChatApp(props: AppProps) {
       props.state.setInput(prev => prev.slice(0, -1))
       return
     }
-    if (evt.sequence && !evt.ctrl && !evt.meta && evt.sequence.length === 1) {
+    if (evt.sequence && !evt.ctrl && !evt.meta && !evt.option && evt.sequence.length === 1) {
       const ch = evt.sequence
       props.state.setInput(prev => prev + ch)
     }
@@ -238,6 +248,9 @@ export function ChatApp(props: AppProps) {
     <box flexDirection="column" width={dims().width} height={dims().height}>
       {/* Chat history — scrollable so it never crowds the input area. */}
       <scrollbox
+        ref={(el: typeof scrollboxRef) => {
+          scrollboxRef = el
+        }}
         flexGrow={1}
         flexShrink={1}
         stickyScroll
@@ -350,7 +363,9 @@ export function ChatApp(props: AppProps) {
           {''}
         </text>
         <text fg="#4b5563" flexShrink={0}>
-          {props.state.status() === 'thinking' ? 'esc interrupt · ctrl+c exit' : 'ctrl+c exit'}
+          {props.state.status() === 'thinking'
+            ? 'esc interrupt · opt+u/d scroll · ctrl+c exit'
+            : 'opt+u/d scroll · ctrl+c exit'}
         </text>
       </box>
     </box>

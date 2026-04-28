@@ -4,6 +4,24 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-04-28
+
+### Added
+
+- **Opt+U / Opt+D scrollback in the chat TUI.** The chat history's `<scrollbox>` is sticky-scroll-anchored to the bottom by default, which made it impossible to review past responses without leaving the input bar. Opt+U scrolls up 8 lines, Opt+D scrolls down 8 lines, and stickyScroll still snaps back to bottom when a new row arrives. Status footer now reads `opt+u/d scroll · ctrl+c exit` (or `esc interrupt · opt+u/d scroll · ctrl+c exit` while thinking). Wired through a ref to the underlying `ScrollBox.scrollBy`.
+- **Esc-to-abort mid-turn.** Pressing Esc while the brain is mid-loop aborts the in-flight `brain.infer` via an `AbortController` plumbed through `fetch`. A `sys` row reports `turn interrupted (esc). brain stopped at the last completed step.` and the chat returns to idle. The next user prompt restarts on a fresh AbortController.
+- **Concurrent-submit gate.** Pressing Enter on a non-empty input while the brain is already thinking now emits `turn in progress. press esc to interrupt before sending the next message.` instead of firing a second `brain.infer` (concurrent calls clobbered history before).
+
+### Fixed
+
+- **Chat TUI fails to boot when bun's cwd is outside the repo.** `bunfig.toml`'s `preload = ["@opentui/solid/preload"]` only fires when bun's cwd-walk discovers the file; running `cd ~ && bun /path/to/anima/packages/cli/bin/anima` (or invoking via an installed npm bin) skipped the preload entirely. Without the solid JSX transform plugin registered, JSX in `<ChatApp />` compiled to `React.createElement` (`Symbol(react.transitional.element)`) and opentui rejected it with a silent `maybeMakeRenderable received an invalid node` warning, leaving the alt-screen blank. Fix: `bin/anima` now imports `@opentui/solid/preload` directly. The plugin is idempotent, so bunfig.toml-discovered preloads remain a no-op when both fire.
+- **CI typecheck failure when a unit test imports a `.tsx` module.** `markdown.test.ts` was importing the segment renderer from `markdown.tsx`, which dragged the JSX runtime into a unit test context. Bun's CI defaults to `react-jsx` and fails to resolve `react/jsx-dev-runtime` for the parser-only tests. Split into `markdown-parse.ts` (pure logic, no JSX) + `markdown.tsx` (the SolidJS component); the test now imports only from the `.ts` module.
+- **Brain shadowed native `browser.*` tools with the `claude-code:agent-browser` skill.** Before any `tool.search` call, the brain saw `claude-code:agent-browser`'s rich SKILL.md description in the skill index and reached for that skill on web prompts. It then shelled out to qutebrowser-specific commands which always failed in anima's headless-Chromium harness. Frozen-prefix builder now filters `claude-code:agent-browser` (and its variants) out of the skill index, so the brain falls through to the native `browser.*` tools.
+
+### Changed
+
+- **Biome formatter pass on v0.9.1 changes.** `biome check --write .` ran clean on the post-v0.9.1 codebase. No behavior changes, only whitespace + import ordering.
+
 ## [0.9.1] - 2026-04-28
 
 ### Added
@@ -365,6 +383,8 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.9.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.9.2
+[0.9.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.9.1
 [0.9.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.9.0
 [0.8.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.8.1
 [0.8.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.8.0
