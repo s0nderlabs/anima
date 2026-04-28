@@ -4,6 +4,16 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.3] - 2026-04-28
+
+### Fixed
+
+- **Chat input bar clipped wrapped text.** The input box had `height={3}` (one content line between borders), so any prompt long enough to wrap silently lost the overflow rows. Switched to `minHeight={3}` + `maxHeight={12}` so the box grows with wrapped content (up to ~10 visible lines) and never starves the chat history on a paste of huge content.
+
+### Changed
+
+- **Scroll keybind now accepts Ctrl+U / Ctrl+D in addition to Opt+U / Opt+D.** Vim-style half-page scroll works in every terminal regardless of meta-key config; the existing Opt+U/D path stays for users whose terminal sends Opt as Alt (Ghostty needs `macos-option-as-alt = true`, iTerm2 "Option as Esc+", Terminal.app "Use Option as Meta key").
+
 ## [0.10.2] - 2026-04-28
 
 ### Fixed
@@ -439,6 +449,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.10.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.3
 [0.10.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.2
 [0.10.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.1
 [0.10.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.0

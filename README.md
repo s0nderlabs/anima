@@ -46,7 +46,7 @@ Parent domain `anima.0g` is registered on SPACE ID on mainnet; `anima init` issu
 ## Commands
 
 - `anima init` — first-time onboarding wizard (see below)
-- `anima` (or `anima chat`) — interactive chat with your agent. Per-turn auto-sync to 0G + chain anchor. Slash commands: `/sync`, `/yolo`, `/help`. Keybinds: `Esc` aborts the current turn mid-flight, `Opt+U` / `Opt+D` scroll the history without leaving the input bar.
+- `anima` (or `anima chat`) — interactive chat with your agent. Per-turn auto-sync to 0G + chain anchor. Slash commands: `/sync`, `/yolo`, `/help`. Keybinds: `Esc` aborts the current turn mid-flight, `Ctrl+U` / `Ctrl+D` (or `Opt+U` / `Opt+D` if your terminal sends Opt as Alt) scroll the history without leaving the input bar.
 - `anima --yolo` — same chat, but with the approval system disabled for the session (auto-approves dangerous tool calls). Status bar shows `perms: off`.
 - `anima status` — agent + wallet + config state
 - `anima logs` — tail the activity log (`--tail N`, `--agent <id>`)

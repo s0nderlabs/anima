@@ -242,9 +242,13 @@ export function ChatApp(props: AppProps) {
       }
       return
     }
-    // stickyScroll auto-snaps to bottom on new rows; opt+u/d lets the
-    // operator scroll back through past responses mid-conversation.
-    if (evt.option && (evt.name === 'u' || evt.name === 'd')) {
+    // stickyScroll auto-snaps to bottom on new rows; ctrl+u/d (vim-style
+    // half-page) and opt+u/d let the operator scroll back through past
+    // responses mid-conversation. Ctrl works in every terminal; Opt only
+    // works when the terminal is configured to send Opt as Meta/Alt
+    // (Ghostty needs `macos-option-as-alt = true`, iTerm2 "Option as Esc+",
+    // Terminal.app "Use Option as Meta key").
+    if ((evt.ctrl || evt.option) && (evt.name === 'u' || evt.name === 'd')) {
       scrollboxRef?.scrollBy(evt.name === 'u' ? -SCROLL_STEP : SCROLL_STEP)
       return
     }
@@ -364,11 +368,15 @@ export function ChatApp(props: AppProps) {
         </text>
       </box>
 
-      {/* Input bar — flexShrink=0 + height=3 prevents collapse when chat fills viewport */}
+      {/* Input bar — minHeight=3 keeps the row visible when empty; box grows
+          as the wrapped text needs more rows. maxHeight caps runaway growth
+          on a paste of huge content so the chat history never gets shoved
+          off-screen. */}
       <box
         flexDirection="row"
         flexShrink={0}
-        height={3}
+        minHeight={3}
+        maxHeight={12}
         borderStyle="rounded"
         borderColor="#374151"
         paddingLeft={1}
