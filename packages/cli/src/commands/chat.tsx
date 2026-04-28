@@ -255,7 +255,12 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       () => [] as SkillRef[],
     ),
   ])
-  const loadedToolNames = tools.schemas().map(s => s.function.name)
+  // Use tools.list() (includes deferred) for guidance lookup — guidance
+  // fires per-tool-namespace, not per-prompt-schema. tools.schemas() is the
+  // separate set the brain SEES in its prompt; deferred tools stay hidden
+  // there until tool.search loads them. But the brain still needs to know
+  // they EXIST via guidance, otherwise it never thinks to search.
+  const loadedToolNames = tools.list().map(t => t.name)
   const disabledSkillSet = new Set(skillsDisabled.current)
   const skillsRef: { current: SkillRef[] } = {
     current: scannedSkills.filter(s => !disabledSkillSet.has(s.id)),

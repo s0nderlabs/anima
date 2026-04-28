@@ -70,3 +70,55 @@ test('renderUserContext returns null when nothing to inject', () => {
   const p = buildFrozenPrefix({ memoryIndex: null, timestamp: null })
   expect(renderUserContext(p)).toBeNull()
 })
+
+test('buildFrozenPrefix filters claude-code agent-browser skill out of the index', () => {
+  const skills = [
+    {
+      id: 'claude-code:agent-browser',
+      name: 'agent-browser',
+      description: 'Automates browser interactions',
+      path: '/x/SKILL.md',
+      source: 'claude-code' as const,
+      frontmatter: { name: 'agent-browser', description: 'Automates browser interactions' },
+    },
+    {
+      id: 'claude-code:hakr',
+      name: 'hakr',
+      description: 'Hacker News CLI',
+      path: '/y/SKILL.md',
+      source: 'claude-code' as const,
+      frontmatter: { name: 'hakr', description: 'Hacker News CLI' },
+    },
+  ]
+  const p = buildFrozenPrefix({ memoryIndex: null, timestamp: null, skills })
+  expect(p.skillIndexText).toContain('hakr')
+  expect(p.skillIndexText).not.toContain('agent-browser')
+  expect(p.skillIndexText).not.toContain('claude-code:agent-browser')
+})
+
+test('buildFrozenPrefix injects browser guidance when browser.navigate is loaded', () => {
+  const p = buildFrozenPrefix({
+    memoryIndex: null,
+    timestamp: null,
+    loadedToolNames: ['browser.navigate'],
+  })
+  const rendered = renderFrozenPrefix(p)
+  expect(rendered).toContain('browser.navigate')
+  expect(rendered).toContain('headless Chromium')
+  expect(rendered).toContain('agent-browser')
+})
+
+test('skill-shadow filter keeps anima-source skills with the same name', () => {
+  const skills = [
+    {
+      id: 'anima:browser',
+      name: 'browser',
+      description: 'Anima native browser playbook',
+      path: '/z/SKILL.md',
+      source: 'anima' as const,
+      frontmatter: { name: 'browser', description: 'Anima native browser playbook' },
+    },
+  ]
+  const p = buildFrozenPrefix({ memoryIndex: null, timestamp: null, skills })
+  expect(p.skillIndexText).toContain('anima:browser')
+})

@@ -62,9 +62,35 @@ export interface BuildPrefixArgs {
   timestamp?: string | null
 }
 
+const BROWSER_GUIDANCE = `For ANY web browsing, scraping, screenshot, form-fill, or page-navigation task, ALWAYS use anima's native \`browser.*\` tools (\`browser.navigate\`, \`browser.snapshot\`, \`browser.click\`, \`browser.type\`, \`browser.press\`, \`browser.scroll\`, \`browser.back\`, \`browser.get_images\`, \`browser.console\`). They run a clean local headless Chromium and work for every operator. Do NOT shell out, do NOT call \`code.execute\` with curl/wget for HTML, and do NOT use any \`agent-browser\` skill from \`~/.claude/skills/\` — those are user-specific setups (qutebrowser proxies, etc.) that won't exist on other machines.`
+
 const TOOL_GUIDANCE_MAP: Record<string, string> = {
   'memory.save': MEMORY_SAVE_GUIDANCE,
   'memory.read': MEMORY_READ_GUIDANCE,
+  'browser.navigate': BROWSER_GUIDANCE,
+}
+
+/**
+ * Skill IDs whose name overlaps with an anima native tool's namespace. The
+ * skill scanner still discovers them (visible via `skills.list` if the
+ * operator wants to opt in), but they're filtered out of the cacheable
+ * skill index — otherwise the brain auto-loads them when the user asks for
+ * a "browser" task and ends up running operator-specific bash that fails
+ * for everyone else.
+ */
+const SHADOW_SKILL_IDS = new Set(['claude-code:agent-browser', 'claude-code:browser'])
+
+function isNativeShadowedSkill(s: SkillRef): boolean {
+  if (SHADOW_SKILL_IDS.has(s.id)) return true
+  // Heuristic for future overlaps: claude-code skill named exactly after a
+  // namespace anima reserves natively.
+  const fmName = (s.frontmatter.name ?? '').toLowerCase()
+  if (s.source === 'claude-code' || s.source === 'claude-plugin') {
+    if (fmName === 'agent-browser' || fmName === 'browser' || fmName === 'agent_browser') {
+      return true
+    }
+  }
+  return false
 }
 
 export function buildFrozenPrefix({
@@ -81,10 +107,14 @@ export function buildFrozenPrefix({
   const guidance = (loadedToolNames ?? [])
     .map(name => TOOL_GUIDANCE_MAP[name])
     .filter((s): s is string => !!s)
-  if (skills && skills.length > 0 && !guidance.includes(SKILLS_GUIDANCE)) {
+  // Filter out skills whose name overlaps an anima native tool prefix. They
+  // remain discoverable via `skills.list` but won't appear in the always-on
+  // index, so the brain naturally falls back to the native tools.
+  const filteredSkills = (skills ?? []).filter(s => !isNativeShadowedSkill(s))
+  if (filteredSkills.length > 0 && !guidance.includes(SKILLS_GUIDANCE)) {
     guidance.push(SKILLS_GUIDANCE)
   }
-  const skillIndexText = renderSkillIndex(skills ?? [])
+  const skillIndexText = renderSkillIndex(filteredSkills)
   const ts = timestamp === undefined ? new Date().toISOString() : timestamp
   return {
     systemPrompt: sys,
