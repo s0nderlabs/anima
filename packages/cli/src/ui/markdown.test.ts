@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test'
-import { parseMarkdown } from './markdown'
+// Import from the .ts file (pure logic) so the test doesn't trigger the
+// JSX transform on markdown.tsx. CI's bun runtime resolves react-jsx by
+// default unless a per-file pragma or workspace tsconfig override applies,
+// and pulling solid-js JSX into the test file isn't worth the coupling.
+import { parseMarkdown } from './markdown-parse'
 
 describe('parseMarkdown', () => {
   it('renders plain text as a single segment', () => {
