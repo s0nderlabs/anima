@@ -15,3 +15,22 @@ export const coerceBool: z.ZodType<boolean> = z.preprocess(v => {
   }
   return v
 }, z.boolean()) as unknown as z.ZodType<boolean>
+
+/**
+ * Same shape as coerceBool but for integers. qwen3.6-plus and other 0G
+ * Compute providers sometimes serialize numeric tool-call args as strings
+ * ("400" instead of 400). zod's z.number() rejects them with
+ * "Expected number, received string". Wrap any numeric tool arg with
+ * `coerceInt` (or `coerceInt.refine(n => n > 0, 'must be positive')`) so the
+ * validation passes regardless of how the brain stringifies it.
+ */
+export const coerceInt: z.ZodType<number> = z.preprocess(v => {
+  if (typeof v === 'number') return v
+  if (typeof v === 'string') {
+    const trimmed = v.trim()
+    if (trimmed === '') return v
+    const n = Number(trimmed)
+    if (Number.isFinite(n) && Math.trunc(n) === n) return n
+  }
+  return v
+}, z.number().int()) as unknown as z.ZodType<number>

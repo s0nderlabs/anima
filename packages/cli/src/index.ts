@@ -159,7 +159,7 @@ async function main(): Promise<void> {
 function printHelp(): void {
   console.log(
     [
-      'anima: sovereign agent runtime CLI',
+      'anima: sovereign agent harness CLI',
       '',
       'Commands:',
       '  anima init                bootstrap a new agent identity + keystore',

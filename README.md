@@ -1,10 +1,10 @@
 # anima
 
-First fully on-chain sovereign agent runtime on 0G.
+First fully on-chain sovereign agent harness on 0G.
 
 ## What it is
 
-Anima is a CLI-hosted agent runtime where the agent's identity, memory, reasoning, and economic life all live on 0G's decentralized infrastructure. Operator runs `anima init` once. After that, the agent persists on chain: close the laptop, walk away, the agent survives. Any operator machine can re-attach via the iNFT.
+Anima is a CLI-hosted agent harness where the agent's identity, memory, reasoning, and economic life all live on 0G's decentralized infrastructure. Operator runs `anima init` once. After that, the agent persists on chain: close the laptop, walk away, the agent survives. Any operator machine can re-attach via the iNFT.
 
 ## Architecture
 

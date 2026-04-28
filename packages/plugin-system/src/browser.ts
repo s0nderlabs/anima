@@ -1,23 +1,30 @@
-import { spawn } from 'node:child_process'
-import { type ToolDef, coerceBool, redactEnv } from '@s0nderlabs/anima-core'
+import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { delimiter, join } from 'node:path'
+import { type ToolDef, coerceBool, coerceInt, redactEnv } from '@s0nderlabs/anima-core'
 import { z } from 'zod'
 
 /**
- * Phase 9.4 browser tools. Thin wrappers around the `agent-browser` CLI
- * (https://github.com/agent-browser, locally installed via Homebrew). Each
- * tool runs `agent-browser <subcommand> ...` and returns stdout.
+ * Phase 9.4 + Task #74 browser tools. Wraps the `agent-browser` CLI with
+ * hermes-grade resilience: PATH-walker for unlinked Homebrew node@N installs,
+ * per-session AGENT_BROWSER_SOCKET_DIR (sidesteps macOS 104-byte AF_UNIX
+ * limit), stdout/stderr to temp files (avoids daemon-fd pipe deadlock),
+ * optional `ANIMA_BROWSER_CDP_URL` override for connecting to a user-supplied
+ * CDP endpoint, and on-exit cleanup of the spawned daemon.
  *
- * All browser tools are `shouldDefer: true` so the brain's prompt stays small
- * unless the user invokes `tool.search` with a browser-related keyword. The
- * agent-browser binary check happens lazily; first invocation surfaces a
- * clean install message if the CLI is missing.
+ * Defaults to local headless Chromium via `agent-browser --session`. Set
+ * `ANIMA_BROWSER_CDP_URL` to opt into CDP override (e.g. qutebrowser proxy,
+ * Browserbase websocket).
  */
 
 interface BrowserDeps {
-  /** Override the agent-browser binary path. Default 'agent-browser' (PATH lookup). */
+  /** Override the agent-browser binary path. Default: PATH walker resolves it lazily. */
   binPath?: string
   /** Working directory for the spawned process. Default cwd. */
   cwd?: string
+  /** Override timeout (ms). Default 60000. */
+  timeoutMs?: number
 }
 
 interface RunResult {
@@ -26,36 +33,310 @@ interface RunResult {
   error?: string
 }
 
-async function runAgentBrowser(args: string[], deps: BrowserDeps): Promise<RunResult> {
-  const bin = deps.binPath ?? 'agent-browser'
+const DEFAULT_TIMEOUT_MS = 60_000
+const SANE_PATH_DIRS = [
+  '/opt/homebrew/bin',
+  '/opt/homebrew/sbin',
+  '/usr/local/bin',
+  '/usr/local/sbin',
+  '/usr/bin',
+  '/usr/sbin',
+  '/bin',
+  '/sbin',
+]
+
+let cachedBinPath: string | null = null
+let binResolved = false
+let cachedSessionName: string | null = null
+let cachedSocketDir: string | null = null
+let cleanupRegistered = false
+
+function discoverHomebrewNodeDirs(): string[] {
+  const homebrewOpt = '/opt/homebrew/opt'
+  if (!existsSync(homebrewOpt)) return []
+  try {
+    return readdirSync(homebrewOpt)
+      .filter(name => name.startsWith('node') && name !== 'node')
+      .map(name => join(homebrewOpt, name, 'bin'))
+      .filter(dir => existsSync(dir))
+  } catch {
+    return []
+  }
+}
+
+function whichIn(name: string, dirs: string[]): string | null {
+  for (const dir of dirs) {
+    const candidate = join(dir, name)
+    if (existsSync(candidate)) return candidate
+  }
+  return null
+}
+
+function findAgentBrowser(override?: string): string | null {
+  if (override) return override
+  if (binResolved) return cachedBinPath
+
+  const pathEnv = process.env.PATH ?? ''
+  const pathDirs = pathEnv.split(delimiter).filter(Boolean)
+  const inPath = whichIn('agent-browser', pathDirs)
+  if (inPath) {
+    cachedBinPath = inPath
+    binResolved = true
+    return inPath
+  }
+
+  const extraDirs = [...discoverHomebrewNodeDirs(), ...SANE_PATH_DIRS].filter(d => existsSync(d))
+  const inExtra = whichIn('agent-browser', extraDirs)
+  if (inExtra) {
+    cachedBinPath = inExtra
+    binResolved = true
+    return inExtra
+  }
+
+  const localBin = join(process.cwd(), 'node_modules', '.bin', 'agent-browser')
+  if (existsSync(localBin)) {
+    cachedBinPath = localBin
+    binResolved = true
+    return localBin
+  }
+
+  const npxPath = whichIn('npx', pathDirs) ?? whichIn('npx', extraDirs)
+  if (npxPath) {
+    cachedBinPath = `${npxPath} agent-browser`
+    binResolved = true
+    return cachedBinPath
+  }
+
+  binResolved = true
+  cachedBinPath = null
+  return null
+}
+
+function socketSafeTmpdir(): string {
+  if (process.platform === 'darwin') return '/tmp'
+  return tmpdir()
+}
+
+function randomHex(bytes: number): string {
+  const buf = new Uint8Array(bytes)
+  crypto.getRandomValues(buf)
+  return Array.from(buf, b => b.toString(16).padStart(2, '0')).join('')
+}
+
+function getSessionName(): string {
+  if (cachedSessionName) return cachedSessionName
+  cachedSessionName = `a_${randomHex(5)}`
+  return cachedSessionName
+}
+
+function getSocketDir(): string {
+  if (cachedSocketDir) return cachedSocketDir
+  const dir = join(socketSafeTmpdir(), `agent-browser-${getSessionName()}`)
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  cachedSocketDir = dir
+  registerCleanup()
+  return dir
+}
+
+function registerCleanup(): void {
+  if (cleanupRegistered) return
+  cleanupRegistered = true
+  const cleanup = () => {
+    try {
+      const bin = cachedBinPath
+      const sess = cachedSessionName
+      if (bin && sess && !process.env.ANIMA_BROWSER_CDP_URL) {
+        const parts = bin.startsWith('npx ') ? ['npx', 'agent-browser'] : [bin]
+        try {
+          // spawnSync so the daemon actually receives `close` before we exit.
+          // Async + detached drops the message: the parent exits before the
+          // child IPC connects to the daemon socket. 5s cap prevents hangs
+          // on a frozen daemon.
+          spawnSync(
+            parts[0]!,
+            [...parts.slice(1), '--session', sess, 'close'],
+            {
+              stdio: 'ignore',
+              env: cachedSocketDir
+                ? { ...process.env, AGENT_BROWSER_SOCKET_DIR: cachedSocketDir }
+                : process.env,
+              timeout: 5000,
+            },
+          )
+        } catch {}
+      }
+      if (cachedSocketDir) {
+        rmSync(cachedSocketDir, { recursive: true, force: true })
+      }
+    } catch {}
+  }
+  process.on('exit', cleanup)
+  process.on('SIGINT', () => {
+    cleanup()
+    process.exit(130)
+  })
+  process.on('SIGTERM', () => {
+    cleanup()
+    process.exit(143)
+  })
+}
+
+function buildBrowserEnv(socketDir: string): NodeJS.ProcessEnv {
   const { env } = redactEnv(process.env as Record<string, string>)
+  const existing = (env.PATH ?? '').split(delimiter).filter(Boolean)
+  const candidates = [...discoverHomebrewNodeDirs(), ...SANE_PATH_DIRS]
+  for (const dir of candidates) {
+    if (existsSync(dir) && !existing.includes(dir)) existing.unshift(dir)
+  }
+  return {
+    ...env,
+    PATH: existing.join(delimiter),
+    AGENT_BROWSER_SOCKET_DIR: socketDir,
+  }
+}
+
+function readFileSafe(path: string): string {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+function rmSafe(path: string): void {
+  try {
+    rmSync(path, { force: true })
+  } catch {}
+}
+
+interface RunOpts {
+  /**
+   * After the primary command completes, run `agent-browser wait <ms>` so
+   * page transitions (navigation, JS-handled form submits) settle before
+   * the next snapshot. Set to 0 to skip. Default 0 (the caller chooses).
+   */
+  settleAfterMs?: number
+}
+
+async function runAgentBrowser(
+  command: string,
+  extraArgs: string[],
+  deps: BrowserDeps,
+  opts: RunOpts = {},
+): Promise<RunResult> {
+  const result = await runAgentBrowserOnce(command, extraArgs, deps)
+  if (!result.ok || !opts.settleAfterMs) return result
+  // Best-effort settle wait — the primary call's result is what we report;
+  // a wait failure (e.g. timeout) doesn't invalidate the action that just
+  // succeeded. We DO surface it via stderr though.
+  const settleMs = Math.min(opts.settleAfterMs, 10_000)
+  await runAgentBrowserOnce('wait', [String(settleMs)], deps)
+  return result
+}
+
+async function runAgentBrowserOnce(
+  command: string,
+  extraArgs: string[],
+  deps: BrowserDeps,
+): Promise<RunResult> {
+  const bin = findAgentBrowser(deps.binPath)
+  if (!bin) {
+    return {
+      ok: false,
+      error:
+        'agent-browser CLI not found on PATH or in Homebrew/local dirs. Install with `brew install agent-browser` (or `npm i -g agent-browser`), or set ANIMA_AGENT_BROWSER_BIN.',
+    }
+  }
+  const cmdParts = bin.startsWith('npx ') ? bin.split(' ') : [bin]
+
+  const cdpOverride = process.env.ANIMA_BROWSER_CDP_URL
+  const backendArgs = cdpOverride
+    ? ['--cdp', cdpOverride]
+    : ['--session', getSessionName()]
+
+  const socketDir = getSocketDir()
+  const sanitizedCmd = command.replace(/[^a-z0-9_-]/gi, '_')
+  const stdoutPath = join(socketDir, `_stdout_${sanitizedCmd}_${Date.now()}`)
+  const stderrPath = join(socketDir, `_stderr_${sanitizedCmd}_${Date.now()}`)
+
+  const fullArgs = [...cmdParts.slice(1), ...backendArgs, command, ...extraArgs]
+  const env = buildBrowserEnv(socketDir)
+
+  let stdoutFd = -1
+  let stderrFd = -1
+  try {
+    stdoutFd = openSync(stdoutPath, 'w', 0o600)
+    stderrFd = openSync(stderrPath, 'w', 0o600)
+  } catch (err) {
+    return { ok: false, error: `failed to open browser temp files: ${(err as Error).message}` }
+  }
+
+  const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS
   return await new Promise<RunResult>(resolve => {
-    let stdout = ''
-    let stderr = ''
-    const proc = spawn(bin, args, { cwd: deps.cwd ?? process.cwd(), env })
-    proc.stdout?.setEncoding('utf8')
-    proc.stderr?.setEncoding('utf8')
-    proc.stdout?.on('data', chunk => {
-      stdout += chunk as string
-      if (stdout.length > 100_000) stdout = stdout.slice(-100_000)
-    })
-    proc.stderr?.on('data', chunk => {
-      stderr += chunk as string
-      if (stderr.length > 50_000) stderr = stderr.slice(-50_000)
-    })
-    proc.on('error', err => {
-      const msg = err.message
-      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+    let proc: ChildProcess
+    try {
+      proc = spawn(cmdParts[0]!, fullArgs, {
+        cwd: deps.cwd ?? process.cwd(),
+        env,
+        stdio: ['ignore', stdoutFd, stderrFd],
+      })
+    } catch (err) {
+      try { closeSync(stdoutFd) } catch {}
+      try { closeSync(stderrFd) } catch {}
+      rmSafe(stdoutPath)
+      rmSafe(stderrPath)
+      const msg = (err as Error).message
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'ENOENT') {
         resolve({
           ok: false,
           error:
-            'agent-browser CLI not found. Install with `brew install agent-browser` (or set ANIMA_AGENT_BROWSER_BIN). Browser tools require it.',
+            'agent-browser CLI not found at resolved path. Install with `brew install agent-browser`.',
+        })
+      } else {
+        resolve({ ok: false, error: msg })
+      }
+      return
+    }
+    try { closeSync(stdoutFd) } catch {}
+    try { closeSync(stderrFd) } catch {}
+
+    let timedOut = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      try { proc.kill('SIGKILL') } catch {}
+    }, timeoutMs)
+
+    proc.on('error', err => {
+      clearTimeout(timer)
+      rmSafe(stdoutPath)
+      rmSafe(stderrPath)
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'ENOENT') {
+        resolve({
+          ok: false,
+          error:
+            'agent-browser CLI vanished after resolution (PATH change?). Reinstall with `brew install agent-browser`.',
         })
         return
       }
-      resolve({ ok: false, error: msg })
+      resolve({ ok: false, error: err.message })
     })
+
     proc.on('close', code => {
+      clearTimeout(timer)
+      const stdout = readFileSafe(stdoutPath).slice(-100_000)
+      const stderr = readFileSafe(stderrPath).slice(-50_000)
+      rmSafe(stdoutPath)
+      rmSafe(stderrPath)
+      if (timedOut) {
+        resolve({
+          ok: false,
+          error: `agent-browser ${command} timed out after ${timeoutMs}ms`,
+          data: { stdout, stderr, exit_code: code },
+        })
+        return
+      }
       resolve({
         ok: (code ?? 1) === 0,
         data: { stdout, stderr, exit_code: code },
@@ -71,11 +352,12 @@ const NavigateSchema = z.object({
 export function makeBrowserNavigate(deps: BrowserDeps): ToolDef<z.infer<typeof NavigateSchema>> {
   return {
     name: 'browser.navigate',
-    description: 'Open a URL in the agent-browser tab. Returns the new page metadata.',
+    description: 'Open a URL in the agent-browser tab. Returns the new page metadata. Auto-waits 1500ms after navigation so the next browser.snapshot reflects the new page.',
     shouldDefer: true,
     searchHint: 'browser navigate open url page',
     schema: NavigateSchema,
-    handler: async args => runAgentBrowser(['open', args.url], deps),
+    handler: async args =>
+      runAgentBrowser('open', [args.url], deps, { settleAfterMs: 1500 }),
   }
 }
 
@@ -97,10 +379,10 @@ export function makeBrowserSnapshot(deps: BrowserDeps): ToolDef<z.infer<typeof S
     searchHint: 'browser snapshot accessibility tree refs page state',
     schema: SnapshotSchema,
     handler: async args => {
-      const flags = ['snapshot']
+      const flags: string[] = []
       if (args.with_image !== false) flags.push('-i')
       if (args.cap !== false) flags.push('-c')
-      return runAgentBrowser(flags, deps)
+      return runAgentBrowser('snapshot', flags, deps)
     },
   }
 }
@@ -115,11 +397,12 @@ const ClickSchema = z.object({
 export function makeBrowserClick(deps: BrowserDeps): ToolDef<z.infer<typeof ClickSchema>> {
   return {
     name: 'browser.click',
-    description: 'Click an element by selector or snapshot ref.',
+    description: 'Click an element by selector or snapshot ref. Auto-waits 1200ms post-click so any triggered navigation/state change settles before the next snapshot.',
     shouldDefer: true,
     searchHint: 'browser click element selector ref',
     schema: ClickSchema,
-    handler: async args => runAgentBrowser(['click', args.selector], deps),
+    handler: async args =>
+      runAgentBrowser('click', [args.selector], deps, { settleAfterMs: 1200 }),
   }
 }
 
@@ -131,17 +414,21 @@ const TypeSchema = z.object({
 export function makeBrowserType(deps: BrowserDeps): ToolDef<z.infer<typeof TypeSchema>> {
   return {
     name: 'browser.type',
-    description: 'Type text into an element by selector or snapshot ref.',
+    description: 'Type text into an element by selector or snapshot ref. Auto-waits 600ms post-type so debounced input handlers settle before the next snapshot.',
     shouldDefer: true,
     searchHint: 'browser type input text fill',
     schema: TypeSchema,
-    handler: async args => runAgentBrowser(['type', args.selector, args.text], deps),
+    handler: async args =>
+      runAgentBrowser('type', [args.selector, args.text], deps, { settleAfterMs: 600 }),
   }
 }
 
 const ScrollSchema = z.object({
   direction: z.enum(['up', 'down', 'left', 'right']),
-  pixels: z.number().int().positive().optional().describe('Default 800.'),
+  pixels: coerceInt
+    .refine(n => n > 0, 'pixels must be > 0')
+    .optional()
+    .describe('Default 800.'),
 })
 
 export function makeBrowserScroll(deps: BrowserDeps): ToolDef<z.infer<typeof ScrollSchema>> {
@@ -152,9 +439,9 @@ export function makeBrowserScroll(deps: BrowserDeps): ToolDef<z.infer<typeof Scr
     searchHint: 'browser scroll page up down',
     schema: ScrollSchema,
     handler: async args => {
-      const args2 = ['scroll', args.direction]
+      const args2: string[] = [args.direction]
       if (args.pixels) args2.push(String(args.pixels))
-      return runAgentBrowser(args2, deps)
+      return runAgentBrowser('scroll', args2, deps)
     },
   }
 }
@@ -164,11 +451,11 @@ const BackSchema = z.object({})
 export function makeBrowserBack(deps: BrowserDeps): ToolDef<z.infer<typeof BackSchema>> {
   return {
     name: 'browser.back',
-    description: 'Navigate the browser history back one step.',
+    description: 'Navigate the browser history back one step. Auto-waits 1500ms for the previous page to render before the next snapshot.',
     shouldDefer: true,
     searchHint: 'browser back history previous page',
     schema: BackSchema,
-    handler: async () => runAgentBrowser(['back'], deps),
+    handler: async () => runAgentBrowser('back', [], deps, { settleAfterMs: 1500 }),
   }
 }
 
@@ -179,29 +466,37 @@ const PressSchema = z.object({
 export function makeBrowserPress(deps: BrowserDeps): ToolDef<z.infer<typeof PressSchema>> {
   return {
     name: 'browser.press',
-    description: 'Send a single key press (Enter, Tab, Escape, Ctrl+A, etc.).',
+    description: 'Send a single key press (Enter, Tab, Escape, Ctrl+A, etc.). Auto-waits 1500ms post-press so a form submit triggered by Enter has time to navigate before the next snapshot.',
     shouldDefer: true,
     searchHint: 'browser press key keyboard',
     schema: PressSchema,
-    handler: async args => runAgentBrowser(['press', args.key], deps),
+    handler: async args =>
+      runAgentBrowser('press', [args.key], deps, { settleAfterMs: 1500 }),
   }
 }
 
 const GetImagesSchema = z.object({
   selector: z.string().optional().describe('Optional CSS selector to scope image extraction.'),
+  limit: coerceInt
+    .refine(n => n > 0 && n <= 200, 'limit must be 1..200')
+    .optional()
+    .describe('Cap on returned URLs. Default 50.'),
 })
 
 export function makeBrowserGetImages(deps: BrowserDeps): ToolDef<z.infer<typeof GetImagesSchema>> {
   return {
     name: 'browser.get_images',
     description:
-      'Extract image URLs from the current page. Optionally scoped to a selector. Returns array of src URLs.',
+      'Extract image URLs from the current page. Optionally scoped to a CSS selector. Returns up to `limit` (default 50) src URLs as a JSON array string.',
     shouldDefer: true,
     searchHint: 'browser images src extract list',
     schema: GetImagesSchema,
     handler: async args => {
-      const sel = args.selector ?? 'img'
-      return runAgentBrowser(['get', 'attr', 'src', sel], deps)
+      const sel = (args.selector ?? 'img').replace(/'/g, "\\'")
+      const limit = args.limit ?? 50
+      // agent-browser `get attr` only returns the first match; eval gets all.
+      const js = `JSON.stringify(Array.from(document.querySelectorAll('${sel}')).slice(0, ${limit}).map(i => i.src || i.getAttribute('src') || '').filter(Boolean))`
+      return runAgentBrowser('eval', [js], deps)
     },
   }
 }
@@ -230,7 +525,6 @@ export function makeBrowserVision(
           error: `vision-capable brain provider required (current: ${deps.modelLabel ?? 'unknown'}).`,
         }
       }
-      // When 0G ships a vision provider, capture screenshot and route to brain.
       return { ok: false, error: 'vision provider configured but no impl yet (Phase 9.4 stub)' }
     },
   }
@@ -248,9 +542,9 @@ export function makeBrowserConsole(deps: BrowserDeps): ToolDef<z.infer<typeof Co
     searchHint: 'browser console logs warnings errors',
     schema: ConsoleSchema,
     handler: async args => {
-      const flags = ['console']
+      const flags: string[] = []
       if (args.clear) flags.push('--clear')
-      return runAgentBrowser(flags, deps)
+      return runAgentBrowser('console', flags, deps)
     },
   }
 }
@@ -266,3 +560,23 @@ export const ALL_BROWSER_TOOL_FACTORIES = [
   makeBrowserGetImages,
   makeBrowserConsole,
 ]
+
+// Test-only hooks for the regression suite. Resets module-level cache so a
+// test can stub PATH or override the platform without leaking state.
+export const __test = {
+  reset(): void {
+    cachedBinPath = null
+    binResolved = false
+    cachedSessionName = null
+    if (cachedSocketDir) {
+      try { rmSync(cachedSocketDir, { recursive: true, force: true }) } catch {}
+    }
+    cachedSocketDir = null
+    cleanupRegistered = false
+  },
+  findAgentBrowser,
+  socketSafeTmpdir,
+  getSessionName,
+  getSocketDir,
+  buildBrowserEnv,
+}

@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { type SkillRef, type ToolDef, scanSkills } from '@s0nderlabs/anima-core'
+import { type SkillRef, type ToolDef, coerceInt, scanSkills } from '@s0nderlabs/anima-core'
 import { z } from 'zod'
 
 /**
@@ -70,7 +70,9 @@ export function makeSkillsList(deps: SkillsToolDeps): ToolDef<z.infer<typeof Lis
 
 const ViewSchema = z.object({
   id: z.string().min(1).describe('Skill id from skills.list (e.g., "anima:dogfood").'),
-  max_bytes: z.number().int().positive().max(200_000).optional(),
+  max_bytes: coerceInt
+    .refine(n => n > 0 && n <= 200_000, 'max_bytes must be 1..200000')
+    .optional(),
 })
 
 export function makeSkillsView(deps: SkillsToolDeps): ToolDef<z.infer<typeof ViewSchema>> {

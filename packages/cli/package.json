@@ -2,7 +2,7 @@
   "name": "@s0nderlabs/anima-cli",
   "version": "0.0.0",
   "type": "module",
-  "description": "CLI binary for the anima agent runtime",
+  "description": "CLI binary for the anima agent harness",
   "license": "MIT",
   "bin": {
     "anima": "./bin/anima"

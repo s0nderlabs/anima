@@ -1,9 +1,9 @@
 {
   "name": "anima",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "private": true,
   "type": "module",
-  "description": "First fully on-chain sovereign agent runtime on 0G",
+  "description": "First fully on-chain sovereign agent harness on 0G",
   "repository": "github.com/s0nderlabs/anima",
   "license": "MIT",
   "workspaces": ["packages/*"],

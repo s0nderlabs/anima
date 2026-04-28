@@ -169,7 +169,7 @@ export class WalletConnectOperatorSigner implements OperatorSigner {
       storage: new EphemeralWcStorage() as any,
       metadata: {
         name: 'Anima',
-        description: 'Sovereign agent runtime on 0G',
+        description: 'Sovereign agent harness on 0G',
         url: 'https://anima.s0nderlabs.xyz',
         icons: [],
       },

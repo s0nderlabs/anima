@@ -1,5 +1,6 @@
 import { useKeyboard, useTerminalDimensions } from '@opentui/solid'
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js'
+import { MarkdownSegments } from './markdown'
 import type { ChatState, TurnRow } from './state'
 
 const SPINNER_FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const
@@ -86,7 +87,7 @@ function AssistantTextRow(props: { text: string; firstOfBlock: boolean }) {
         {props.firstOfBlock ? renderPrefix('anima') : BODY_INDENT}
       </text>
       <text wrapMode="word" flexGrow={1} fg="#e5e7eb">
-        {props.text}
+        <MarkdownSegments text={props.text} />
       </text>
     </box>
   )

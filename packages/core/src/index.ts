@@ -1,4 +1,4 @@
-// @s0nderlabs/anima-core: always-on infrastructure for the anima runtime.
+// @s0nderlabs/anima-core: always-on infrastructure for the anima harness.
 export const VERSION = '0.0.0'
 
 export * from './config'
@@ -14,7 +14,7 @@ export type {
 export { EventQueue, newEventId, listeners, routeLoop } from './events'
 
 export type { ToolCall, ToolDef, ToolResult, ToolSchema, JSONSchema } from './tools'
-export { ToolRegistry, zodToJsonSchema, coerceBool } from './tools'
+export { ToolRegistry, zodToJsonSchema, coerceBool, coerceInt } from './tools'
 
 export type {
   Brain,

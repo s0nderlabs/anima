@@ -111,12 +111,38 @@ export class OGComputeBrain implements Brain {
     messages.push({ role: 'user', content: userText })
 
     let turnResult: BrainTurn | null = null
-    const MAX_ROUND_TRIPS = 5
-    for (let i = 0; i < MAX_ROUND_TRIPS; i++) {
+    // No round-trip cap: the brain exits naturally when it returns a
+    // content-only response (no tool_calls). Capping here truncated multi-step
+    // browser drives before the final answer.
+    let recoveredFromSafetyBlock = false
+    while (true) {
       const resp = await this.callCompletion(messages)
       turnResult = resp
 
       if (!resp.toolCalls.length) {
+        // qwen3.6-plus on the 0G broker sometimes returns its safety-filter
+        // reject as a plain assistant turn (no tool_calls). The string looks
+        // like: "An error occurred while generating a tool call: Unauthorized:
+        // <name> is a blocked tool." That happens when the model generates a
+        // tool name that doesn't match any registered tool (typically the
+        // bare prefix of a dotted name, e.g. "browser" instead of
+        // "browser.snapshot"). Auto-recover once: inject a corrective user
+        // message naming the valid tools, then continue the loop so the brain
+        // can re-issue with the correct dotted name.
+        const blockedName = detectBlockedToolError(resp.content ?? '')
+        if (blockedName && !recoveredFromSafetyBlock) {
+          recoveredFromSafetyBlock = true
+          const validNames = this.opts.tools
+            .map(t => (t as { name?: string }).name ?? '')
+            .filter(n => n.startsWith(`${blockedName}.`) || n.startsWith(`${blockedName}_`))
+            .slice(0, 12)
+          const hint =
+            validNames.length > 0
+              ? `Your last tool call used the bare name "${blockedName}", which is not a registered tool. Use the full name with subname (one of: ${validNames.join(', ')}). Retry now.`
+              : `Your last tool call used the bare name "${blockedName}", which is not a registered tool. Use the full namespaced name (e.g., something.action). Retry now.`
+          messages.push({ role: 'user', content: hint })
+          continue
+        }
         messages.push({ role: 'assistant', content: resp.content ?? '' })
         break
       }
@@ -247,6 +273,18 @@ function safeParseJson(raw: string): unknown {
   } catch {
     return raw
   }
+}
+
+/**
+ * Detect the 0G broker's safety-filter reject ("An error occurred while
+ * generating a tool call: Unauthorized: <name> is a blocked tool.") and
+ * return the blocked tool name. Returns null when the content is a normal
+ * response.
+ */
+export function detectBlockedToolError(content: string): string | null {
+  if (!content) return null
+  const m = content.match(/Unauthorized:\s+(\S+)\s+is a blocked tool/)
+  return m ? m[1]! : null
 }
 
 function findLastAssistantContent(messages: BrainMessage[]): string {

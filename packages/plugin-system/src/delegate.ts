@@ -1,4 +1,4 @@
-import type { ClaudeAgent, DelegateBrainFactory, ToolDef } from '@s0nderlabs/anima-core'
+import { type ClaudeAgent, type DelegateBrainFactory, type ToolDef, coerceInt } from '@s0nderlabs/anima-core'
 import { z } from 'zod'
 
 /**
@@ -30,7 +30,9 @@ const DelegateSchema = z.object({
     .optional()
     .describe('Custom system prompt for the sub-brain. Used when no agent is specified.'),
   task: z.string().min(1).describe('The task description / user-message the sub-brain receives.'),
-  max_output_tokens: z.number().int().positive().max(8_000).optional(),
+  max_output_tokens: coerceInt
+    .refine(n => n > 0 && n <= 8_000, 'max_output_tokens must be 1..8000')
+    .optional(),
 })
 
 export function makeDelegateTask(deps: DelegateDeps): ToolDef<z.infer<typeof DelegateSchema>> {
