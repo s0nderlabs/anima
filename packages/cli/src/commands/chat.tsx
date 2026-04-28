@@ -443,6 +443,10 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
         return
       }
     }
+    // Per-turn AbortController. Esc in the TUI calls .abort() on this.
+    // Stored on state so the keyboard handler can reach it from app.tsx.
+    const abortCtrl = new AbortController()
+    state.setActiveAbort(abortCtrl)
     try {
       // Refresh per-turn user-context (MEMORY.md may have grown last turn).
       // The system prefix stays cached; only the user-msg context updates.
@@ -460,6 +464,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
           payload: { label: 'user-message', data: text },
           ts: Date.now(),
         },
+        signal: abortCtrl.signal,
       })
       await activity.append({
         ts: Date.now(),
@@ -500,7 +505,23 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
           })
         })
     } catch (e) {
-      // Mirror the error to chat.log too — render-layer bugs can swallow the
+      // AbortError = operator pressed Esc; render as a clean sys row, NOT an
+      // error. The activity log gets a paired entry so the post-mortem reflects
+      // operator intent, not a real fault.
+      if ((e instanceof Error && e.name === 'AbortError') || abortCtrl.signal.aborted) {
+        state.pushRow({
+          role: 'system',
+          text: 'turn interrupted (esc). brain stopped at the last completed step.',
+        })
+        await activity.append({
+          ts: Date.now(),
+          kind: 'brain-response',
+          data: { content: '(aborted by operator)', toolCalls: 0, finishReason: 'aborted' },
+        })
+        state.setStatus('idle')
+        return
+      }
+      // Mirror real errors to chat.log too — render-layer bugs can swallow the
       // sys row before it hits the screen, and chat.log is the only artifact
       // the operator can read post-mortem.
       const errMsg = e instanceof Error ? e.message : String(e ?? 'unknown error')
@@ -508,6 +529,8 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       console.error('[handleSubmit] error:', dumped)
       state.pushRow({ role: 'system', text: `error: ${errMsg.slice(0, 300)}` })
       state.setStatus('error')
+    } finally {
+      state.setActiveAbort(null)
     }
   }
 

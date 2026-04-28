@@ -40,6 +40,11 @@ export function createChatState(opts: CreateChatStateOpts) {
   const [pendingApproval, setPendingApproval] = createSignal<PendingApproval | null>(null)
   const [approvalsMode, setApprovalsMode] = createSignal<PermissionMode>(opts.approvalsMode)
 
+  // Per-turn AbortController. Set when handleSubmit kicks off brain.infer;
+  // cleared (set to null) after the turn ends or is aborted. The keyboard
+  // handler reads it to wire Esc → abort.
+  const [activeAbort, setActiveAbort] = createSignal<AbortController | null>(null)
+
   let idCounter = 1
   const nextId = () => `row-${idCounter++}`
 
@@ -61,11 +66,13 @@ export function createChatState(opts: CreateChatStateOpts) {
     usage,
     pendingApproval,
     approvalsMode,
+    activeAbort,
     setInput,
     setStatus,
     setUsage,
     setPendingApproval,
     setApprovalsMode,
+    setActiveAbort,
     pushRow,
     identityLabel: opts.identityLabel,
     brainLabel: opts.brainLabel,

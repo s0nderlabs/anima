@@ -196,9 +196,28 @@ export function ChatApp(props: AppProps) {
       }
       return
     }
+    // Esc mid-turn aborts the current brain.infer. Caller's handleSubmit
+    // catches AbortError and emits a clean "turn interrupted" sys row.
+    if (evt.name === 'escape') {
+      const abort = props.state.activeAbort()
+      if (abort && !abort.signal.aborted) {
+        abort.abort()
+      }
+      return
+    }
     if (evt.name === 'return') {
       const text = props.state.input().trim()
       if (!text) return
+      // Mid-turn submit guard: refuse to fire a second brain.infer while one
+      // is in flight (concurrent infers clobber history). Tell the operator
+      // how to interrupt the current one.
+      if (props.state.status() === 'thinking') {
+        props.state.pushRow({
+          role: 'system',
+          text: 'turn in progress. press esc to interrupt before sending the next message.',
+        })
+        return
+      }
       props.state.pushRow({ role: 'user', text })
       props.state.setInput('')
       props.state.setStatus('thinking')
@@ -277,7 +296,7 @@ export function ChatApp(props: AppProps) {
       <box flexDirection="row" flexShrink={0} paddingLeft={3} paddingRight={2} marginTop={1}>
         <text fg="#67e8f9" flexGrow={1}>
           {props.state.status() === 'thinking'
-            ? `${SPINNER_FRAMES[spinnerFrame()]} thinking…`
+            ? `${SPINNER_FRAMES[spinnerFrame()]} thinking… (esc to interrupt)`
             : ' '}
         </text>
       </box>
@@ -331,7 +350,7 @@ export function ChatApp(props: AppProps) {
           {''}
         </text>
         <text fg="#4b5563" flexShrink={0}>
-          {'ctrl+c exit'}
+          {props.state.status() === 'thinking' ? 'esc interrupt · ctrl+c exit' : 'ctrl+c exit'}
         </text>
       </box>
     </box>

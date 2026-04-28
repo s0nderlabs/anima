@@ -97,6 +97,10 @@ export class OGComputeBrain implements Brain {
 
   async infer(input: BrainInferInput): Promise<BrainTurn> {
     if (!this.broker) await this.init()
+    const signal = input.signal
+    if (signal?.aborted) {
+      throw new DOMException('aborted before infer started', 'AbortError')
+    }
     const userText = normalizeUserContent(input)
     const messages: BrainMessage[] = [
       { role: 'system', content: this.renderedPrefix },
@@ -116,7 +120,10 @@ export class OGComputeBrain implements Brain {
     // browser drives before the final answer.
     let recoveredFromSafetyBlock = false
     while (true) {
-      const resp = await this.callCompletion(messages)
+      if (signal?.aborted) {
+        throw new DOMException('aborted between round-trips', 'AbortError')
+      }
+      const resp = await this.callCompletion(messages, signal)
       turnResult = resp
 
       if (!resp.toolCalls.length) {
@@ -154,6 +161,9 @@ export class OGComputeBrain implements Brain {
       })
 
       for (const call of resp.toolCalls) {
+        if (signal?.aborted) {
+          throw new DOMException('aborted between tool calls', 'AbortError')
+        }
         if (!this.opts.onToolCall) {
           messages.push({
             role: 'tool',
@@ -174,7 +184,7 @@ export class OGComputeBrain implements Brain {
     return turnResult ?? { content: null, toolCalls: [] }
   }
 
-  private async callCompletion(messages: BrainMessage[]): Promise<BrainTurn> {
+  private async callCompletion(messages: BrainMessage[], signal?: AbortSignal): Promise<BrainTurn> {
     if (!this.broker || !this.endpoint || !this.model) {
       throw new Error('Brain not initialized; call init() first.')
     }
@@ -217,6 +227,7 @@ export class OGComputeBrain implements Brain {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify(body),
+      signal,
     })
     if (!resp.ok) {
       throw new Error(`Brain HTTP ${resp.status}: ${await resp.text()}`)

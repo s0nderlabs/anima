@@ -23,6 +23,14 @@ export interface BrainInferInput {
   history?: BrainMessage[]
   /** Optional tool allowlist override (defaults to all registered tools). */
   toolWhitelist?: string[]
+  /**
+   * Cancel the in-flight turn. Aborts the upstream HTTP fetch (so 0G
+   * Compute stops billing the round-trip immediately) and short-circuits
+   * the tool-call loop. The promise rejects with a DOMException whose
+   * `.name === 'AbortError'`. Caller should catch that and treat it as
+   * a clean operator-driven cancel, not an error.
+   */
+  signal?: AbortSignal
 }
 
 export interface BrainTurn {
