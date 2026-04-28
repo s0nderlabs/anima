@@ -70,6 +70,8 @@ The brain ships with a battery-included tool surface (Phase 9.0). Each tool runs
 | `tool.search` | Hydrate deferred tool schemas (Claude Code-style) |
 | `fs.read` / `fs.write` / `fs.patch` / `fs.search` | UTF-8 text filesystem ops scoped to the workspace, refusing credential paths and the agent's own state tree |
 | `shell.run` | Run a shell command. Permission-gated; wallet/API-key env vars are stripped from the subprocess |
+| `shell.cd` | Set persistent cwd for subsequent shell.run / code.execute / shell.process_start calls. Refuses credential dirs and the agent state tree. |
+| `web.fetch` | GET an http(s) URL and return body as markdown (HTML), pretty JSON, or plain text. GET-only; refuses private/loopback/metadata IPs. |
 | `todo` | In-session task list |
 | `clarify` | Ask the operator a question |
 | `skills.list` / `skills.view` | Discover and read SKILL.md files under `~/.anima/skills/` and (when `imports.claudeCode: true`) `~/.claude/skills/` |

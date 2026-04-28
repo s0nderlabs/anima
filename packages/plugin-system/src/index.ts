@@ -21,10 +21,12 @@ import {
   makeBrowserVision,
 } from './browser'
 import { makeCodeExecute } from './code-execute'
+import { WorkingDirState } from './cwd-state'
 import { makeDelegateTask, makeVisionAnalyze } from './delegate'
 import { makeFsPatch, makeFsRead, makeFsSearch, makeFsWrite } from './fs'
 import { makeSessionSearch } from './session-search'
 import { makeShellRun } from './shell'
+import { makeShellCd } from './shell-cd'
 import {
   makeShellProcessKill,
   makeShellProcessList,
@@ -34,6 +36,7 @@ import {
 import { makeSkillsList, makeSkillsView } from './skills'
 import { makeSkillsManage } from './skills-manage'
 import { makeClarify, makeTodo } from './todo'
+import { makeWebFetch } from './web-fetch'
 
 export {
   makeFsRead,
@@ -41,6 +44,7 @@ export {
   makeFsPatch,
   makeFsSearch,
   makeShellRun,
+  makeShellCd,
   makeShellProcessStart,
   makeShellProcessOutput,
   makeShellProcessList,
@@ -54,6 +58,7 @@ export {
   makeCodeExecute,
   makeDelegateTask,
   makeVisionAnalyze,
+  makeWebFetch,
   makeBrowserNavigate,
   makeBrowserSnapshot,
   makeBrowserClick,
@@ -65,6 +70,7 @@ export {
   makeBrowserVision,
   makeBrowserConsole,
 }
+export { WorkingDirState, resolveCwd } from './cwd-state'
 export { killAllProcesses } from './shell-process'
 
 const plugin: NativePlugin = {
@@ -75,6 +81,11 @@ const plugin: NativePlugin = {
     // one (legacy callers, tests), fall back to LocalBackend (passthrough)
     // so existing behaviour is preserved exactly.
     const sandbox = ctx.sandbox ?? new LocalBackend()
+    // Phase 9.6: ONE shared cwd state for shell.cd / shell.run / code.execute
+    // / shell.process_start. shell.cd mutates; the others read at handler
+    // invocation time. Tests that pass `cwd: '<path>'` get a private state
+    // automatically (resolveCwd promotes string → state per tool).
+    const cwdState = new WorkingDirState(workspaceRoot)
     const fsDeps = { workspaceRoot, agentDir: ctx.agentDir }
     const skillsDeps = {
       importsClaudeCode: ctx.imports.claudeCode,
@@ -85,7 +96,9 @@ const plugin: NativePlugin = {
       makeFsWrite(fsDeps) as ToolDef,
       makeFsPatch(fsDeps) as ToolDef,
       makeFsSearch(fsDeps) as ToolDef,
-      makeShellRun({ cwd: workspaceRoot, sandbox }) as ToolDef,
+      makeShellRun({ cwd: cwdState, sandbox }) as ToolDef,
+      makeShellCd({ cwd: cwdState, agentDir: ctx.agentDir }) as ToolDef,
+      makeWebFetch() as ToolDef,
       makeTodo() as ToolDef,
       makeClarify() as ToolDef,
       makeSkillsList(skillsDeps) as ToolDef,
@@ -96,8 +109,8 @@ const plugin: NativePlugin = {
         disabledRef: ctx.skillsDisabled,
       }) as ToolDef,
       makeSessionSearch({ activityLogPath: ctx.activityLogPath }) as ToolDef,
-      makeCodeExecute({ cwd: workspaceRoot, sandbox }) as ToolDef,
-      makeShellProcessStart({ cwd: workspaceRoot, sandbox }) as ToolDef,
+      makeCodeExecute({ cwd: cwdState, sandbox }) as ToolDef,
+      makeShellProcessStart({ cwd: cwdState, sandbox }) as ToolDef,
       makeShellProcessOutput() as ToolDef,
       makeShellProcessList() as ToolDef,
       makeShellProcessKill() as ToolDef,

@@ -4,6 +4,21 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.4] - 2026-04-28
+
+### Added
+
+- **`shell.cd <path>`** — set persistent cwd for subsequent `shell.run` / `code.execute` / `shell.process_start` calls. Saves repeating `cd X &&` prefixes on every command in multi-step coding workflows. Resolves relative paths against the current cwd; expands `~`; canonicalises through `realpath` so the stored cwd matches what `pwd` reports inside the sandbox. PathGuard refuses cd into credential dirs (`~/.ssh`, `~/.aws`, `.config/gcloud`) and the agent state tree. One shared `WorkingDirState` per session is wired across all four shell-class tools.
+- **`web.fetch <url>`** — GET an http(s) URL, return body as markdown (HTML), pretty JSON (application/json), or plain text. Mirrors Claude Code's `WebFetch`: GET-only by construction, follows redirects, no auth headers (use `shell.run curl` for those). Bypasses the approval modal because the surface is read-only and refuses to talk to private/loopback/metadata IPs. Streams the body and cancels the reader once `max_bytes` (default 50KB) is reached, so a misleading URL pointing at a multi-GB asset doesn't pull the whole thing before truncation. Inline ~80 LOC HTML→markdown converter (no new deps).
+
+### Fixed
+
+- **PathGuard symlink bypass** — on macOS, `/var/folders/...` resolves to `/private/var/folders/...` via symlink. PathGuard previously stored only the as-given form of the agent state tree + credential dirs, so a brain that addressed the canonical form smuggled past the deny rule. Now stores BOTH the raw `resolve()` form and the realpath-canonical form, and check time tests both. Closes the hole for `fs.write` / `fs.patch` (which already used PathGuard) as well as `shell.cd`.
+
+### Changed
+
+- Brain prompt: added `shell.run` for directory listings (`ls`, `find`) and `web.fetch` for HTTP GET to the NEVER-from-memory list, so non-qwen models don't have to infer the routing. Added `shell.cd` and `web.fetch` to the Tool preferences section as well.
+
 ## [0.10.3] - 2026-04-28
 
 ### Fixed
@@ -449,6 +464,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.10.4]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.4
 [0.10.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.3
 [0.10.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.2
 [0.10.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.1

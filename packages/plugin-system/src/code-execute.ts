@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { LocalBackend, type SandboxBackend, type ToolDef, redactEnv } from '@s0nderlabs/anima-core'
 import { z } from 'zod'
+import { type WorkingDirState, resolveCwd } from './cwd-state'
 
 /**
  * `code.execute` runs a snippet in a subprocess. Wraps shell.run with an
@@ -32,7 +33,11 @@ const ExecuteSchema = z.object({
 })
 
 interface CodeExecuteDeps {
-  cwd: string
+  /**
+   * Working directory. Pass a `WorkingDirState` to share with `shell.cd`
+   * (production); a plain string for a fixed cwd (tests).
+   */
+  cwd: string | WorkingDirState
   /** Phase 9.5: sandbox backend wraps the spawn. LocalBackend = passthrough. Optional for back-compat. */
   sandbox?: SandboxBackend
 }
@@ -50,13 +55,14 @@ interface RunResult {
 
 export function makeCodeExecute(deps: CodeExecuteDeps): ToolDef<z.infer<typeof ExecuteSchema>> {
   const sandbox = deps.sandbox ?? new LocalBackend()
+  const cwdState = resolveCwd(deps.cwd)
   return {
     name: 'code.execute',
     description:
       "Run a code snippet in bash/python/node/bun. Returns exit code, stdout, stderr. Honours the agent's permission/dangerous-pattern floor (shell.run-equivalent).",
     searchHint: 'code execute python javascript bash run snippet',
     schema: ExecuteSchema,
-    handler: async args => execute(args, deps.cwd, sandbox),
+    handler: async args => execute(args, cwdState.get(), sandbox),
   }
 }
 

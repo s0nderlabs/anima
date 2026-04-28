@@ -1,10 +1,15 @@
 import { spawn } from 'node:child_process'
 import { LocalBackend, type SandboxBackend, type ToolDef, redactEnv } from '@s0nderlabs/anima-core'
 import { z } from 'zod'
+import { type WorkingDirState, resolveCwd } from './cwd-state'
 
 interface ShellToolDeps {
-  /** Working directory for spawned commands (typically agent workspace). */
-  cwd: string
+  /**
+   * Working directory for spawned commands. Pass a `WorkingDirState` to share
+   * the cwd with `shell.cd` and other shell-class tools (production path), or
+   * a plain string for a fixed cwd (legacy + tests).
+   */
+  cwd: string | WorkingDirState
   /** Default timeout in ms. */
   defaultTimeoutMs?: number
   /**
@@ -33,6 +38,7 @@ const ShellSchema = z.object({
 
 export function makeShellRun(deps: ShellToolDeps): ToolDef<z.infer<typeof ShellSchema>> {
   const sandbox = deps.sandbox ?? new LocalBackend()
+  const cwdState = resolveCwd(deps.cwd)
   return {
     name: 'shell.run',
     description:
@@ -40,6 +46,7 @@ export function makeShellRun(deps: ShellToolDeps): ToolDef<z.infer<typeof ShellS
     searchHint: 'shell run bash command execute subprocess',
     schema: ShellSchema,
     handler: async args => {
+      const cwd = cwdState.get()
       const timeout = args.timeout_ms ?? deps.defaultTimeoutMs ?? 60_000
       const { env: redactedEnv, removed } = redactEnv(process.env)
       // Build an explicit /bin/sh -c <cmd> argv so the sandbox backend can
@@ -48,7 +55,7 @@ export function makeShellRun(deps: ShellToolDeps): ToolDef<z.infer<typeof ShellS
       const wrapped = await sandbox.wrapSpawn({
         command: '/bin/sh',
         args: ['-c', args.command],
-        options: { cwd: deps.cwd, env: redactedEnv },
+        options: { cwd, env: redactedEnv },
       })
       return new Promise(resolve => {
         const child = spawn(wrapped.command, wrapped.args, wrapped.options)
@@ -77,7 +84,7 @@ export function makeShellRun(deps: ShellToolDeps): ToolDef<z.infer<typeof ShellS
               timedOut,
               stdout: stdout.slice(-32_000),
               stderr: stderr.slice(-32_000),
-              cwd: deps.cwd,
+              cwd,
               redactedEnvVars: removed,
             },
             ...(timedOut

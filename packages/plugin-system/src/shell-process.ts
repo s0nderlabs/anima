@@ -7,6 +7,7 @@ import {
   redactEnv,
 } from '@s0nderlabs/anima-core'
 import { z } from 'zod'
+import { type WorkingDirState, resolveCwd } from './cwd-state'
 
 /**
  * v0.9.3 split: long-running subprocess management is FOUR flat tools, not
@@ -41,7 +42,11 @@ interface BackgroundProcess {
 const processes = new Map<string, BackgroundProcess>()
 
 interface ShellProcessDeps {
-  cwd: string
+  /**
+   * Working directory. Pass a `WorkingDirState` to share with `shell.cd`
+   * (production); a plain string for a fixed cwd (tests).
+   */
+  cwd: string | WorkingDirState
   /** Phase 9.5: sandbox wraps the long-running spawn. LocalBackend = passthrough. Optional for back-compat. */
   sandbox?: SandboxBackend
 }
@@ -70,13 +75,14 @@ export function makeShellProcessStart(
   deps: ShellProcessDeps,
 ): ToolDef<z.infer<typeof StartSchema>> {
   const sandbox = deps.sandbox ?? new LocalBackend()
+  const cwdState = resolveCwd(deps.cwd)
   return {
     name: 'shell.process_start',
     description:
       'Spawn a backgrounded shell command and return its id. Use for dev servers, watchers, REPLs, anything you need to keep running while you do other things. For one-shot commands, use shell.run instead.',
     searchHint: 'shell process spawn background daemon long running start',
     schema: StartSchema,
-    handler: async args => startProcess(args.command, args.cwd ?? deps.cwd, sandbox),
+    handler: async args => startProcess(args.command, args.cwd ?? cwdState.get(), sandbox),
   }
 }
 
