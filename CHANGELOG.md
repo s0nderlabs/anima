@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.5] - 2026-04-28
+
+### Fixed
+
+- **`shell.cd` deny check ran AFTER realpath, breaking on CI runners.** v0.10.4 ordered the handler as `realpath → guard.check`, so a path like `~/.ssh/foo` on a runner where `~/.ssh` doesn't exist would ENOENT before the deny rule fired (the test asserted `protected path` in the error string and saw `stat failed: ENOENT` instead). Flipped to `guard.check(abs) → realpath → guard.check(canonical)` so denials happen at the string layer first, with a defense-in-depth re-check after canonicalisation. Local + CI-sim both green.
+
 ## [0.10.4] - 2026-04-28
 
 ### Added
@@ -464,6 +470,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.10.5]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.5
 [0.10.4]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.4
 [0.10.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.3
 [0.10.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.2

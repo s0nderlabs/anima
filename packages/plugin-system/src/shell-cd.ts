@@ -33,19 +33,30 @@ export function makeShellCd(deps: ShellCdDeps): ToolDef<z.infer<typeof CdSchema>
     handler: async args => {
       const expanded = args.path.startsWith('~') ? args.path.replace('~', homedir()) : args.path
       const abs = isAbsolute(expanded) ? expanded : resolve(cwdState.get(), expanded)
+      // Run the deny check FIRST — before any filesystem syscall — so a
+      // protected target denies cleanly even when the path doesn't exist on
+      // disk (e.g. CI runners without ~/.ssh would otherwise ENOENT before
+      // the deny rule fires). PathGuard now canonicalises via realpath
+      // internally and stores both raw + canonical denylist entries, so
+      // symlinked credential dirs are still caught.
+      const guardResult = guard.check(abs)
+      if (!guardResult.allowed) {
+        return { ok: false, error: guardResult.reason ?? 'path denied' }
+      }
       // Canonicalise through realpath so the stored cwd matches what `pwd`
       // would print inside subsequent shell.run calls (macOS resolves
-      // /var/folders → /private/var/folders, etc.). PathGuard runs against
-      // the canonical form so symlinked credential dirs cannot smuggle past.
+      // /var/folders → /private/var/folders, etc.).
       let canonical: string
       try {
         canonical = await realpath(abs)
       } catch (e) {
         return { ok: false, error: `stat failed: ${(e as Error).message}` }
       }
-      const guardResult = guard.check(canonical)
-      if (!guardResult.allowed) {
-        return { ok: false, error: guardResult.reason ?? 'path denied' }
+      // Re-check after canonicalisation — covers the (rare) case where the
+      // raw form passes but the resolved target lands inside a denied tree.
+      const guardCanonical = guard.check(canonical)
+      if (!guardCanonical.allowed) {
+        return { ok: false, error: guardCanonical.reason ?? 'path denied' }
       }
       try {
         const info = await stat(canonical)
