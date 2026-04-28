@@ -6,9 +6,7 @@ import { zodToJsonSchema } from '../tools/zod-schema'
 
 const ToolSearchSchema = z.object({
   query: z.string().min(1, 'query is required'),
-  max_results: coerceInt
-    .refine(n => n > 0 && n <= 20, 'max_results must be 1..20')
-    .optional(),
+  max_results: coerceInt.refine(n => n > 0 && n <= 20, 'max_results must be 1..20').optional(),
 })
 
 export type ToolSearchArgs = z.infer<typeof ToolSearchSchema>

@@ -8,7 +8,7 @@ describe('browser parity (task #74)', () => {
   })
   afterEach(() => {
     __test.reset()
-    delete process.env.ANIMA_BROWSER_CDP_URL
+    process.env.ANIMA_BROWSER_CDP_URL = undefined
   })
 
   test('socketSafeTmpdir returns /tmp on darwin', () => {
@@ -58,7 +58,7 @@ describe('browser parity (task #74)', () => {
       expect(env.PATH).toBeTruthy()
       expect(env.ANIMA_OPERATOR_PRIVKEY).toBeUndefined()
     } finally {
-      delete process.env.ANIMA_OPERATOR_PRIVKEY
+      process.env.ANIMA_OPERATOR_PRIVKEY = undefined
     }
   })
 

@@ -70,9 +70,7 @@ export function makeSkillsList(deps: SkillsToolDeps): ToolDef<z.infer<typeof Lis
 
 const ViewSchema = z.object({
   id: z.string().min(1).describe('Skill id from skills.list (e.g., "anima:dogfood").'),
-  max_bytes: coerceInt
-    .refine(n => n > 0 && n <= 200_000, 'max_bytes must be 1..200000')
-    .optional(),
+  max_bytes: coerceInt.refine(n => n > 0 && n <= 200_000, 'max_bytes must be 1..200000').optional(),
 })
 
 export function makeSkillsView(deps: SkillsToolDeps): ToolDef<z.infer<typeof ViewSchema>> {

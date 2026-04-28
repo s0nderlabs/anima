@@ -1,5 +1,13 @@
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process'
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { type ToolDef, coerceBool, coerceInt, redactEnv } from '@s0nderlabs/anima-core'
@@ -152,17 +160,13 @@ function registerCleanup(): void {
           // Async + detached drops the message: the parent exits before the
           // child IPC connects to the daemon socket. 5s cap prevents hangs
           // on a frozen daemon.
-          spawnSync(
-            parts[0]!,
-            [...parts.slice(1), '--session', sess, 'close'],
-            {
-              stdio: 'ignore',
-              env: cachedSocketDir
-                ? { ...process.env, AGENT_BROWSER_SOCKET_DIR: cachedSocketDir }
-                : process.env,
-              timeout: 5000,
-            },
-          )
+          spawnSync(parts[0]!, [...parts.slice(1), '--session', sess, 'close'], {
+            stdio: 'ignore',
+            env: cachedSocketDir
+              ? { ...process.env, AGENT_BROWSER_SOCKET_DIR: cachedSocketDir }
+              : process.env,
+            timeout: 5000,
+          })
         } catch {}
       }
       if (cachedSocketDir) {
@@ -250,9 +254,7 @@ async function runAgentBrowserOnce(
   const cmdParts = bin.startsWith('npx ') ? bin.split(' ') : [bin]
 
   const cdpOverride = process.env.ANIMA_BROWSER_CDP_URL
-  const backendArgs = cdpOverride
-    ? ['--cdp', cdpOverride]
-    : ['--session', getSessionName()]
+  const backendArgs = cdpOverride ? ['--cdp', cdpOverride] : ['--session', getSessionName()]
 
   const socketDir = getSocketDir()
   const sanitizedCmd = command.replace(/[^a-z0-9_-]/gi, '_')
@@ -281,8 +283,12 @@ async function runAgentBrowserOnce(
         stdio: ['ignore', stdoutFd, stderrFd],
       })
     } catch (err) {
-      try { closeSync(stdoutFd) } catch {}
-      try { closeSync(stderrFd) } catch {}
+      try {
+        closeSync(stdoutFd)
+      } catch {}
+      try {
+        closeSync(stderrFd)
+      } catch {}
       rmSafe(stdoutPath)
       rmSafe(stderrPath)
       const msg = (err as Error).message
@@ -298,13 +304,19 @@ async function runAgentBrowserOnce(
       }
       return
     }
-    try { closeSync(stdoutFd) } catch {}
-    try { closeSync(stderrFd) } catch {}
+    try {
+      closeSync(stdoutFd)
+    } catch {}
+    try {
+      closeSync(stderrFd)
+    } catch {}
 
     let timedOut = false
     const timer = setTimeout(() => {
       timedOut = true
-      try { proc.kill('SIGKILL') } catch {}
+      try {
+        proc.kill('SIGKILL')
+      } catch {}
     }, timeoutMs)
 
     proc.on('error', err => {
@@ -352,12 +364,12 @@ const NavigateSchema = z.object({
 export function makeBrowserNavigate(deps: BrowserDeps): ToolDef<z.infer<typeof NavigateSchema>> {
   return {
     name: 'browser.navigate',
-    description: 'Open a URL in the agent-browser tab. Returns the new page metadata. Auto-waits 1500ms after navigation so the next browser.snapshot reflects the new page.',
+    description:
+      'Open a URL in the agent-browser tab. Returns the new page metadata. Auto-waits 1500ms after navigation so the next browser.snapshot reflects the new page.',
     shouldDefer: true,
     searchHint: 'browser navigate open url page',
     schema: NavigateSchema,
-    handler: async args =>
-      runAgentBrowser('open', [args.url], deps, { settleAfterMs: 1500 }),
+    handler: async args => runAgentBrowser('open', [args.url], deps, { settleAfterMs: 1500 }),
   }
 }
 
@@ -397,12 +409,12 @@ const ClickSchema = z.object({
 export function makeBrowserClick(deps: BrowserDeps): ToolDef<z.infer<typeof ClickSchema>> {
   return {
     name: 'browser.click',
-    description: 'Click an element by selector or snapshot ref. Auto-waits 1200ms post-click so any triggered navigation/state change settles before the next snapshot.',
+    description:
+      'Click an element by selector or snapshot ref. Auto-waits 1200ms post-click so any triggered navigation/state change settles before the next snapshot.',
     shouldDefer: true,
     searchHint: 'browser click element selector ref',
     schema: ClickSchema,
-    handler: async args =>
-      runAgentBrowser('click', [args.selector], deps, { settleAfterMs: 1200 }),
+    handler: async args => runAgentBrowser('click', [args.selector], deps, { settleAfterMs: 1200 }),
   }
 }
 
@@ -414,7 +426,8 @@ const TypeSchema = z.object({
 export function makeBrowserType(deps: BrowserDeps): ToolDef<z.infer<typeof TypeSchema>> {
   return {
     name: 'browser.type',
-    description: 'Type text into an element by selector or snapshot ref. Auto-waits 600ms post-type so debounced input handlers settle before the next snapshot.',
+    description:
+      'Type text into an element by selector or snapshot ref. Auto-waits 600ms post-type so debounced input handlers settle before the next snapshot.',
     shouldDefer: true,
     searchHint: 'browser type input text fill',
     schema: TypeSchema,
@@ -451,7 +464,8 @@ const BackSchema = z.object({})
 export function makeBrowserBack(deps: BrowserDeps): ToolDef<z.infer<typeof BackSchema>> {
   return {
     name: 'browser.back',
-    description: 'Navigate the browser history back one step. Auto-waits 1500ms for the previous page to render before the next snapshot.',
+    description:
+      'Navigate the browser history back one step. Auto-waits 1500ms for the previous page to render before the next snapshot.',
     shouldDefer: true,
     searchHint: 'browser back history previous page',
     schema: BackSchema,
@@ -466,12 +480,12 @@ const PressSchema = z.object({
 export function makeBrowserPress(deps: BrowserDeps): ToolDef<z.infer<typeof PressSchema>> {
   return {
     name: 'browser.press',
-    description: 'Send a single key press (Enter, Tab, Escape, Ctrl+A, etc.). Auto-waits 1500ms post-press so a form submit triggered by Enter has time to navigate before the next snapshot.',
+    description:
+      'Send a single key press (Enter, Tab, Escape, Ctrl+A, etc.). Auto-waits 1500ms post-press so a form submit triggered by Enter has time to navigate before the next snapshot.',
     shouldDefer: true,
     searchHint: 'browser press key keyboard',
     schema: PressSchema,
-    handler: async args =>
-      runAgentBrowser('press', [args.key], deps, { settleAfterMs: 1500 }),
+    handler: async args => runAgentBrowser('press', [args.key], deps, { settleAfterMs: 1500 }),
   }
 }
 
@@ -569,7 +583,9 @@ export const __test = {
     binResolved = false
     cachedSessionName = null
     if (cachedSocketDir) {
-      try { rmSync(cachedSocketDir, { recursive: true, force: true }) } catch {}
+      try {
+        rmSync(cachedSocketDir, { recursive: true, force: true })
+      } catch {}
     }
     cachedSocketDir = null
     cleanupRegistered = false

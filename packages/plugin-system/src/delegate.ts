@@ -1,4 +1,9 @@
-import { type ClaudeAgent, type DelegateBrainFactory, type ToolDef, coerceInt } from '@s0nderlabs/anima-core'
+import {
+  type ClaudeAgent,
+  type DelegateBrainFactory,
+  type ToolDef,
+  coerceInt,
+} from '@s0nderlabs/anima-core'
 import { z } from 'zod'
 
 /**
