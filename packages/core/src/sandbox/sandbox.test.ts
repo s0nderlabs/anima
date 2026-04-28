@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { makeSandboxBackend } from './factory'
+import { buildBwrapArgs } from './linux'
 import { LocalBackend } from './local'
 import { MacOSSandboxExecBackend } from './macos'
 import { buildSeatbeltProfile } from './seatbelt-profile'
@@ -98,6 +99,48 @@ describe('buildSeatbeltProfile', () => {
     })
     expect(profile).toContain('/path/with\\"quote')
     expect(profile).toContain('/path\\\\with\\\\backslash')
+  })
+
+  // Property-style fuzz of the escape function: every input must produce a
+  // syntactically valid (subpath "X") string — no unescaped backslashes/quotes/
+  // newlines that would prematurely close the literal or break SBPL parsing.
+  // The actual exploit risk is near-zero (operators don't trick themselves) but
+  // the cost of a clean test is one regex check per scenario.
+  test('escapes pathological inputs cleanly: nested quotes, sbpl operators, unicode', () => {
+    const cases: Array<[string, string]> = [
+      // Bare close-paren that could escape an SBPL form (must remain inside the literal)
+      ['/tmp/test)', '/tmp/test)'],
+      // Embedded "(allow file-write*" attempt to inject a new rule
+      [
+        '/tmp/" (allow file-write* (subpath "/etc"))',
+        '/tmp/\\" (allow file-write* (subpath \\"/etc\\"))',
+      ],
+      // Nested quotes
+      ['/path"with"many"quotes', '/path\\"with\\"many\\"quotes'],
+      // Backslash-quote pair
+      ['/x\\"y', '/x\\\\\\"y'],
+      // Carriage return / form feed
+      ['/x\ny', '/x y'], // newline becomes space
+      // Unicode emoji (valid path component on macOS)
+      ['/Users/alice/\u{1F600}-projects', '/Users/alice/\u{1F600}-projects'],
+      // SBPL pattern delimiters embedded
+      ['/path/#(literal)', '/path/#(literal)'],
+    ]
+    for (const [input, expectedFragment] of cases) {
+      const profile = buildSeatbeltProfile({
+        agentDir: input,
+        workspaceRoot: '/w',
+        homedir: '/h',
+      })
+      expect(profile).toContain(`(subpath "${expectedFragment}")`)
+      // After escape + concat, no unbalanced double quote inside (subpath "..."):
+      // every non-escaped " inside the literal would prematurely close it.
+      const subpathPattern = /\(subpath\s+"((?:\\.|[^"\\])*)"\)/g
+      // Strip well-formed (subpath "...") instances; remaining text shouldn't
+      // contain a stray (subpath ".. " missing its terminator.
+      const stripped = profile.replace(subpathPattern, '<<subpath>>')
+      expect(stripped).not.toContain('(subpath "')
+    }
   })
 
   test('re-allows agentDir AFTER the broad ~/.anima deny so anima state stays writable', () => {
@@ -202,21 +245,55 @@ describe('makeSandboxBackend factory', () => {
     }
   })
 
-  test('mode=os on linux falls back to LocalBackend with warning', () => {
+  test('mode=docker accepts resource caps + network/runtime overrides without crashing', () => {
+    // Wide-input smoke test: factory should accept all DockerBackend opts and
+    // construct (or fall back) without throwing, regardless of runtime presence.
     let warned = ''
     const b = makeSandboxBackend({
-      mode: 'os',
+      mode: 'docker',
       agentDir: '/a',
       workspaceRoot: '/w',
       homedir: '/h',
+      platform: 'darwin',
+      dockerCpu: 1.5,
+      dockerMemoryMb: 4096,
+      dockerDiskMb: 51200,
+      dockerNoNetwork: true,
+      dockerMountWorkspace: false,
+      warn: m => {
+        warned = m
+      },
+    })
+    if (b.mode === 'docker') {
+      expect(b.label.startsWith('docker:') || b.label.startsWith('podman:')).toBe(true)
+    } else {
+      expect(b.mode).toBe('none')
+      expect(warned).toContain('docker')
+    }
+  })
+
+  test('mode=os on linux constructs bubblewrap backend if bwrap exists, else falls back', () => {
+    let warned = ''
+    const b = makeSandboxBackend({
+      mode: 'os',
+      agentDir: '/tmp/anima-agent',
+      workspaceRoot: '/tmp',
+      homedir: '/root',
       platform: 'linux',
       warn: m => {
         warned = m
       },
     })
-    expect(b.mode).toBe('none')
-    expect(warned).toContain('linux')
-    expect(warned).toContain('passthrough')
+    // On a Linux machine with bubblewrap installed (apt install bubblewrap),
+    // mode === 'os' + label 'os:linux'. On macOS or stripped Linux without
+    // bwrap, factory falls back to LocalBackend with a warning. Either is
+    // acceptable; this test pins the contract, not the platform.
+    if (b.mode === 'os') {
+      expect(b.label).toBe('os:linux')
+    } else {
+      expect(b.mode).toBe('none')
+      expect(warned).toContain('bubblewrap')
+    }
   })
 
   test('mode=os on unknown platform falls back to LocalBackend with warning', () => {
@@ -247,4 +324,65 @@ describe('makeSandboxBackend factory', () => {
       expect(b.label).toBe('os:darwin')
     })
   }
+})
+
+describe('buildBwrapArgs (Linux profile)', () => {
+  test('binds agentDir + workspaceRoot writable', () => {
+    const args = buildBwrapArgs({
+      agentDir: '/home/u/.anima/agents/abc',
+      workspaceRoot: '/home/u/proj',
+      homedir: '/home/u',
+    })
+    expect(args).toContain('--bind')
+    expect(args.join(' ')).toContain('/home/u/.anima/agents/abc /home/u/.anima/agents/abc')
+    expect(args.join(' ')).toContain('/home/u/proj /home/u/proj')
+  })
+
+  test('blocks credential dirs via tmpfs overlay', () => {
+    const args = buildBwrapArgs({
+      agentDir: '/a',
+      workspaceRoot: '/w',
+      homedir: '/home/u',
+    })
+    const argString = args.join(' ')
+    expect(argString).toContain('--tmpfs /home/u/.ssh')
+    expect(argString).toContain('--tmpfs /home/u/.aws')
+    expect(argString).toContain('--tmpfs /home/u/.config/gcloud')
+    expect(argString).toContain('--tmpfs /home/u/.gnupg')
+  })
+
+  test('reads of root are allowed via --ro-bind', () => {
+    const args = buildBwrapArgs({ agentDir: '/a', workspaceRoot: '/w', homedir: '/h' })
+    expect(args.slice(0, 3)).toEqual(['--ro-bind', '/', '/'])
+  })
+
+  test('shares network but unshares everything else', () => {
+    const args = buildBwrapArgs({ agentDir: '/a', workspaceRoot: '/w', homedir: '/h' })
+    expect(args).toContain('--unshare-all')
+    expect(args).toContain('--share-net')
+    expect(args).toContain('--die-with-parent')
+    expect(args).toContain('--new-session')
+  })
+
+  test('respects extraWriteAllow for sandbox dirs', () => {
+    const args = buildBwrapArgs({
+      agentDir: '/a',
+      workspaceRoot: '/w',
+      homedir: '/h',
+      extraWriteAllow: ['/tmp/anima-test-sandbox-XYZ'],
+    })
+    expect(args.join(' ')).toContain(
+      '--bind /tmp/anima-test-sandbox-XYZ /tmp/anima-test-sandbox-XYZ',
+    )
+  })
+
+  test('respects extraWriteDeny via tmpfs', () => {
+    const args = buildBwrapArgs({
+      agentDir: '/a',
+      workspaceRoot: '/w',
+      homedir: '/h',
+      extraWriteDeny: ['/home/u/secrets'],
+    })
+    expect(args.join(' ')).toContain('--tmpfs /home/u/secrets')
+  })
 })

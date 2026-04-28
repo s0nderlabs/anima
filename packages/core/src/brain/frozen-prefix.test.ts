@@ -135,6 +135,66 @@ test('buildFrozenPrefix renders envInfo cwd + platform', () => {
   expect(rendered).toContain('platform: darwin')
 })
 
+test('envInfo with sandbox=docker surfaces inner OS + workspace mount + scope', () => {
+  const p = buildFrozenPrefix({
+    memoryIndex: null,
+    timestamp: null,
+    envInfo: {
+      cwd: '/tmp/x',
+      platform: 'darwin',
+      sandbox: {
+        mode: 'docker',
+        label: 'podman:nikolaik/python-nodejs:python3.11-nodejs20+workspace',
+        innerOs: 'linux',
+        workspaceMount: '/workspace',
+        scope: 'shell.run, code.execute, shell.process_start run inside the container',
+      },
+    },
+  })
+  const rendered = renderFrozenPrefix(p)
+  expect(rendered).toContain('sandbox: docker (podman:')
+  expect(rendered).toContain('inner os: linux')
+  expect(rendered).toContain('workspace mount: host cwd is bind-mounted at /workspace')
+  expect(rendered).toContain('scope: shell.run, code.execute')
+})
+
+test('envInfo with sandbox.mode=none does NOT add the sandbox section', () => {
+  const p = buildFrozenPrefix({
+    memoryIndex: null,
+    timestamp: null,
+    envInfo: {
+      cwd: '/tmp/x',
+      platform: 'darwin',
+      sandbox: { mode: 'none', label: 'none' },
+    },
+  })
+  const rendered = renderFrozenPrefix(p)
+  expect(rendered).toContain('cwd: /tmp/x')
+  expect(rendered).not.toContain('sandbox:')
+})
+
+test('envInfo with sandbox=os surfaces label + scope under # Environment', () => {
+  const p = buildFrozenPrefix({
+    memoryIndex: null,
+    timestamp: null,
+    envInfo: {
+      cwd: '/tmp/x',
+      platform: 'darwin',
+      sandbox: {
+        mode: 'os',
+        label: 'os:darwin',
+        innerOs: 'darwin',
+        workspaceMount: null,
+        scope: 'spawns wrapped in sandbox-exec; writes outside agentDir + cwd denied',
+      },
+    },
+  })
+  const rendered = renderFrozenPrefix(p)
+  expect(rendered).toContain('sandbox: os (os:darwin)')
+  expect(rendered).toContain('scope: spawns wrapped in sandbox-exec')
+  expect(rendered).not.toContain('workspace mount:')
+})
+
 test('skill-shadow filter keeps anima-source skills with the same name', () => {
   const skills = [
     {

@@ -4,6 +4,26 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.2] - 2026-04-28
+
+### Fixed
+
+- **DockerBackend container crash recovery was a false claim in v0.10.1.** The docstring promised "next wrapSpawn recreates the container" but the cached `containerId` survived external `podman kill` / OOM / daemon restart, so subsequent shell.run calls looped on `exit 125 — no such container` forever. Added `isContainerAlive` probe (`podman inspect --format '{{.State.Running}}'`, 3s timeout) in wrapSpawn that auto-invalidates the cache and re-runs `startContainer`. TTL-cached at 30s so happy-path spawns skip the ~30-70ms inspect tax. Verified live: external `podman kill` → next prompt spawns fresh container, brain resumes.
+
+### Added
+
+- **Hermes-style container resource caps.** Four new opt-in `sandbox.*` config fields: `dockerCpu` (`--cpus`), `dockerMemoryMb` (`--memory <N>m`), `dockerDiskMb` (`--storage-opt size=` — Linux+overlay2 only, no-op on macOS), `dockerNoNetwork` (`--network=none` for max paranoia). All unset by default — anima's stance is "let the container compete fairly with host work unless the operator opts in." Hermes recommended values documented in the annotated config template (`dockerCpu=1, dockerMemoryMb=5120, dockerDiskMb=51200`). Verified live via `podman inspect`: `Memory=2147483648`, `NanoCpus=1000000000` when `dockerCpu=1, dockerMemoryMb=2048` set.
+- **Always-on container hardening.** Ported hermes-agent's `_SECURITY_ARGS`: `--init` (tini PID 1, reaps zombies), `--cap-drop ALL` + selective add of DAC_OVERRIDE/CHOWN/FOWNER (only what package managers need), `--security-opt no-new-privileges` (blocks setuid escalation), `--pids-limit 256` (caps fork bombs), size-limited tmpfs at /tmp (512MB), /var/tmp (256MB, noexec), /run (64MB, noexec). Applied to every spawned container regardless of operator config. Verified via `podman inspect` showing CapDrop/CapAdd/SecurityOpt/PidsLimit/Tmpfs/Init flags all set.
+- **Linux bubblewrap backend (`LinuxBubblewrapBackend`).** Mode `'os'` on Linux now wraps spawns in `bwrap --ro-bind / / --bind agentDir/cwd/tmp --tmpfs <credential dirs> --proc /proc --dev /dev --unshare-all --share-net --die-with-parent --new-session -- ...`. Profile mirrors macOS seatbelt: deny by default, allow agentDir + cwd + /tmp writes, blackhole credential dirs (`~/.ssh`, `~/.aws`, `~/.config/gcloud`, `~/.config/anthropic`, `~/.gnupg`) via empty tmpfs overlays. Falls back to LocalBackend with a clear stderr warning if `bwrap` isn't installed. Macs are unaffected; existing seatbelt path stays.
+- **Sandbox awareness in the brain's frozen prefix.** New `SandboxEnvHint` exposed via `SandboxBackend.envHint()` and surfaced under `# Environment` in the system prompt. The brain now pre-knows mode/innerOs/workspaceMount/scope before its first turn, skipping the empirical-discovery dance (`pwd` + `ls /` + `uname` to figure out "am I in a container?"). Three friction points fixed at once: `fs.read('/workspace/X')` ENOENT loops, BSD-vs-GNU sed mismatch on first try, "where am I?" answered without tools. Verified live: brain answered with `toolCalls=0` when asked to describe environment, correctly identified docker container + Linux innerOs + workspace mount path.
+- **Shared `CREDENTIAL_DIR_RELATIVE_PATHS` constant.** macOS seatbelt and Linux bubblewrap profiles now blackhole the same credential dirs from a single source. Earlier the bwrap profile included `~/.config/anthropic` + `~/.gnupg` while the seatbelt profile didn't — drift closed.
+
+### Changed
+
+- `wrapSpawn` in DockerBackend now consults a 30s TTL cache before issuing `podman inspect`. Happy path skips the probe entirely after the first successful call within the window. Container kill is detected on the next probe ≤30s after death.
+- `chat.tsx` no longer assembles the brain's sandbox env hint via a 3-arm ternary; calls `sandbox.envHint?.() ?? null`. Backend-specific knowledge (e.g. "DockerBackend mounts at /workspace, MacOSSandboxExecBackend doesn't") moved into the backend that owns it.
+- `EnvInfo` extracted as a named exported type from `@s0nderlabs/anima-core/brain`. Earlier it was duplicated verbatim between `BuildPrefixArgs` and `renderEnvInfo`'s parameter signature.
+
 ## [0.10.1] - 2026-04-28
 
 ### Added
@@ -419,6 +439,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.10.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.2
 [0.10.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.1
 [0.10.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.0
 [0.9.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.9.2

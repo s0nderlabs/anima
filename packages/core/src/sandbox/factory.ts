@@ -14,6 +14,7 @@
  */
 
 import { DockerBackend } from './docker'
+import { LinuxBubblewrapBackend } from './linux'
 import { LocalBackend } from './local'
 import { MacOSSandboxExecBackend } from './macos'
 import type { SandboxBackend, SandboxBackendOpts, SandboxMode } from './types'
@@ -24,12 +25,20 @@ export interface MakeSandboxOpts extends SandboxBackendOpts {
   platform?: NodeJS.Platform
   /** Sink for the platform-fallback warning. Defaults to process.stderr.write. */
   warn?: (msg: string) => void
-  /** docker mode: container image override (default `oven/bun:1`). */
+  /** docker mode: container image override (default `nikolaik/python-nodejs:python3.11-nodejs20`). */
   dockerImage?: string
   /** docker mode: bind-mount workspaceRoot into container at /workspace (default false). */
   dockerMountWorkspace?: boolean
   /** docker mode: force a specific runtime binary path (auto-detect by default). */
   dockerRuntimePath?: string
+  /** docker mode: CPU cores cap (`--cpus`). Unset = unlimited. */
+  dockerCpu?: number
+  /** docker mode: memory cap in MB (`--memory <N>m`). Unset = unlimited. */
+  dockerMemoryMb?: number
+  /** docker mode: per-container disk cap in MB. Linux+overlay2 only; ignored on darwin. */
+  dockerDiskMb?: number
+  /** docker mode: block all network from inside container (`--network=none`). Default false. */
+  dockerNoNetwork?: boolean
 }
 
 export function makeSandboxBackend(opts: MakeSandboxOpts): SandboxBackend {
@@ -47,6 +56,10 @@ export function makeSandboxBackend(opts: MakeSandboxOpts): SandboxBackend {
         image: opts.dockerImage,
         mountWorkspace: opts.dockerMountWorkspace,
         runtimePath: opts.dockerRuntimePath,
+        cpu: opts.dockerCpu,
+        memoryMb: opts.dockerMemoryMb,
+        diskMb: opts.dockerDiskMb,
+        noNetwork: opts.dockerNoNetwork,
       })
     } catch (err) {
       warn(
@@ -69,10 +82,14 @@ export function makeSandboxBackend(opts: MakeSandboxOpts): SandboxBackend {
   }
 
   if (platform === 'linux') {
-    warn(
-      `anima: sandbox.mode="os" on linux is not yet implemented (bubblewrap pending), falling back to passthrough\n`,
-    )
-    return new LocalBackend()
+    try {
+      return new LinuxBubblewrapBackend(opts)
+    } catch (err) {
+      warn(
+        `anima: linux bubblewrap sandbox failed to initialize, falling back to passthrough: ${(err as Error).message}\n`,
+      )
+      return new LocalBackend()
+    }
   }
 
   warn(

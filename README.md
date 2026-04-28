@@ -86,10 +86,10 @@ The hard-deny `PathGuard` (credential dirs + agent state tree) applies in every 
 Permission heuristics catch known-dangerous patterns. The sandbox is a structural layer beneath them — even when the modal grants `s` (allow session) or yolo disables prompts entirely, the sandbox profile prevents writes outside an allowlist. Set `sandbox.mode` in `~/.anima/config.ts`:
 
 - `none` (default) — passthrough. Permission floor only.
-- `os` — macOS `sandbox-exec` (Apple seatbelt). Wraps every shell.run / code.execute / shell.process_start spawn. Allows writes to agentDir + cwd + `/tmp/anima-*` + `/var/folders`. Denies reads of `~/.ssh`, `~/.aws`, `~/Library/Keychains`, `~/.config/gcloud`. Linux bubblewrap pending.
-- `docker` — long-lived container per session, every shell-class spawn routes through `docker exec`. Auto-detects Docker Desktop or Podman. Default image `oven/bun:1`. Container has its own filesystem; host is invisible unless `sandbox.dockerMountWorkspace: true`. Mirrors hermes-agent's `TERMINAL_ENV=docker` isolation.
+- `os` — native OS sandbox. macOS uses `sandbox-exec` (Apple seatbelt); Linux uses `bubblewrap` (`bwrap`). Wraps every shell.run / code.execute / shell.process_start spawn. Allows writes to agentDir + cwd + `/tmp/anima-*` (+ `/var/folders` on macOS). Denies reads of `~/.ssh`, `~/.aws`, `~/.config/gcloud`, `~/.config/anthropic`, `~/.gnupg` (+ `~/Library/Keychains` on macOS). Falls back to passthrough with a stderr warning if `bwrap` isn't installed on Linux.
+- `docker` — long-lived container per session, every shell-class spawn routes through `docker exec`. Auto-detects Docker Desktop or Podman. Default image `nikolaik/python-nodejs:python3.11-nodejs20` (matches hermes; bash + python3 + node + npm + git on standard PATH). Container has its own filesystem; host is invisible unless `sandbox.dockerMountWorkspace: true`. Always-on hardening (cap-drop ALL + selective re-add, no-new-privileges, pids-limit 256, sized tmpfs at /tmp /var/tmp /run, --init for zombie reaping). Optional resource caps: `dockerCpu`, `dockerMemoryMb`, `dockerDiskMb`, `dockerNoNetwork`. Mirrors hermes-agent's `TERMINAL_ENV=docker` isolation.
 
-Belt-and-suspenders: permission floor stays on regardless of `sandbox.mode`.
+Belt-and-suspenders: permission floor stays on regardless of `sandbox.mode`. Container crashes (external `podman kill`, OOM, daemon restart) self-heal via a 30s-TTL `inspect` probe in `wrapSpawn`.
 
 ## Operator wallet sources
 

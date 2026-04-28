@@ -15,7 +15,13 @@
 
 import { existsSync } from 'node:fs'
 import { buildSeatbeltProfile } from './seatbelt-profile'
-import type { SandboxBackend, SandboxBackendOpts, SandboxSpawnRequest, WrappedSpawn } from './types'
+import type {
+  SandboxBackend,
+  SandboxBackendOpts,
+  SandboxEnvHint,
+  SandboxSpawnRequest,
+  WrappedSpawn,
+} from './types'
 
 const SANDBOX_EXEC_PATH = '/usr/bin/sandbox-exec'
 
@@ -42,6 +48,17 @@ export class MacOSSandboxExecBackend implements SandboxBackend {
   /** Test-only accessor for the rendered profile. */
   getProfile(): string {
     return this.profile
+  }
+
+  envHint(): SandboxEnvHint {
+    return {
+      mode: 'os',
+      label: this.label,
+      innerOs: 'darwin',
+      workspaceMount: null,
+      scope:
+        'shell.run, code.execute, shell.process_start are wrapped in sandbox-exec; writes outside agentDir + cwd + /tmp/anima-* are denied',
+    }
   }
 
   async wrapSpawn(req: SandboxSpawnRequest): Promise<WrappedSpawn> {

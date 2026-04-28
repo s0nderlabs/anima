@@ -136,6 +136,30 @@ export interface AnimaConfig {
      * `/opt/homebrew/bin/podman` to bypass a docker symlink.
      */
     dockerRuntimePath?: string
+    /**
+     * docker mode only: CPU cores cap (`--cpus`). Float (1.5 = 1.5 cores).
+     * Default unlimited (no cap). Set e.g. `1` to mirror hermes' default cap.
+     */
+    dockerCpu?: number
+    /**
+     * docker mode only: memory cap in MB (`--memory <N>m`). Default unlimited.
+     * Hermes default is 5120 (5GB); leaving unset is anima's default so the
+     * container competes fairly with host work without OOM-killing surprise.
+     */
+    dockerMemoryMb?: number
+    /**
+     * docker mode only: per-container writable-layer disk cap in MB. Linux +
+     * overlay2 with pquota only — silently dropped on macOS Docker Desktop /
+     * podman machine. Hermes default is 51200 (50GB).
+     */
+    dockerDiskMb?: number
+    /**
+     * docker mode only: block all network access from inside the container
+     * (`--network=none`). Default false (network reaches the internet through
+     * the runtime's bridge). Useful for max-paranoia code.execute that should
+     * never call out.
+     */
+    dockerNoNetwork?: boolean
   }
 }
 

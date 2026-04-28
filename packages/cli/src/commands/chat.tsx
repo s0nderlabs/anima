@@ -181,6 +181,10 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       dockerImage: config.sandbox?.dockerImage,
       dockerMountWorkspace: config.sandbox?.dockerMountWorkspace,
       dockerRuntimePath: config.sandbox?.dockerRuntimePath,
+      dockerCpu: config.sandbox?.dockerCpu,
+      dockerMemoryMb: config.sandbox?.dockerMemoryMb,
+      dockerDiskMb: config.sandbox?.dockerDiskMb,
+      dockerNoNetwork: config.sandbox?.dockerNoNetwork,
     })
   } catch (err) {
     process.stderr.write(
@@ -327,7 +331,16 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     current: scannedSkills.filter(s => !disabledSkillSet.has(s.id)),
   }
   const promptAppend = config.prompt?.append ?? null
-  const envInfo = { cwd: process.cwd(), platform: process.platform }
+  // Surface sandbox awareness so the brain doesn't have to empirically discover
+  // its container/profile via pwd + ls + uname round-trips. Without it,
+  // qwen3.6-plus would hit fs.read('/workspace/X') → ENOENT (fs.* runs on host),
+  // sed -i '' (BSD) → fails on Linux GNU sed, and answer "where am I?" only
+  // after probing. Each wasted call costs latency + tokens.
+  const envInfo = {
+    cwd: process.cwd(),
+    platform: process.platform,
+    sandbox: sandbox.envHint?.() ?? null,
+  }
   const buildPrefix = async () => {
     const idx = await readIndexFile(paths.memoryIndex).catch(() => null)
     return buildFrozenPrefix({

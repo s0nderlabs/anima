@@ -1,5 +1,6 @@
 import { stringifyIndex } from '../memory/index-file'
 import type { MemoryIndex } from '../memory/types'
+import type { SandboxEnvHint } from '../sandbox/types'
 import type { SkillRef } from '../skills/types'
 
 /**
@@ -104,8 +105,8 @@ export interface BuildPrefixArgs {
   skills?: readonly SkillRef[] | null
   /** Operator-supplied prompt addendum from anima.config.ts `prompt.append`. */
   promptAppend?: string | null
-  /** Optional environment hint (cwd, platform). Renders under # Environment. */
-  envInfo?: { cwd?: string | null; platform?: string | null } | null
+  /** Optional environment hint (cwd, platform, sandbox). Renders under # Environment. */
+  envInfo?: EnvInfo | null
   /** ISO timestamp of session start. Default: current time. */
   timestamp?: string | null
 }
@@ -173,13 +174,34 @@ export function buildFrozenPrefix({
   }
 }
 
-function renderEnvInfo(
-  env?: { cwd?: string | null; platform?: string | null } | null,
-): string | null {
+/**
+ * Environment hint surfaced under the # Environment block. The sandbox
+ * sub-field skips the brain's empirical-discovery dance for "am I in a
+ * container?" — pre-briefing on innerOs + workspace mount + tool scope
+ * lets it pick the right syntax (Linux GNU coreutils vs BSD) and tool
+ * (shell.run for /workspace, fs.* for host paths) on first try.
+ */
+export interface EnvInfo {
+  cwd?: string | null
+  platform?: string | null
+  sandbox?: SandboxEnvHint | null
+}
+
+function renderEnvInfo(env?: EnvInfo | null): string | null {
   if (!env) return null
   const lines: string[] = []
   if (env.cwd) lines.push(`- cwd: ${env.cwd}`)
   if (env.platform) lines.push(`- platform: ${env.platform}`)
+  if (env.sandbox && env.sandbox.mode !== 'none') {
+    const sb = env.sandbox
+    const head = `- sandbox: ${sb.mode}${sb.label ? ` (${sb.label})` : ''}`
+    lines.push(head)
+    if (sb.innerOs) lines.push(`  - inner os: ${sb.innerOs}`)
+    if (sb.workspaceMount) {
+      lines.push(`  - workspace mount: host cwd is bind-mounted at ${sb.workspaceMount} inside`)
+    }
+    if (sb.scope) lines.push(`  - scope: ${sb.scope}`)
+  }
   if (lines.length === 0) return null
   return lines.join('\n')
 }

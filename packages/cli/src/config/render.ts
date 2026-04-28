@@ -71,12 +71,20 @@ function renderSandboxBlock(sandbox: AnimaConfig['sandbox']): string {
   //    Override with 'oven/bun:1' (~250 MB) if you only need bun/ts.
   //    'dockerMountWorkspace: true' bind-mounts your launch cwd into
   //    /workspace (off by default for max isolation). 'dockerRuntimePath'
-  //    forces a specific runtime binary.
+  //    forces a specific runtime binary. Resource caps are unset by default
+  //    (container competes fairly with host work). Set them to mirror hermes'
+  //    production hardening: dockerCpu=1, dockerMemoryMb=5120, dockerDiskMb=
+  //    51200 (Linux+overlay2 only). dockerNoNetwork=true blocks all internet
+  //    access from the container (max paranoia for code.execute).
   //  sandbox: {
   //    mode: 'docker',
   //    dockerImage: 'nikolaik/python-nodejs:python3.11-nodejs20',
   //    dockerMountWorkspace: false,
   //    // dockerRuntimePath: '/opt/homebrew/bin/podman',
+  //    // dockerCpu: 1,           // CPU cores cap
+  //    // dockerMemoryMb: 5120,   // 5 GB memory cap
+  //    // dockerDiskMb: 51200,    // 50 GB disk cap (Linux + overlay2 only)
+  //    // dockerNoNetwork: true,  // block all network from inside container
   //  },
   // ---------------------------------------------------------------------------
 `

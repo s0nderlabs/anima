@@ -52,6 +52,30 @@ describe('renderConfigTs sandbox block', () => {
     expect(out).not.toContain('OPTION')
   })
 
+  test('annotated template documents resource caps with hermes default values', () => {
+    const out = renderConfigTs(baseConfig)
+    expect(out).toContain('// dockerCpu: 1')
+    expect(out).toContain('// dockerMemoryMb: 5120')
+    expect(out).toContain('// dockerDiskMb: 51200')
+    expect(out).toContain('// dockerNoNetwork: true')
+  })
+
+  test('config with sandbox docker + resource caps emits chosen numeric values', () => {
+    const out = renderConfigTs({
+      ...baseConfig,
+      sandbox: {
+        mode: 'docker',
+        dockerCpu: 2,
+        dockerMemoryMb: 4096,
+        dockerNoNetwork: true,
+      },
+    })
+    expect(out).toContain(`"dockerCpu": 2`)
+    expect(out).toContain(`"dockerMemoryMb": 4096`)
+    expect(out).toContain(`"dockerNoNetwork": true`)
+    expect(out).not.toContain('OPTION')
+  })
+
   test('output is valid TypeScript (parses as a default-export module)', async () => {
     const out = renderConfigTs(baseConfig)
     const { writeFile, rm, mkdtemp } = await import('node:fs/promises')

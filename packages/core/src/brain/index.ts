@@ -12,6 +12,7 @@ export {
   renderFrozenPrefix,
   DEFAULT_SYSTEM_PROMPT,
   type FrozenPrefix,
+  type EnvInfo,
 } from './frozen-prefix'
 export { OGComputeBrain, type OGComputeBrainOpts } from './og-compute'
 export {

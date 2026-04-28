@@ -42,6 +42,8 @@
  * credentials.
  */
 
+import { credentialDirs } from './credentials'
+
 export interface SeatbeltProfileOpts {
   agentDir: string
   workspaceRoot: string
@@ -76,11 +78,9 @@ export function buildSeatbeltProfile(opts: SeatbeltProfileOpts): string {
     ...(opts.extraWriteAllow ?? []).map(p => `(allow file-write* (subpath "${sbplEscape(p)}"))`),
   ].join('\n  ')
 
+  const credDirs = credentialDirs(opts.homedir).map(sbplEscape)
   const denySubpaths = [
-    `(deny file-write* (subpath "${home}/.ssh"))`,
-    `(deny file-write* (subpath "${home}/.aws"))`,
-    `(deny file-write* (subpath "${home}/Library/Keychains"))`,
-    `(deny file-write* (subpath "${home}/.config/gcloud"))`,
+    ...credDirs.map(p => `(deny file-write* (subpath "${p}"))`),
     `(deny file-write* (subpath "${home}/.anima"))`,
     ...(opts.extraWriteDeny ?? []).map(p => `(deny file-write* (subpath "${sbplEscape(p)}"))`),
   ].join('\n  ')
@@ -89,13 +89,8 @@ export function buildSeatbeltProfile(opts: SeatbeltProfileOpts): string {
   // binaries, libraries, project files, etc.) but EXPLICITLY deny credential
   // dirs. This blocks `cat ~/.ssh/id_rsa` -- shell.run that bypasses
   // PathGuard's tool-level checks. Network is broad; if exfil is a concern
-  // (read public file + POST somewhere), use Docker mode (Phase 9.5 followup).
-  const denyReadSubpaths = [
-    `(deny file-read* (subpath "${home}/.ssh"))`,
-    `(deny file-read* (subpath "${home}/.aws"))`,
-    `(deny file-read* (subpath "${home}/Library/Keychains"))`,
-    `(deny file-read* (subpath "${home}/.config/gcloud"))`,
-  ].join('\n  ')
+  // (read public file + POST somewhere), use Docker mode.
+  const denyReadSubpaths = credDirs.map(p => `(deny file-read* (subpath "${p}"))`).join('\n  ')
 
   // The agentDir is under ~/.anima/agents/<id>/, and we deny ~/.anima broadly,
   // so we MUST re-allow agentDir AFTER the deny to keep anima's own state

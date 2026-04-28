@@ -82,13 +82,32 @@ export interface SandboxSpawnRequest {
 }
 
 /**
+ * Environment hint surfaced to the brain via the frozen prefix's # Environment
+ * block. Lets the brain skip the "run pwd + ls / + uname to figure out where
+ * I am" empirical-discovery dance — saves wasted tool calls when the brain
+ * defaults to host-style commands inside a Linux container (BSD sed, fs.read
+ * /workspace ENOENT, etc.).
+ *
+ * Each non-passthrough backend implements `envHint()` to surface its specific
+ * shape. `LocalBackend` returns null (no sandbox, no hint).
+ */
+export interface SandboxEnvHint {
+  mode: SandboxMode
+  label: string
+  innerOs?: 'linux' | 'darwin' | null
+  workspaceMount?: string | null
+  scope?: string | null
+}
+
+/**
  * The backend interface. Implementations: LocalBackend (passthrough),
- * MacOSSandboxExecBackend (sandbox-exec wrapper), DockerBackend (per-session
- * container), future LinuxBubblewrapBackend.
+ * MacOSSandboxExecBackend (sandbox-exec wrapper), LinuxBubblewrapBackend
+ * (bwrap wrapper), DockerBackend (per-session container).
  *
  * `wrapSpawn` is async to allow lifecycle work (e.g. DockerBackend lazy-starts
  * the container on first call). Sync backends just `return Promise.resolve(...)`.
  * Optional `dispose` lets backends clean up (DockerBackend kills its container).
+ * Optional `envHint` returns a brain-facing description of the sandbox shape.
  */
 export interface SandboxBackend {
   /** Backend identifier surfaced in logs / debug output. */
@@ -105,4 +124,6 @@ export interface SandboxBackend {
   wrapSpawn(req: SandboxSpawnRequest): Promise<WrappedSpawn>
   /** Optional cleanup (kill long-lived containers, remove temp files). Called on anima exit. */
   dispose?(): Promise<void>
+  /** Optional brain-facing description of the sandbox shape. Null for passthrough. */
+  envHint?(): SandboxEnvHint | null
 }
