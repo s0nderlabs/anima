@@ -4,7 +4,28 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.2] - 2026-04-28
+## [0.10.0] - 2026-04-28
+
+### Added
+
+- **Phase 9.5 sandbox: structural isolation for anima limbs.** Defense-in-depth layer beneath the existing permission floor (PathGuard + dangerous-pattern + strict/prompt/yolo modes). Even when the modal allow-session grants a destructive command, or YOLO disables the modal entirely, the OS sandbox or container blocks writes outside an allowlist. Two backends ship, opt-in via `sandbox.mode` in `~/.anima/config.ts`:
+  - **`os` (Tier 2): macOS sandbox-exec wrapper.** Every shell.run / code.execute / shell.process_start spawn is wrapped in `sandbox-exec -p '<seatbelt-profile>' /bin/sh -c <cmd>`. Profile is deny-default with explicit allowlist for agentDir + cwd + `/tmp/anima-*` + `/var/folders`. Reads of `~/.ssh`, `~/.aws`, `~/Library/Keychains`, `~/.config/gcloud` are denied even though file-read is otherwise broad — blocks `cat ~/.ssh/id_rsa` exfiltration through shell.run. Empirically verified: `rm -rf /tmp/host-canary-X` returns "Operation not permitted", `rm -rf /tmp/tmux-501` (the Apr 28 incident path) is denied.
+  - **`docker` (Tier 3): long-lived container per session.** Same isolation shape as hermes-agent's `TERMINAL_ENV=docker`. Auto-detects Docker Desktop OR Podman runtime (matching hermes' setup). Lazy-starts a single `oven/bun:1` container on first wrapSpawn (~1s cold, image auto-pulled if missing), reuses it via cached containerId for the rest of the session, kills it on SIGINT/SIGTERM via async dispose handler. Container has its own filesystem; host /tmp invisible to the agent unless `sandbox.dockerMountWorkspace: true` is set. Verified: brain issued `rm -rf /tmp/host-canary` under YOLO, command ran in container's /tmp (empty), host canary survived.
+- **`SandboxBackend` interface + factory in `@s0nderlabs/anima-core`.** `LocalBackend` (passthrough, default), `MacOSSandboxExecBackend`, `DockerBackend`. `wrapSpawn` is async to support container lazy-start; sync backends use `Promise.resolve`. Optional `dispose()` for cleanup.
+- **`anima.config.ts` sandbox knobs.** `sandbox.mode: 'none' | 'os' | 'docker'`, `sandbox.dockerImage` (default `oven/bun:1`), `sandbox.dockerMountWorkspace` (default `false`, honors hermes' isolation-by-default principle), `sandbox.dockerRuntimePath` (override auto-detect, e.g. force `/opt/homebrew/bin/podman`).
+- **Sandbox startup banner.** When sandbox is active, anima prints to stderr at boot: `sandbox active [os:darwin]` or `container sandbox active [podman:oven/bun:1]` — operator can confirm isolation is on.
+
+### Fixed
+
+- **DockerBackend lazy-start race.** Concurrent first-callers used to each kick off `startContainer()` because `this.starting` was assigned only after `await`. Synchronous Promise assignment ensures all callers wait on the same start.
+- **DockerBackend orphan on Ctrl-C.** Earlier draft used `process.once('SIGINT', () => { onExit(); process.exit(0) })` — `process.exit` runs synchronously, discarding the dispose Promise and leaving the container alive. Signal handlers now `await` dispose before exiting.
+
+### Changed
+
+- `shell.run`, `code.execute`, `shell.process_start` now route every spawn through the configured `SandboxBackend`. With `mode='none'` (default), behavior is byte-identical to v0.9.2 — backward-compatible.
+- `PluginContext` extended with optional `sandbox: SandboxBackend`. Plugins receiving the context get the backend wired through automatically; legacy plugins that ignore it still work via the `LocalBackend` fallback.
+
+
 
 ### Added
 
@@ -383,6 +404,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.10.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.0
 [0.9.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.9.2
 [0.9.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.9.1
 [0.9.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.9.0

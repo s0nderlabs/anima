@@ -95,6 +95,27 @@ export class OGComputeBrain implements Brain {
     return services
   }
 
+  /** Live ledger balance in 0G (the prepaid compute credit). null on failure. */
+  async getLedgerBalance(): Promise<number | null> {
+    if (!this.broker) await this.init()
+    try {
+      const ledger = await this.broker!.ledger.getLedger()
+      // broker returns BigNumber-like; convert via formatEther fallback
+      const totalRaw = (ledger as { totalBalance?: bigint | string }).totalBalance
+      const lockedRaw = (ledger as { locked?: bigint | string }).locked
+      if (totalRaw == null) return null
+      const toBigInt = (v: bigint | string): bigint =>
+        typeof v === 'bigint' ? v : BigInt(v.toString())
+      const total = toBigInt(totalRaw)
+      const locked = lockedRaw != null ? toBigInt(lockedRaw) : 0n
+      const available = total - locked
+      // available is in wei (18 decimals)
+      return Number(available) / 1e18
+    } catch {
+      return null
+    }
+  }
+
   async infer(input: BrainInferInput): Promise<BrainTurn> {
     if (!this.broker) await this.init()
     const signal = input.signal

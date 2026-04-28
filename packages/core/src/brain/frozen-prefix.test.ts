@@ -96,16 +96,43 @@ test('buildFrozenPrefix filters claude-code agent-browser skill out of the index
   expect(p.skillIndexText).not.toContain('claude-code:agent-browser')
 })
 
-test('buildFrozenPrefix injects browser guidance when browser.navigate is loaded', () => {
-  const p = buildFrozenPrefix({
-    memoryIndex: null,
-    timestamp: null,
-    loadedToolNames: ['browser.navigate'],
-  })
+test('default system prompt includes browser guidance always-on (not conditional)', () => {
+  const p = buildFrozenPrefix({ memoryIndex: null, timestamp: null })
   const rendered = renderFrozenPrefix(p)
   expect(rendered).toContain('browser.navigate')
   expect(rendered).toContain('headless Chromium')
   expect(rendered).toContain('agent-browser')
+})
+
+test('default system prompt includes tool-use enforcement', () => {
+  const p = buildFrozenPrefix({ memoryIndex: null, timestamp: null })
+  const rendered = renderFrozenPrefix(p)
+  expect(rendered).toContain('You MUST use your tools')
+  expect(rendered).toContain('NEVER answer these from memory')
+})
+
+test('buildFrozenPrefix appends operator promptAppend under # Operator instructions', () => {
+  const p = buildFrozenPrefix({
+    memoryIndex: null,
+    timestamp: null,
+    promptAppend: 'Always reply in Indonesian.',
+  })
+  expect(p.appendText).toBe('Always reply in Indonesian.')
+  const rendered = renderFrozenPrefix(p)
+  expect(rendered).toContain('# Operator instructions')
+  expect(rendered).toContain('Always reply in Indonesian.')
+})
+
+test('buildFrozenPrefix renders envInfo cwd + platform', () => {
+  const p = buildFrozenPrefix({
+    memoryIndex: null,
+    timestamp: null,
+    envInfo: { cwd: '/tmp/x', platform: 'darwin' },
+  })
+  const rendered = renderFrozenPrefix(p)
+  expect(rendered).toContain('# Environment')
+  expect(rendered).toContain('cwd: /tmp/x')
+  expect(rendered).toContain('platform: darwin')
 })
 
 test('skill-shadow filter keeps anima-source skills with the same name', () => {

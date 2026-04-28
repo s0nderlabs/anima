@@ -40,10 +40,30 @@ export function createChatState(opts: CreateChatStateOpts) {
   const [pendingApproval, setPendingApproval] = createSignal<PendingApproval | null>(null)
   const [approvalsMode, setApprovalsMode] = createSignal<PermissionMode>(opts.approvalsMode)
 
+  // 0G Compute ledger balance, in 0G. Refreshed at chat init and after each
+  // per-turn auto-sync. null = not yet fetched / fetch failed.
+  const [balance, setBalance] = createSignal<number | null>(null)
+  // ms epoch when current turn started (status flipped to 'thinking'). The
+  // spinner row reads this and renders elapsed seconds. Cleared on idle.
+  const [turnStartedAt, setTurnStartedAt] = createSignal<number | null>(null)
+
   // Per-turn AbortController. Set when handleSubmit kicks off brain.infer;
   // cleared (set to null) after the turn ends or is aborted. The keyboard
   // handler reads it to wire Esc → abort.
   const [activeAbort, setActiveAbort] = createSignal<AbortController | null>(null)
+
+  // Wrap status setter so the turn-start timestamp tracks status changes
+  // automatically. Every code path that flips to 'thinking' starts the
+  // clock; every flip to idle/error stops it. Removes the burden from
+  // call sites.
+  const setStatusTracked: typeof setStatus = next => {
+    const prev = status()
+    const result = setStatus(next)
+    const after = status()
+    if (prev !== 'thinking' && after === 'thinking') setTurnStartedAt(Date.now())
+    else if (prev === 'thinking' && after !== 'thinking') setTurnStartedAt(null)
+    return result
+  }
 
   let idCounter = 1
   const nextId = () => `row-${idCounter++}`
@@ -66,12 +86,16 @@ export function createChatState(opts: CreateChatStateOpts) {
     usage,
     pendingApproval,
     approvalsMode,
+    balance,
+    turnStartedAt,
     activeAbort,
     setInput,
-    setStatus,
+    setStatus: setStatusTracked,
     setUsage,
     setPendingApproval,
     setApprovalsMode,
+    setBalance,
+    setTurnStartedAt,
     setActiveAbort,
     pushRow,
     identityLabel: opts.identityLabel,

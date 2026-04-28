@@ -93,6 +93,50 @@ export interface AnimaConfig {
   skills?: {
     disabled?: string[]
   }
+  /**
+   * v0.9.3: operator-supplied additions to the system prompt. `append` is
+   * concatenated under a `# Operator instructions` header AFTER anima's
+   * built-in safety + tool-use scaffolding. Can NOT replace the base prompt;
+   * use it for personal rules ("always reply in Indonesian", "prefer Bun
+   * over npm", "follow our team commit convention").
+   */
+  prompt?: {
+    append?: string | null
+  }
+  /**
+   * v0.9.4 (Apr 28 2026): structural sandbox for limb spawns. Defense-in-depth
+   * BENEATH the permission floor — even when `s` (allow session) or yolo grants
+   * a destructive command, the sandbox profile prevents writes outside an
+   * allowlist (agentDir + workspaceRoot + /tmp/anima-* + /var/folders).
+   *
+   *  - `none` (default): passthrough, today's behaviour. Permission floor only.
+   *  - `os`: native OS sandbox. macOS = sandbox-exec wrapper. Linux = bubblewrap
+   *    (post-MVP, falls back to passthrough with warning until impl lands).
+   *    Catches the rm-cascading-into-orphan-daemons class of incident.
+   *  - `docker`: long-lived container per session, every spawn through `docker
+   *    exec`. NOT YET IMPLEMENTED — separate Phase 9.5 follow-up bundle.
+   */
+  sandbox?: {
+    mode?: 'none' | 'os' | 'docker'
+    /**
+     * docker mode only: container image. Default `oven/bun:1`. Compatible
+     * with Docker Desktop AND Podman (CLI-compatible). Override for custom
+     * tooling: `nikolaik/python-nodejs:python3.11-nodejs20`, etc.
+     */
+    dockerImage?: string
+    /**
+     * docker mode only: bind-mount the host's workspaceRoot into the
+     * container at /workspace. Default `false` for max isolation. Set true
+     * if the agent should read/edit your project files.
+     */
+    dockerMountWorkspace?: boolean
+    /**
+     * docker mode only: force a specific container runtime binary. Auto-detect
+     * by default (tries docker, then podman). Override e.g. to
+     * `/opt/homebrew/bin/podman` to bypass a docker symlink.
+     */
+    dockerRuntimePath?: string
+  }
 }
 
 export type AnimaConfigInput = Partial<AnimaConfig> & Pick<AnimaConfig, 'network'>
@@ -106,6 +150,8 @@ const DEFAULT_CONFIG: Omit<AnimaConfig, 'network' | 'storage'> = {
   operator: null,
   approvals: { mode: 'prompt', allowlist: [] },
   skills: { disabled: [] },
+  prompt: { append: null },
+  sandbox: { mode: 'none' },
 }
 
 export function defineConfig(input: AnimaConfigInput): AnimaConfig {
@@ -121,6 +167,8 @@ export function defineConfig(input: AnimaConfigInput): AnimaConfig {
     operator: input.operator ?? DEFAULT_CONFIG.operator,
     approvals: input.approvals ?? DEFAULT_CONFIG.approvals,
     skills: input.skills ?? DEFAULT_CONFIG.skills,
+    prompt: input.prompt ?? DEFAULT_CONFIG.prompt,
+    sandbox: input.sandbox ?? DEFAULT_CONFIG.sandbox,
   }
 }
 

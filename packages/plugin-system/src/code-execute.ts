@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { type ToolDef, redactEnv } from '@s0nderlabs/anima-core'
+import { LocalBackend, type SandboxBackend, type ToolDef, redactEnv } from '@s0nderlabs/anima-core'
 import { z } from 'zod'
 
 /**
@@ -33,6 +33,8 @@ const ExecuteSchema = z.object({
 
 interface CodeExecuteDeps {
   cwd: string
+  /** Phase 9.5: sandbox backend wraps the spawn. LocalBackend = passthrough. Optional for back-compat. */
+  sandbox?: SandboxBackend
 }
 
 interface RunResult {
@@ -47,19 +49,21 @@ interface RunResult {
 }
 
 export function makeCodeExecute(deps: CodeExecuteDeps): ToolDef<z.infer<typeof ExecuteSchema>> {
+  const sandbox = deps.sandbox ?? new LocalBackend()
   return {
     name: 'code.execute',
     description:
       "Run a code snippet in bash/python/node/bun. Returns exit code, stdout, stderr. Honours the agent's permission/dangerous-pattern floor (shell.run-equivalent).",
     searchHint: 'code execute python javascript bash run snippet',
     schema: ExecuteSchema,
-    handler: async args => execute(args, deps.cwd),
+    handler: async args => execute(args, deps.cwd, sandbox),
   }
 }
 
 async function execute(
   args: z.infer<typeof ExecuteSchema>,
   defaultCwd: string,
+  sandbox: SandboxBackend,
 ): Promise<RunResult> {
   const interp = pickInterpreter(args.language)
   if (!interp) return { ok: false, error: `unsupported language: ${args.language}` }
@@ -69,8 +73,13 @@ async function execute(
   const cwd = args.cwd && args.cwd.trim().length > 0 ? args.cwd : defaultCwd
   const timeoutMs = args.timeout_ms ?? 30_000
   const { env: redactedEnv } = redactEnv(process.env as Record<string, string>)
+  const wrapped = await sandbox.wrapSpawn({
+    command: interp.command,
+    args: [...interp.args, file],
+    options: { cwd, env: redactedEnv },
+  })
   return await new Promise<RunResult>(resolve => {
-    const proc = spawn(interp.command, [...interp.args, file], { cwd, env: redactedEnv })
+    const proc = spawn(wrapped.command, wrapped.args, wrapped.options)
     let stdout = ''
     let stderr = ''
     let timedOut = false

@@ -47,6 +47,29 @@ function formatUsage(usage: { total?: number; cached?: number } | null | undefin
   return cached ? `${totalK} t (${cachedK} cached)` : `${totalK} t`
 }
 
+function formatBalance(balance: number | null | undefined): string {
+  if (balance == null) return ''
+  if (balance >= 100) return `${balance.toFixed(0)} 0G`
+  if (balance >= 1) return `${balance.toFixed(2)} 0G`
+  return `${balance.toFixed(3)} 0G`
+}
+
+function balanceColor(balance: number | null | undefined): string {
+  if (balance == null) return '#9ca3af'
+  if (balance < 0.5) return '#fca5a5'
+  if (balance < 1.5) return '#fbbf24'
+  return '#9ca3af'
+}
+
+function formatElapsed(startedAt: number | null | undefined): string {
+  if (!startedAt) return ''
+  const sec = Math.floor((Date.now() - startedAt) / 1000)
+  if (sec < 60) return `${sec}s`
+  const m = Math.floor(sec / 60)
+  const s = sec % 60
+  return `${m}m${s.toString().padStart(2, '0')}s`
+}
+
 function summarizeApprovalSubject(req: {
   kind: string
   command?: string
@@ -168,6 +191,25 @@ export function ChatApp(props: AppProps) {
       SPINNER_FRAME_MS,
     )
     onCleanup(() => clearInterval(id))
+  })
+
+  // When the approval modal mounts, scrollbox flexGrow=1 compresses to give
+  // it room. opentui's stickyScroll reanchors against the new shorter
+  // viewport before content remeasures, sometimes landing at scrollTop=0.
+  // Force a re-snap to the bottom one tick after mount.
+  createEffect(() => {
+    const pending = props.state.pendingApproval()
+    if (!pending) return
+    queueMicrotask(() => {
+      if (!scrollboxRef) return
+      // Setting scrollTop to a large value clamps to scrollHeight inside opentui.
+      try {
+        scrollboxRef.scrollTop = Number.MAX_SAFE_INTEGER
+      } catch {
+        // Older opentui versions: scrollBy with a big delta lands at the bottom.
+        scrollboxRef.scrollBy?.(1_000_000)
+      }
+    })
   })
 
   useKeyboard(evt => {
@@ -305,12 +347,20 @@ export function ChatApp(props: AppProps) {
       {/* Status hint row above input. Always rendered (no Show wrapper) so
           the row's height never collapses; spinner content swaps between a
           spinner string and a single space (never empty — opentui's text
-          renderer chokes on truly-empty children). */}
+          renderer chokes on truly-empty children). The elapsed counter
+          re-evaluates on every spinnerFrame tick (80ms), no extra timer. */}
       <box flexDirection="row" flexShrink={0} paddingLeft={3} paddingRight={2} marginTop={1}>
         <text fg="#67e8f9" flexGrow={1}>
-          {props.state.status() === 'thinking'
-            ? `${SPINNER_FRAMES[spinnerFrame()]} thinking… (esc to interrupt)`
-            : ' '}
+          {(() => {
+            if (props.state.status() !== 'thinking') return ' '
+            // re-read spinnerFrame so this expression is reactive
+            spinnerFrame()
+            const elapsed = formatElapsed(props.state.turnStartedAt())
+            const frame = SPINNER_FRAMES[spinnerFrame()]
+            return elapsed
+              ? `${frame} thinking… ${elapsed} (esc to interrupt)`
+              : `${frame} thinking… (esc to interrupt)`
+          })()}
         </text>
       </box>
 
@@ -330,11 +380,14 @@ export function ChatApp(props: AppProps) {
           {'> '}
         </text>
         <text wrapMode="word" flexGrow={1} fg="#e5e7eb">
-          {props.state.input()}
+          {`${props.state.input()}${props.state.status() === 'idle' ? '▋' : ''}`}
         </text>
       </box>
 
-      {/* Status footer */}
+      {/* Status footer. Each separator is paired with its value via a Show so
+          dropping a value also drops its leading separator (no orphans).
+          Hint text takes flexShrink=1 so on narrow terminals it compresses
+          before colliding with the left side. */}
       <box flexDirection="row" flexShrink={0} paddingLeft={2} paddingRight={2}>
         <text fg="#86efac" flexShrink={0}>
           {props.state.identityLabel}
@@ -351,6 +404,14 @@ export function ChatApp(props: AppProps) {
         <text fg={props.state.approvalsMode() === 'off' ? '#fbbf24' : '#9ca3af'} flexShrink={0}>
           {`perms: ${props.state.approvalsMode()}`}
         </text>
+        <Show when={props.state.balance() != null}>
+          <text fg="#374151" flexShrink={0}>
+            {'  ·  '}
+          </text>
+          <text fg={balanceColor(props.state.balance())} flexShrink={0}>
+            {formatBalance(props.state.balance())}
+          </text>
+        </Show>
         <Show when={props.state.usage()}>
           <text fg="#374151" flexShrink={0}>
             {'  ·  '}
@@ -359,14 +420,6 @@ export function ChatApp(props: AppProps) {
             {formatUsage(props.state.usage())}
           </text>
         </Show>
-        <text fg="#374151" flexGrow={1}>
-          {''}
-        </text>
-        <text fg="#4b5563" flexShrink={0}>
-          {props.state.status() === 'thinking'
-            ? 'esc interrupt · opt+u/d scroll · ctrl+c exit'
-            : 'opt+u/d scroll · ctrl+c exit'}
-        </text>
       </box>
     </box>
   )

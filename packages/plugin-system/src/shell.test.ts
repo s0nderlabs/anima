@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import type { SandboxBackend, SandboxSpawnRequest, WrappedSpawn } from '@s0nderlabs/anima-core'
 import { makeShellRun } from './shell'
 
 describe('shell.run', () => {
@@ -53,6 +54,29 @@ describe('shell.run', () => {
       expect(out.ok).toBe(false)
       const d = out.data as { timedOut: boolean }
       expect(d.timedOut).toBe(true)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+  // Phase 9.5 integration: shell.run must delegate every spawn through the
+  // SandboxBackend so that mode='os' actually wraps the command.
+  it('routes every spawn through SandboxBackend.wrapSpawn', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'anima-shell-'))
+    try {
+      const seen: SandboxSpawnRequest[] = []
+      const fakeBackend: SandboxBackend = {
+        mode: 'none',
+        label: 'test',
+        async wrapSpawn(req): Promise<WrappedSpawn> {
+          seen.push(req)
+          return { command: req.command, args: req.args, options: req.options }
+        },
+      }
+      const tool = makeShellRun({ cwd: dir, sandbox: fakeBackend })
+      await tool.handler({ command: 'echo backend-was-called' })
+      expect(seen.length).toBe(1)
+      expect(seen[0]?.command).toBe('/bin/sh')
+      expect(seen[0]?.args).toEqual(['-c', 'echo backend-was-called'])
     } finally {
       await rm(dir, { recursive: true, force: true })
     }

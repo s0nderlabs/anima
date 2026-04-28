@@ -279,3 +279,19 @@ export {
   type ClaudeAgent,
   type ClaudeExtrasDiscoveryResult,
 } from './claude-plugins'
+
+export {
+  LocalBackend,
+  MacOSSandboxExecBackend,
+  DockerBackend,
+  makeSandboxBackend,
+  buildSeatbeltProfile,
+  type SandboxBackend,
+  type SandboxBackendOpts,
+  type SandboxMode,
+  type SandboxSpawnRequest,
+  type WrappedSpawn,
+  type SeatbeltProfileOpts,
+  type MakeSandboxOpts,
+  type DockerBackendOpts,
+} from './sandbox'

@@ -1,19 +1,29 @@
 import { type ChildProcess, spawn } from 'node:child_process'
-import { type ToolDef, coerceBool, redactEnv } from '@s0nderlabs/anima-core'
+import {
+  LocalBackend,
+  type SandboxBackend,
+  type ToolDef,
+  coerceBool,
+  redactEnv,
+} from '@s0nderlabs/anima-core'
 import { z } from 'zod'
 
 /**
- * `shell.process`: long-running background subprocess with a handle id.
+ * v0.9.3 split: long-running subprocess management is FOUR flat tools, not
+ * a discriminated union. qwen3.6-plus narrates results when faced with
+ * `action: 'start'|'output'|'list'|'kill'` schemas (regression #1). Flat
+ * z.object schemas remove that footgun.
  *
- * The brain calls `shell.process { action: 'start', command: 'bun dev' }` to
- * spin up a server, then `shell.process { action: 'output', id }` to read
- * accumulated stdout/stderr, and `shell.process { action: 'kill', id }` to
- * tear it down. State lives in module-level memory; the process tree is
- * killed when anima exits.
+ * - `shell.process_start`  — spawn a backgrounded command, returns id
+ * - `shell.process_output` — read stdout/stderr by id
+ * - `shell.process_list`   — list active + recently-exited entries
+ * - `shell.process_kill`   — terminate by id (SIGTERM / SIGKILL / SIGINT)
  *
- * This is distinct from `shell.run`: shell.run waits for completion (good for
- * one-shot commands), shell.process backgrounds it (good for dev servers,
- * watchers, REPLs).
+ * State lives in module-level memory shared across the four tools; the
+ * process tree is killed when anima exits via killAllProcesses().
+ *
+ * Distinct from `shell.run` which waits for completion (one-shot
+ * commands). shell.process_start backgrounds it (dev servers, watchers).
  */
 
 interface BackgroundProcess {
@@ -30,64 +40,92 @@ interface BackgroundProcess {
 
 const processes = new Map<string, BackgroundProcess>()
 
-const ProcessSchema = z.object({
-  action: z
-    .enum(['start', 'output', 'list', 'kill'])
-    .describe(
-      "'start' (returns id; requires command), 'output' (requires id), 'list' (no other args), 'kill' (requires id)",
-    ),
-  command: z
-    .string()
-    .min(1)
-    .optional()
-    .describe('For action=start: command to run via /bin/sh -c.'),
-  cwd: z.string().optional().describe('For action=start: working directory override.'),
-  id: z.string().min(1).optional().describe('For action=output|kill: id from a previous start.'),
-  clear: coerceBool
-    .optional()
-    .describe('For action=output: clear the captured output after returning.'),
+interface ShellProcessDeps {
+  cwd: string
+  /** Phase 9.5: sandbox wraps the long-running spawn. LocalBackend = passthrough. Optional for back-compat. */
+  sandbox?: SandboxBackend
+}
+
+const StartSchema = z.object({
+  command: z.string().min(1).describe('Command to run via /bin/sh -c, in the background.'),
+  cwd: z.string().optional().describe('Working directory override. Defaults to anima cwd.'),
+})
+
+const OutputSchema = z.object({
+  id: z.string().min(1).describe('Process id from a prior shell.process_start.'),
+  clear: coerceBool.optional().describe('Clear captured output after returning. Default false.'),
+})
+
+const ListSchema = z.object({})
+
+const KillSchema = z.object({
+  id: z.string().min(1).describe('Process id from a prior shell.process_start.'),
   signal: z
     .enum(['SIGTERM', 'SIGKILL', 'SIGINT'])
     .optional()
-    .describe('For action=kill: signal to send. Default SIGTERM.'),
+    .describe('Signal to send. Default SIGTERM.'),
 })
 
-interface ShellProcessDeps {
-  cwd: string
-}
-
-export function makeShellProcess(deps: ShellProcessDeps): ToolDef<z.infer<typeof ProcessSchema>> {
+export function makeShellProcessStart(
+  deps: ShellProcessDeps,
+): ToolDef<z.infer<typeof StartSchema>> {
+  const sandbox = deps.sandbox ?? new LocalBackend()
   return {
-    name: 'shell.process',
+    name: 'shell.process_start',
     description:
-      "Manage long-running background subprocesses. Actions: 'start' (returns id), 'output' (captures stdout/stderr), 'list' (all active), 'kill' (terminate by id). Use shell.run for one-shot commands instead.",
-    searchHint: 'shell process background subprocess long running daemon',
-    schema: ProcessSchema,
-    handler: async args => {
-      switch (args.action) {
-        case 'start':
-          if (!args.command) return { ok: false, error: 'command is required for action=start' }
-          return startProcess(args.command, args.cwd ?? deps.cwd)
-        case 'output':
-          if (!args.id) return { ok: false, error: 'id is required for action=output' }
-          return captureOutput(args.id, args.clear ?? false)
-        case 'list':
-          return listProcesses()
-        case 'kill':
-          if (!args.id) return { ok: false, error: 'id is required for action=kill' }
-          return killProcess(args.id, args.signal ?? 'SIGTERM')
-      }
-    },
+      'Spawn a backgrounded shell command and return its id. Use for dev servers, watchers, REPLs, anything you need to keep running while you do other things. For one-shot commands, use shell.run instead.',
+    searchHint: 'shell process spawn background daemon long running start',
+    schema: StartSchema,
+    handler: async args => startProcess(args.command, args.cwd ?? deps.cwd, sandbox),
   }
 }
 
-function startProcess(
+export function makeShellProcessOutput(): ToolDef<z.infer<typeof OutputSchema>> {
+  return {
+    name: 'shell.process_output',
+    description:
+      'Read accumulated stdout + stderr of a backgrounded process by id. Returns running flag and exit_code (null while running). Set clear=true to drain the buffer after reading.',
+    searchHint: 'shell process output stdout stderr capture read',
+    schema: OutputSchema,
+    handler: async args => captureOutput(args.id, args.clear ?? false),
+  }
+}
+
+export function makeShellProcessList(): ToolDef<z.infer<typeof ListSchema>> {
+  return {
+    name: 'shell.process_list',
+    description:
+      'List all backgrounded processes (active and recently-exited) with their commands, cwd, and status.',
+    searchHint: 'shell process list active running daemons subprocesses',
+    schema: ListSchema,
+    handler: async () => listProcesses(),
+  }
+}
+
+export function makeShellProcessKill(): ToolDef<z.infer<typeof KillSchema>> {
+  return {
+    name: 'shell.process_kill',
+    description:
+      'Terminate a backgrounded process by id. Default signal is SIGTERM. Returns killed=true if a live process was signalled, killed=false if it had already exited.',
+    searchHint: 'shell process kill terminate sigterm sigkill stop',
+    schema: KillSchema,
+    handler: async args => killProcess(args.id, args.signal ?? 'SIGTERM'),
+  }
+}
+
+async function startProcess(
   command: string,
   cwd: string,
-): { ok: boolean; data?: { id: string }; error?: string } {
+  sandbox: SandboxBackend,
+): Promise<{ ok: boolean; data?: { id: string }; error?: string }> {
   const id = `proc-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const { env } = redactEnv(process.env as Record<string, string>)
-  const proc = spawn('/bin/sh', ['-c', command], { cwd, env })
+  const wrapped = await sandbox.wrapSpawn({
+    command: '/bin/sh',
+    args: ['-c', command],
+    options: { cwd, env },
+  })
+  const proc = spawn(wrapped.command, wrapped.args, wrapped.options)
   const entry: BackgroundProcess = {
     id,
     command,
@@ -148,8 +186,6 @@ function captureOutput(
     entry.stdout = ''
     entry.stderr = ''
   }
-  // After the brain reads output for an exited process, evict it so
-  // long-running sessions don't accumulate dead entries with multi-MB buffers.
   if (entry.exitCode !== null && clear) {
     processes.delete(id)
   }

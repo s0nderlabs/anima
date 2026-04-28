@@ -7,7 +7,7 @@
  * registered tool; chat.tsx hooks `pre_tool_call` to enforce.
  */
 
-import type { NativePlugin, ToolDef } from '@s0nderlabs/anima-core'
+import { LocalBackend, type NativePlugin, type ToolDef } from '@s0nderlabs/anima-core'
 import {
   makeBrowserBack,
   makeBrowserClick,
@@ -25,7 +25,12 @@ import { makeDelegateTask, makeVisionAnalyze } from './delegate'
 import { makeFsPatch, makeFsRead, makeFsSearch, makeFsWrite } from './fs'
 import { makeSessionSearch } from './session-search'
 import { makeShellRun } from './shell'
-import { makeShellProcess } from './shell-process'
+import {
+  makeShellProcessKill,
+  makeShellProcessList,
+  makeShellProcessOutput,
+  makeShellProcessStart,
+} from './shell-process'
 import { makeSkillsList, makeSkillsView } from './skills'
 import { makeSkillsManage } from './skills-manage'
 import { makeClarify, makeTodo } from './todo'
@@ -36,7 +41,10 @@ export {
   makeFsPatch,
   makeFsSearch,
   makeShellRun,
-  makeShellProcess,
+  makeShellProcessStart,
+  makeShellProcessOutput,
+  makeShellProcessList,
+  makeShellProcessKill,
   makeTodo,
   makeClarify,
   makeSkillsList,
@@ -63,6 +71,10 @@ const plugin: NativePlugin = {
   name: 'system',
   register: ctx => {
     const workspaceRoot = ctx.workspaceRoot ?? process.cwd()
+    // Phase 9.5: pull sandbox backend from context. If chat.tsx didn't supply
+    // one (legacy callers, tests), fall back to LocalBackend (passthrough)
+    // so existing behaviour is preserved exactly.
+    const sandbox = ctx.sandbox ?? new LocalBackend()
     const fsDeps = { workspaceRoot, agentDir: ctx.agentDir }
     const skillsDeps = {
       importsClaudeCode: ctx.imports.claudeCode,
@@ -73,7 +85,7 @@ const plugin: NativePlugin = {
       makeFsWrite(fsDeps) as ToolDef,
       makeFsPatch(fsDeps) as ToolDef,
       makeFsSearch(fsDeps) as ToolDef,
-      makeShellRun({ cwd: workspaceRoot }) as ToolDef,
+      makeShellRun({ cwd: workspaceRoot, sandbox }) as ToolDef,
       makeTodo() as ToolDef,
       makeClarify() as ToolDef,
       makeSkillsList(skillsDeps) as ToolDef,
@@ -84,8 +96,11 @@ const plugin: NativePlugin = {
         disabledRef: ctx.skillsDisabled,
       }) as ToolDef,
       makeSessionSearch({ activityLogPath: ctx.activityLogPath }) as ToolDef,
-      makeCodeExecute({ cwd: workspaceRoot }) as ToolDef,
-      makeShellProcess({ cwd: workspaceRoot }) as ToolDef,
+      makeCodeExecute({ cwd: workspaceRoot, sandbox }) as ToolDef,
+      makeShellProcessStart({ cwd: workspaceRoot, sandbox }) as ToolDef,
+      makeShellProcessOutput() as ToolDef,
+      makeShellProcessList() as ToolDef,
+      makeShellProcessKill() as ToolDef,
       makeVisionAnalyze({
         supportsVision: ctx.brainSupportsVision,
         modelLabel: ctx.brainModelLabel ?? undefined,

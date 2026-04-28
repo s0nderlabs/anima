@@ -1,5 +1,6 @@
 import type { ClaudeAgent } from '../claude-plugins/types'
 import type { Listener } from '../events/listeners'
+import type { SandboxBackend } from '../sandbox/types'
 import type { ToolRegistry } from '../tools/registry'
 import type { ToolDef, ToolSchema } from '../tools/types'
 import type { HookBus, HookHandler, HookName } from './hooks'
@@ -76,6 +77,12 @@ export interface PluginContext {
   brainSupportsVision: boolean
   /** Brain model label (string). Surfaces in tool error messages. */
   brainModelLabel: string | null
+  /**
+   * Phase 9.5: sandbox backend wrapping every spawn() in shell.run / code.execute /
+   * shell.process_start. Optional for back-compat: legacy callers + tests that
+   * don't supply one get a LocalBackend (passthrough) inside the plugin.
+   */
+  sandbox?: SandboxBackend
 }
 
 export interface NativePlugin {
@@ -104,6 +111,8 @@ export interface PluginLoaderDeps {
   claudeAgents?: ClaudeAgent[]
   brainSupportsVision?: boolean
   brainModelLabel?: string | null
+  /** Phase 9.5 sandbox backend, propagated to plugin context. Optional. */
+  sandbox?: SandboxBackend
   /**
    * Resolver for `name` → ESM module path. Defaults to dynamic import of
    * `@s0nderlabs/anima-plugin-<name>`. Tests pass a stub.
@@ -133,6 +142,7 @@ export async function loadPlugins(
     claudeAgents: deps.claudeAgents ?? [],
     brainSupportsVision: deps.brainSupportsVision ?? false,
     brainModelLabel: deps.brainModelLabel ?? null,
+    sandbox: deps.sandbox,
   }
   for (const name of names) {
     try {

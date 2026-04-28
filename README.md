@@ -81,6 +81,16 @@ Approval modes:
 
 The hard-deny `PathGuard` (credential dirs + agent state tree) applies in every mode, including YOLO.
 
+### Sandbox (Phase 9.5, opt-in)
+
+Permission heuristics catch known-dangerous patterns. The sandbox is a structural layer beneath them — even when the modal grants `s` (allow session) or yolo disables prompts entirely, the sandbox profile prevents writes outside an allowlist. Set `sandbox.mode` in `~/.anima/config.ts`:
+
+- `none` (default) — passthrough. Permission floor only.
+- `os` — macOS `sandbox-exec` (Apple seatbelt). Wraps every shell.run / code.execute / shell.process_start spawn. Allows writes to agentDir + cwd + `/tmp/anima-*` + `/var/folders`. Denies reads of `~/.ssh`, `~/.aws`, `~/Library/Keychains`, `~/.config/gcloud`. Linux bubblewrap pending.
+- `docker` — long-lived container per session, every shell-class spawn routes through `docker exec`. Auto-detects Docker Desktop or Podman. Default image `oven/bun:1`. Container has its own filesystem; host is invisible unless `sandbox.dockerMountWorkspace: true`. Mirrors hermes-agent's `TERMINAL_ENV=docker` isolation.
+
+Belt-and-suspenders: permission floor stays on regardless of `sandbox.mode`.
+
 ## Operator wallet sources
 
 Four first-class sources, pick at `anima init`:

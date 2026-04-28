@@ -42,6 +42,8 @@ describe('OGComputeBrain abort signal', () => {
         personaText: null,
         skillIndexText: null,
         toolGuidance: [],
+        appendText: null,
+        envText: null,
         timestamp: null,
       },
     })

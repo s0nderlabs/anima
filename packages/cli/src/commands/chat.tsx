@@ -1,4 +1,5 @@
 import { mkdir } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { isCancel, select, spinner } from '@clack/prompts'
 import {
   ActivityLog,
@@ -7,6 +8,7 @@ import {
   type ClaudeAgent,
   type ClaudeCommand,
   HookBus,
+  LocalBackend,
   McpManager,
   MemorySyncManager,
   NETWORK_RPC,
@@ -18,6 +20,7 @@ import {
   type PostToolCallContext,
   type PreToolCallContext,
   type PreToolCallResult,
+  type SandboxBackend,
   type SkillRef,
   ToolRegistry,
   agentPaths,
@@ -30,6 +33,7 @@ import {
   loadPlugins,
   makeMemoryReadTool,
   makeMemorySaveTool,
+  makeSandboxBackend,
   makeToolSearchTool,
   matchSkillTriggers,
   newEventId,
@@ -157,6 +161,56 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     return subBrain as unknown as import('@s0nderlabs/anima-core').DelegateBrainHandle
   }
 
+  // Phase 9.5: build sandbox backend BEFORE plugins load. Tools that spawn
+  // subprocesses (shell.run, code.execute, shell.process_start) wrap their
+  // spawn argv through this backend.
+  const sandboxMode: 'none' | 'os' | 'docker' = config.sandbox?.mode ?? 'none'
+  let sandbox: SandboxBackend
+  try {
+    sandbox = makeSandboxBackend({
+      mode: sandboxMode,
+      agentDir: paths.dir,
+      workspaceRoot: process.cwd(),
+      homedir: homedir(),
+      dockerImage: config.sandbox?.dockerImage,
+      dockerMountWorkspace: config.sandbox?.dockerMountWorkspace,
+      dockerRuntimePath: config.sandbox?.dockerRuntimePath,
+    })
+  } catch (err) {
+    process.stderr.write(
+      `anima: sandbox init failed (${(err as Error).message}), continuing without sandbox\n`,
+    )
+    sandbox = new LocalBackend()
+  }
+  if (sandbox.mode === 'os') {
+    process.stderr.write(
+      `anima: sandbox active [${sandbox.label}] — limb spawns gated to agentDir + cwd + /tmp/anima-* + /var/folders; reads of ~/.ssh ~/.aws ~/Library/Keychains ~/.config/gcloud denied\n`,
+    )
+  } else if (sandbox.mode === 'docker') {
+    process.stderr.write(
+      `anima: container sandbox active [${sandbox.label}] — every shell-class spawn runs inside the container; host fs invisible to those tools${config.sandbox?.dockerMountWorkspace ? ' except mounted /workspace' : ''}\n`,
+    )
+  }
+  // Register dispose hook so docker containers don't leak when anima exits.
+  // Signal handlers MUST await dispose before exiting; sync `process.exit(0)`
+  // would discard the dispose promise and leave the container orphaned.
+  if (sandbox.dispose) {
+    const disposeOnce = (() => {
+      let done = false
+      return async () => {
+        if (done) return
+        done = true
+        await sandbox.dispose?.().catch(() => {})
+      }
+    })()
+    process.once('SIGINT', () => {
+      void disposeOnce().then(() => process.exit(0))
+    })
+    process.once('SIGTERM', () => {
+      void disposeOnce().then(() => process.exit(0))
+    })
+  }
+
   const pluginNames = (config.plugins ?? []).filter(p => p === 'system')
   const skillsDisabled = { current: [...(config.skills?.disabled ?? [])] }
   const loadResult = await loadPlugins(pluginNames, {
@@ -175,6 +229,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     claudeAgents,
     brainSupportsVision: false,
     brainModelLabel: config.brain.model ?? config.brain.provider,
+    sandbox,
     resolve: async name => {
       switch (name) {
         case 'system':
@@ -265,6 +320,8 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   const skillsRef: { current: SkillRef[] } = {
     current: scannedSkills.filter(s => !disabledSkillSet.has(s.id)),
   }
+  const promptAppend = config.prompt?.append ?? null
+  const envInfo = { cwd: process.cwd(), platform: process.platform }
   const buildPrefix = async () => {
     const idx = await readIndexFile(paths.memoryIndex).catch(() => null)
     return buildFrozenPrefix({
@@ -273,6 +330,8 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       persona: personaText,
       loadedToolNames,
       skills: skillsRef.current,
+      promptAppend,
+      envInfo,
     })
   }
   const prefix = buildFrozenPrefix({
@@ -281,6 +340,8 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     persona: personaText,
     loadedToolNames,
     skills: skillsRef.current,
+    promptAppend,
+    envInfo,
   })
   const activity = new ActivityLog(paths.activityLog)
 
@@ -401,6 +462,14 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     process.exit(1)
   }
 
+  // Initial ledger balance for the status bar (best-effort, never blocks boot).
+  brain
+    .getLedgerBalance()
+    .then(b => {
+      if (b != null) state.setBalance(b)
+    })
+    .catch(() => {})
+
   // Redirect noisy SDK chatter (0G storage progress, ethers RPC errors) to a
   // log file so it doesn't fall through opentui's alt-screen and pollute the
   // chat UI. Keep process.stdout intact - opentui itself needs to write there.
@@ -483,6 +552,13 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       })
       state.pushRow({ role: 'assistant', text: turn.content ?? '(no content)' })
       state.setStatus('idle')
+      // Refresh balance fire-and-forget so the bar reflects post-turn burn.
+      brain
+        .getLedgerBalance()
+        .then(b => {
+          if (b != null) state.setBalance(b)
+        })
+        .catch(() => {})
       if (turn.usage) {
         state.setUsage({
           total: turn.usage.totalTokens,
@@ -764,12 +840,16 @@ function describePermissionCheck(call: { name: string; args: unknown }): Permiss
     const command = `[${args.language ?? '?'}] ${typeof args.code === 'string' ? args.code : ''}`
     return { kind: 'code.execute', command, reason: 'arbitrary code execution' }
   }
-  if (call.name === 'shell.process') {
-    const args = (call.args ?? {}) as { action?: string; command?: string; id?: string }
-    if (args.action === 'start') {
-      const command = typeof args.command === 'string' ? args.command : ''
-      return { kind: 'shell.process', command, reason: 'background process start' }
-    }
+  if (call.name === 'shell.process_start') {
+    const args = (call.args ?? {}) as { command?: string }
+    const command = typeof args.command === 'string' ? args.command : ''
+    return { kind: 'shell.process', command, reason: 'background process start' }
+  }
+  if (
+    call.name === 'shell.process_output' ||
+    call.name === 'shell.process_list' ||
+    call.name === 'shell.process_kill'
+  ) {
     return null
   }
   if (call.name === 'fs.write' || call.name === 'fs.patch') {
