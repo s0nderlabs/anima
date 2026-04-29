@@ -98,6 +98,12 @@ export interface PluginContext {
    * don't supply one get a LocalBackend (passthrough) inside the plugin.
    */
   sandbox?: SandboxBackend
+  /**
+   * Phase 7 side-band runtime context for plugin-comms. Opaque to core; the
+   * plugin reads its concrete shape via a typed cast. Holding the field as
+   * `unknown` keeps core free of a back-edge to the comms package.
+   */
+  comms?: unknown
 }
 
 export interface NativePlugin {
@@ -129,6 +135,8 @@ export interface PluginLoaderDeps {
   visionInfer?: VisionInferFn | null
   /** Phase 9.5 sandbox backend, propagated to plugin context. Optional. */
   sandbox?: SandboxBackend
+  /** Phase 7 side-band runtime context for plugin-comms. Opaque to core. */
+  comms?: unknown
   /**
    * Resolver for `name` → ESM module path. Defaults to dynamic import of
    * `@s0nderlabs/anima-plugin-<name>`. Tests pass a stub.
@@ -160,6 +168,7 @@ export async function loadPlugins(
     brainModelLabel: deps.brainModelLabel ?? null,
     visionInfer: deps.visionInfer ?? null,
     sandbox: deps.sandbox,
+    comms: deps.comms,
   }
   for (const name of names) {
     try {

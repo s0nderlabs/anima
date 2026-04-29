@@ -104,6 +104,19 @@ function SystemRow(props: { text: string }) {
   )
 }
 
+function InboxRow(props: { text: string }) {
+  return (
+    <box flexDirection="row" marginBottom={1}>
+      <text fg="#fbbf24" flexShrink={0}>
+        {renderPrefix('inbox')}
+      </text>
+      <text wrapMode="word" flexGrow={1} fg="#fde68a">
+        {props.text}
+      </text>
+    </box>
+  )
+}
+
 function AssistantTextRow(props: { text: string; firstOfBlock: boolean }) {
   return (
     <box flexDirection="row" marginTop={props.firstOfBlock ? 0 : 1} marginBottom={1}>
@@ -170,6 +183,7 @@ function ChatRowDispatch(props: { row: TurnRow }) {
       />
     )
   if (r.role === 'tool-result') return <ToolResultRow text={r.text} failed={r.failed === true} />
+  if (r.role === 'inbox') return <InboxRow text={r.text} />
   return null
 }
 

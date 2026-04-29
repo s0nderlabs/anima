@@ -75,6 +75,13 @@ export interface AnimaConfig {
    */
   operator?: OperatorSourceHint | null
   /**
+   * Phase 7: the agent's `<label>.anima.0g` subname (without the suffix).
+   * Recorded by `anima init` so the chat loop can auto-publish the agent's
+   * pubkey text record on every launch (idempotent backfill for pre-Phase-7
+   * agents). Optional — agents without a subname skip the publish.
+   */
+  subname?: string | null
+  /**
    * Phase 9.0: permission system. `prompt` (default) prompts on dangerous
    * commands; `strict` always denies them; `off` is YOLO (no prompts).
    * `--yolo` CLI flag and `/yolo` TUI slash both flip the active service to
@@ -182,6 +189,7 @@ const DEFAULT_CONFIG: Omit<AnimaConfig, 'network' | 'storage'> = {
   tools: {},
   imports: { claudeCode: true },
   operator: null,
+  subname: null,
   approvals: { mode: 'prompt', allowlist: [] },
   skills: { disabled: [] },
   prompt: { append: null },
@@ -200,6 +208,7 @@ export function defineConfig(input: AnimaConfigInput): AnimaConfig {
     tools: input.tools ?? DEFAULT_CONFIG.tools,
     imports: input.imports ?? DEFAULT_CONFIG.imports,
     operator: input.operator ?? DEFAULT_CONFIG.operator,
+    subname: input.subname ?? DEFAULT_CONFIG.subname,
     approvals: input.approvals ?? DEFAULT_CONFIG.approvals,
     skills: input.skills ?? DEFAULT_CONFIG.skills,
     prompt: input.prompt ?? DEFAULT_CONFIG.prompt,

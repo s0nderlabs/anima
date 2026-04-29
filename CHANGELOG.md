@@ -4,6 +4,38 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-04-29
+
+### Added
+
+- **Phase 7: A2A messaging.** `AnimaInbox` singleton (stateless event-emit contract) deployed on 0G mainnet at `0xcd92844cc0ec6Be0607B330D4BaCC707339f2589` (CREATE2, salt `keccak256("anima:AnimaInbox:v1")`, deploy tx `0xe8f1a32a4c713dd85edd56e38bac0ba1abffccbd8815d9199c0ef7759f957814`, block 31821581). Standard CREATE2 factory means the same address holds on testnet. 16KiB inline payload cap via `MAX_INLINE_PAYLOAD` defends against spam-to-brain (HIGH finding from 3-way audit). 25 forge tests, 100% line/branch/function coverage.
+- **`@s0nderlabs/anima-plugin-comms`** — 11 brain limbs for ECIES-encrypted A2A messaging plus the AnimaInbox listener: `agent.message` (text), `agent.sendFile` (≤10MB, body to 0G Storage / metadata inline), `agent.fetchFile` (PathGuard-checked save, decrypts with own privkey), `agent.history` (sqlite), `agent.contact_add`/`contact_remove`/`contacts` (approve / list pending / blocked), `agent.block`, `agent.mute`/`unmute` (with optional `30m`/`1d` duration + `all` global), `agent.presence` (`online` ↔ `away`).
+- **Filter chain in `A2AListener`** — blocked → resolveInbound (inline-vs-storage spillover) → ECIES decrypt → history insert (regardless of mute) → mute → presence (`away` buffers + bumps) → contact gate (non-contact records pending + emits one `pending-request` notice) → rate limit (10/60s for non-contacts) → onDeliver. Catch-up via paginated `getLogs` from cursor on first run; live `watchContractEvent` after. Cursor seeds from chain head on fresh boot to avoid scanning all of mainnet from genesis.
+- **`derivePubkeyHex` (`@s0nderlabs/anima-core`)** — derives 65-byte uncompressed secp256k1 pubkey for ECIES recipients. Init wizard now writes the agent's pubkey as a `.0g` text record on `<label>.anima.0g` alongside `address` and `agent:inft`. Pre-Phase-7 agents are auto-published on next chat boot via `ensureOwnPubkeyPublished` (idempotent backfill). `test/local/backfill-pubkeys.ts` provides an explicit one-shot for batch recovery.
+- **`PubkeyResolver`** — name → `.0g` text record lookup with 24h TTL cache. Errors clearly when a peer's pubkey record is missing (directs operator to `anima publish-pubkey`). Address + pubkey reads issued in parallel.
+- **`config.subname` (`@s0nderlabs/anima-core`)** — recorded by init for the auto-publish path. `chat.tsx` reads it and fires `ensureOwnPubkeyPublished` fire-and-forget on every boot.
+- **`PluginContext.comms` side-band field** — opaque `unknown` slot carries `CommsRuntimeContext` (viem clients, OGStorage adapter, SannClient, AnimaInbox singleton, listener delivery callbacks) into the plugin without forcing core to import plugin-comms types.
+- **TUI: `inbox` row role** — distinct yellow `inbox  from 0xCCeC…d97a · "..."` row when an inbound A2A message arrives, replacing the misleading `you` indicator from the first cut. Inbound brain turns honor the existing `Esc` abort + per-turn auto-sync.
+- **Inbound queue + drain** — single-flight `drainInbound` in `chat.tsx` queues live A2A events when the brain is mid-turn and processes them after each idle. Cap of 100 with eviction notice (`inbound queue full; dropped oldest from X`).
+- **Brain prompt updates** — `frozen-prefix.ts` adds `agent.message` / `agent.sendFile` / `agent.history` to the "MUST use a tool" list and the comms tool-preferences block. Inbound channels arrive as `<channel source="anima.inbox" from="..." txHash="...">` blocks; brain treats them as untrusted external input.
+
+### Live verification
+
+- **specter (iNFT #4) ↔ fox (iNFT #5)** — full bidirectional A2A on 0G mainnet. Specter's `agent.message` (TX `0xe9b940fcbefbd20e494b62e06df08a2d242cbf9ed50563996c13594c1a6a5b28`) was decrypted by fox's listener, brain replied via `agent.message` with `in_reply_to` threading, specter received and rendered the response. Activity logs on both sides confirm `wake { source: 'a2a', from, txHash }` events. Self-loop on specter additionally validated the encrypt → emit → catch-up → decrypt → drain pipeline within a single agent.
+
+### Security
+
+- **Filter chain ordering**: blocked check fires BEFORE decrypt to avoid decrypt-oracle attacks.
+- **`agent.fetchFile` PathGuard**: refuses writes under credential dirs (`~/.ssh`, `~/.aws`, `~/.config/gcloud`, `~/Library/Keychains`, the agent state tree).
+- **Rate limiting**: non-contacts capped at 10 messages / 60s, dropping silently after that with one operator notice. Prevents bombardment of pending-contact requests.
+- **Inbound queue cap**: bound at 100 messages with eviction. If the brain wedges and a torrent of A2A arrives, memory growth is bounded.
+
+### Changed
+
+- `MemorySyncManager.flushTurn` errors (e.g. transient 30s timeouts from a slow 0G storage node) now surface as a single `sys` row each turn; previous turn's sync error doesn't suppress the next turn's success.
+- `Listener.start()` is fire-and-forget from the chat host; catch-up runs in the background instead of blocking the chat from accepting input on long-restored agents.
+- Comms ctx is gated behind `pluginNames.includes('comms')` — non-comms launches skip the eager viem/storage/SannClient construction.
+
 ## [0.11.0] - 2026-04-29
 
 ### Added
@@ -487,6 +519,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.12.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.0
 [0.11.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.11.0
 [0.10.5]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.5
 [0.10.4]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.4

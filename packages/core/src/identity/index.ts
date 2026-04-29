@@ -10,6 +10,7 @@ export {
 export { AGENT_NFT_ABI } from './abi'
 export {
   ANIMA_AGENT_NFT_ADDRESS,
+  ANIMA_INBOX_ADDRESS,
   EXPLORER_BASE,
   type NetworkName,
   explorerTxUrl,
@@ -25,6 +26,7 @@ export {
   slotIndex,
 } from './intelligent-data'
 export { mintAgent, iNFTAgentId, type MintAgentOpts } from './mint'
+export { derivePubkeyHex } from './pubkey'
 export {
   persistKeystoreToStorage,
   restoreKeystoreFromStorage,

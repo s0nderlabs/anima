@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { isCancel, select, spinner } from '@clack/prompts'
 import {
+  ANIMA_INBOX_ADDRESS,
   ActivityLog,
   type AnimaConfig,
   type BrainMessage,
@@ -9,11 +10,13 @@ import {
   type ClaudeAgent,
   type ClaudeCommand,
   HookBus,
+  type Listener,
   LocalBackend,
   McpManager,
   MemorySyncManager,
   NETWORK_RPC,
   OGComputeBrain,
+  OGStorage,
   type PermissionDecision,
   type PermissionMode,
   type PermissionRequest,
@@ -22,6 +25,7 @@ import {
   type PreToolCallContext,
   type PreToolCallResult,
   type SandboxBackend,
+  SannClient,
   type SkillRef,
   ToolRegistry,
   VISION_PROVIDER_DEFAULTS,
@@ -38,11 +42,18 @@ import {
   makeMemorySaveTool,
   makeSandboxBackend,
   makeToolSearchTool,
+  makeViemClients,
   matchSkillTriggers,
   newEventId,
   readIndexFile,
   scanSkills,
 } from '@s0nderlabs/anima-core'
+import {
+  type CommsRuntimeContext,
+  type DeliveredMessage,
+  type OperatorNotice,
+  ensureOwnPubkeyPublished,
+} from '@s0nderlabs/anima-plugin-comms'
 import { type Address, type Hex, formatEther } from 'viem'
 import { findAndLoadConfig } from '../config/load'
 import { writeConfigTs } from '../config/render'
@@ -237,12 +248,67 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     ? brokerPool.visionInferFor(visionProvider)
     : null
 
-  const pluginNames = (config.plugins ?? []).filter(p => p === 'system')
+  // Plugin filter: system + comms ship today; onchain is empty.
+  const pluginNames = (config.plugins ?? []).filter(p => p === 'system' || p === 'comms')
+  // Phase 7 comms side-band ctx: viem clients + OGStorage adapter + SannClient +
+  // AnimaInbox singleton + listener delivery callbacks. Skipped when 'comms'
+  // isn't in the plugins list to avoid the eager construction cost.
+  // onDeliver/onOperatorNotice are forward-declared as mutable cells so the ctx
+  // can be built before state + brain exist; they get wired further below.
+  const inboundQueue: DeliveredMessage[] = []
+  let onInboundDeliver: (m: DeliveredMessage) => void = m => {
+    inboundQueue.push(m)
+  }
+  let onInboundNotice: (n: OperatorNotice) => void = () => {}
+  let comms: CommsRuntimeContext | undefined
+  let sann: SannClient | undefined
+  if (pluginNames.includes('comms')) {
+    const inboxAddress = ANIMA_INBOX_ADDRESS[config.network] as Address | undefined
+    if (!inboxAddress) {
+      throw new Error(
+        `AnimaInbox address missing for network=${config.network}; check core/identity/deployments.ts`,
+      )
+    }
+    const viemClients = makeViemClients({ network: config.network, privkeyHex: agentPrivkey })
+    const ogStorage = new OGStorage({ network: config.network, privkeyHex: agentPrivkey })
+    sann = new SannClient({ privkeyHex: agentPrivkey })
+    // Listener.catchUp fetches getBlockNumber itself; passing 0n here just
+    // seeds an unset cursor so the first catch-up scans from chain head.
+    const sannRead = sann
+    comms = {
+      agentEoa: agentAddress,
+      agentPrivkeyHex: agentPrivkey,
+      publicClient: viemClients.publicClient,
+      walletClient: viemClients.walletClient,
+      sann: { readText: (node, key) => sannRead.readText(node, key) },
+      storage: {
+        put: async bytes => (await ogStorage.putBlob(bytes)) as Hex,
+        get: async dataHash => {
+          const blob = await ogStorage.getBlob(dataHash)
+          if (!blob) throw new Error(`storage: blob ${dataHash} not found`)
+          return blob
+        },
+      },
+      inboxAddress,
+      startBlock: 0n,
+      onDeliver: m => onInboundDeliver(m),
+      onOperatorNotice: n => onInboundNotice(n),
+    }
+  }
+  // Local listener registry: plugin-comms registers a single 'a2a-inbox'
+  // listener via ctx.registerListener; we collect them here so chat can
+  // start them once brain init is done. Other plugins may register listeners
+  // too — same path.
+  const collectedListeners: Listener[] = []
   const skillsDisabled = { current: [...(config.skills?.disabled ?? [])] }
   const loadResult = await loadPlugins(pluginNames, {
     tools,
     hooks,
-    listeners: { register: () => {} },
+    listeners: {
+      register: l => {
+        collectedListeners.push(l)
+      },
+    },
     agentDir: paths.dir,
     agentId,
     network: config.network,
@@ -257,10 +323,13 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     brainModelLabel: config.brain.model ?? config.brain.provider,
     visionInfer,
     sandbox,
+    comms,
     resolve: async name => {
       switch (name) {
         case 'system':
           return await import('@s0nderlabs/anima-plugin-system')
+        case 'comms':
+          return await import('@s0nderlabs/anima-plugin-comms')
         default:
           throw new Error(`unknown first-party plugin: ${name}`)
       }
@@ -541,6 +610,151 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     openConsoleOnError: false,
   })
 
+  // ─── Inbound A2A queue + drain ────────────────────────────────────────────
+  // Inbound messages arrive via plugin-comms's listener. We can't fire brain
+  // turns concurrently with operator-typed prompts (single-flight gate), so
+  // queue them and drain whenever status flips back to idle.
+  let drainingInbound = false
+  const drainInbound = async () => {
+    if (drainingInbound) return
+    if (inboundQueue.length === 0) return
+    if (state.status() === 'thinking') return
+    drainingInbound = true
+    try {
+      while (inboundQueue.length > 0) {
+        const m = inboundQueue.shift()!
+        const channelText = formatA2AChannel(m)
+        state.pushRow({ role: 'inbox', text: formatInboxPreview(m) })
+        state.setStatus('thinking')
+        const abortCtrl = new AbortController()
+        state.setActiveAbort(abortCtrl)
+        try {
+          const refreshed = await buildPrefix()
+          brain.refreshUserContext(refreshed)
+          await activity.append({
+            ts: Date.now(),
+            kind: 'wake',
+            data: { source: 'a2a', from: m.from, txHash: m.txHash },
+          })
+          const turn = await brain.infer({
+            event: {
+              id: newEventId(),
+              source: 'a2a',
+              payload: { label: 'inbound-message', data: channelText, peer: m.from },
+              ts: Date.now(),
+            },
+            signal: abortCtrl.signal,
+          })
+          await activity.append({
+            ts: Date.now(),
+            kind: 'brain-response',
+            data: {
+              content: turn.content,
+              toolCalls: turn.toolCalls.length,
+              finishReason: turn.finishReason,
+              usage: turn.usage,
+            },
+          })
+          state.pushRow({ role: 'assistant', text: turn.content ?? '(no content)' })
+          state.setStatus('idle')
+          brain
+            .getLedgerBalance()
+            .then(b => {
+              if (b != null) state.setBalance(b)
+            })
+            .catch(() => {})
+          sync
+            .flushTurn()
+            .then(res => {
+              if (res.txHash && res.changedSlots.length > 0) {
+                state.pushRow({
+                  role: 'system',
+                  text: `synced ${res.changedSlots.join(', ')} → ${explorerTxUrl(config.network, res.txHash)}`,
+                })
+              }
+            })
+            .catch(() => {})
+        } catch (e) {
+          if ((e instanceof Error && e.name === 'AbortError') || abortCtrl.signal.aborted) {
+            state.pushRow({
+              role: 'system',
+              text: 'inbound a2a turn interrupted (esc).',
+            })
+            await activity.append({
+              ts: Date.now(),
+              kind: 'brain-response',
+              data: { content: '(aborted by operator)', toolCalls: 0, finishReason: 'aborted' },
+            })
+            state.setStatus('idle')
+          } else {
+            state.pushRow({
+              role: 'system',
+              text: `inbound error: ${(e as Error).message.slice(0, 200)}`,
+            })
+            state.setStatus('idle')
+          }
+        } finally {
+          state.setActiveAbort(null)
+        }
+      }
+    } finally {
+      drainingInbound = false
+    }
+  }
+  // Wire forward-declared callbacks now that state + brain exist. Bound queue
+  // (drops oldest with a system-row notice) prevents memory growth if a brain
+  // turn wedges and inbound traffic spikes.
+  const INBOUND_QUEUE_CAP = 100
+  onInboundDeliver = m => {
+    inboundQueue.push(m)
+    if (inboundQueue.length > INBOUND_QUEUE_CAP) {
+      const dropped = inboundQueue.shift()!
+      state.pushRow({
+        role: 'system',
+        text: `inbound queue full (${INBOUND_QUEUE_CAP}); dropped oldest from ${shortAddr(dropped.from)}`,
+      })
+    }
+    void drainInbound()
+  }
+  onInboundNotice = notice => {
+    const msg = describeOperatorNotice(notice)
+    if (msg) state.pushRow({ role: 'system', text: msg })
+  }
+  // Listener catch-up + WS subscribe runs in the background. `start` only
+  // resolves after catch-up finishes, which can be slow on long-restored
+  // agents; awaiting it would block the chat from accepting input.
+  for (const l of collectedListeners) {
+    l.start(undefined as never).catch(e => {
+      state.pushRow({
+        role: 'system',
+        text: `listener ${l.name} failed to start: ${(e as Error).message.slice(0, 160)}`,
+      })
+    })
+  }
+  // Drain anything queued during boot.
+  void drainInbound()
+
+  // Phase 7 auto-publish: idempotent backfill of `<subname>.anima.0g pubkey`
+  // text record. Fire-and-forget; failures don't block chat. Skipped without
+  // comms (no SannClient) or without a configured subname.
+  if (config.subname && sann) {
+    const sannPub = sann
+    ensureOwnPubkeyPublished({
+      privkeyHex: agentPrivkey,
+      subname: `${config.subname}.anima.0g`,
+      sann: sannPub,
+    })
+      .then(res => {
+        if (res.txHash) {
+          state.pushRow({
+            role: 'system',
+            text: `pubkey published on ${config.subname}.anima.0g → ${explorerTxUrl(config.network, res.txHash)}`,
+          })
+        }
+      })
+      .catch(() => {})
+  }
+
   const handleSubmit = async (text: string): Promise<void> => {
     const trimmed = text.trim()
     if (trimmed.startsWith('/')) {
@@ -648,6 +862,9 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       state.setStatus('error')
     } finally {
       state.setActiveAbort(null)
+      // Inbound A2A events that arrived during this turn waited in the queue.
+      // Drain once status flips back to idle.
+      void drainInbound()
     }
   }
 
@@ -915,5 +1132,59 @@ async function readMemoryFileOrNull(path: string): Promise<string | null> {
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw e
+  }
+}
+
+/**
+ * Render an inbound A2A delivery as a `<channel>` block the brain treats as
+ * untrusted external input (mirrors how attn/string surface remote agent
+ * messages). Body content varies by envelope type: 'msg' carries the text,
+ * 'file' carries filename + caption + a hint to call agent.fetchFile.
+ */
+/**
+ * Single-line inbox preview shown to the operator when a new A2A message
+ * arrives. Distinct from formatA2AChannel (which is the brain-facing block).
+ * Format: `from short-addr · "first 80 chars of content"`.
+ */
+function formatInboxPreview(m: DeliveredMessage): string {
+  const env = m.envelope
+  const body =
+    env.type === 'msg'
+      ? env.content.replace(/\s+/g, ' ').trim()
+      : `[file] ${env.filename} (${env.size} bytes)`
+  const trimmed = body.length > 90 ? `${body.slice(0, 87)}...` : body
+  return `from ${shortAddr(m.from)} · "${trimmed}"`
+}
+
+function formatA2AChannel(m: DeliveredMessage): string {
+  const env = m.envelope
+  const head = `<channel source="anima.inbox" from="${m.from}" txHash="${m.txHash}">`
+  const body =
+    env.type === 'msg'
+      ? env.content
+      : `[file] ${env.filename} (${env.mime}, ${env.size} bytes)${
+          env.caption ? `\ncaption: ${env.caption}` : ''
+        }\nfetch via agent.fetchFile data_hash=${m.dataHash}`
+  const inReplyHint = env.inReplyTo ? `\n(reply to ${env.inReplyTo})` : ''
+  return `${head}\n${body}${inReplyHint}\n</channel>`
+}
+
+/**
+ * Translate a listener OperatorNotice into a one-line system row. Used for
+ * pending-contact requests, rate-limit drops, and decrypt failures. Returns
+ * null when the notice should be silently dropped from the UI.
+ */
+function describeOperatorNotice(n: OperatorNotice): string | null {
+  switch (n.kind) {
+    case 'pending-request':
+      return `inbound a2a from ${shortAddr(n.from)} (not in contacts) — call agent.contact_add to approve, agent.block to refuse.`
+    case 'rate-limit-drop':
+      return `dropped repeated a2a from ${shortAddr(n.from)} (rate limit exceeded for non-contact).`
+    case 'decrypt-failed':
+      return `a2a decrypt failed from ${shortAddr(n.from)}: ${n.reason}`
+    case 'fetch-failed':
+      return `a2a storage fetch failed from ${shortAddr(n.from)}: ${n.reason}`
+    default:
+      return null
   }
 }

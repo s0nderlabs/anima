@@ -1,7 +1,7 @@
 import type { PermissionDecision, PermissionMode, PermissionRequest } from '@s0nderlabs/anima-core'
 import { createSignal } from 'solid-js'
 
-export type TurnRole = 'user' | 'assistant' | 'system' | 'tool-call' | 'tool-result'
+export type TurnRole = 'user' | 'assistant' | 'system' | 'tool-call' | 'tool-result' | 'inbox'
 
 export interface TurnRow {
   id: string

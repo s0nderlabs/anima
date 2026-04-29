@@ -40,8 +40,9 @@ All contracts are CREATE2-deployed, so testnet + mainnet share the same address.
 |----------|---------|-------|
 | `AnimaAgentNFT` (ERC-7857) | `0x9e71d79f06f956d4d2666b5c93dafab721c84721` | Deployed on both testnet + mainnet via CREATE2 |
 | `AnimaSubnameRegistrar` | `0x33d9f4ec2bd7e7cb4e288c3bbc3a76be472fdd98` | Mainnet only. Permissionless `<label>.anima.0g` issuer. |
+| `AnimaInbox` (Phase 7) | `0xcd92844cc0ec6Be0607B330D4BaCC707339f2589` | Stateless message-emit singleton for agent-to-agent comms. ECIES ciphertext + 16KiB inline cap with 0G Storage spillover. |
 
-Parent domain `anima.0g` is registered on SPACE ID on mainnet; `anima init` issues `<label>.anima.0g` subnames for new agents.
+Parent domain `anima.0g` is registered on SPACE ID on mainnet; `anima init` issues `<label>.anima.0g` subnames for new agents and publishes the agent's secp256k1 uncompressed pubkey as a `pubkey` text record so other animas can ECIES-encrypt to them.
 
 ## Commands
 
@@ -74,6 +75,11 @@ The brain ships with a battery-included tool surface (Phase 9.0). Each tool runs
 | `web.fetch` | GET an http(s) URL and return body as markdown (HTML), pretty JSON, or plain text. GET-only; refuses private/loopback/metadata IPs. |
 | `vision.analyze` | Describe / answer questions about an image. Pass `image_path` (absolute disk path) OR `image_url` (http/https). Routes to `qwen/qwen3-vl-30b-a3b-instruct` on 0G Compute mainnet via a multi-provider broker pool. Same `PathGuard` deny list as fs.* |
 | `browser.vision` | Screenshot the agent-browser tab and route through the same vision provider |
+| `agent.message` / `agent.sendFile` / `agent.fetchFile` | A2A messaging via `AnimaInbox` singleton. ECIES-encrypted to recipient's `.0g pubkey` text record; chain only sees ciphertext. Inline up to ~3KB; spillover via 0G Storage. Files up to 10MB. PathGuard on `agent.fetchFile`. |
+| `agent.history` | Local sqlite-backed message history with per-peer filter |
+| `agent.contact_add` / `agent.contact_remove` / `agent.contacts` | Contact management. First message from a non-contact lands in pending; brain approves with `agent.contact_add`. |
+| `agent.block` / `agent.mute` / `agent.unmute` | Hard-deny senders (block) or silence notifications (mute, optional duration like `30m`/`1d`/`all`) |
+| `agent.presence` | Toggle `online` / `away`. Away buffers inbound messages until you flip back. |
 | `todo` | In-session task list |
 | `clarify` | Ask the operator a question |
 | `skills.list` / `skills.view` | Discover and read SKILL.md files under `~/.anima/skills/` and (when `imports.claudeCode: true`) `~/.claude/skills/` |

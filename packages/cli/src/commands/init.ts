@@ -20,6 +20,7 @@ import {
   SannClient,
   agentPaths,
   defineConfig,
+  derivePubkeyHex,
   explorerTokenUrl,
   explorerTxUrl,
   generateAgentWallet,
@@ -447,8 +448,16 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
           `eip155:${NETWORK_CHAIN_ID[network]}:${contractAddress}:${mintedTokenId.toString()}`,
         )
         await sann.waitForReceipt(inftTx)
+        // Publish the agent's secp256k1 uncompressed pubkey so other animas
+        // can ECIES-encrypt to this agent for A2A messaging (Phase 7).
+        const pubkeyTx = await sann.setText(
+          node,
+          'pubkey',
+          derivePubkeyHex(agent.privkeyHex as Hex),
+        )
+        await sann.waitForReceipt(pubkeyTx)
         await updateWizardState(paths.dir, draft => {
-          draft.steps.textRecordsSetTx = inftTx
+          draft.steps.textRecordsSetTx = pubkeyTx
         })
         sSub.stop(
           `${requestedSubname}.anima.0g registered → ${explorerTxUrl('0g-mainnet', claimTx)}`,
