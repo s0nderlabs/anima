@@ -4,6 +4,23 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-04-29
+
+### Added
+
+- **`vision.analyze`** — describe / answer questions about an image. Routes to `qwen/qwen3-vl-30b-a3b-instruct` on 0G Compute mainnet via a lazy multi-provider broker pool. Accepts EITHER `image_path` (absolute path on disk) OR `image_url` (http/https). URL fetches stream and abort at the 10MB raw cap so a misleading URL pointing at a multi-GB asset cancels mid-download. Magic-byte MIME sniff covers PNG/JPEG/GIF/WebP/BMP. Verified live on mainnet: a "Hello Anima" placeholder PNG and a "Vision Live On 0G" image-URL, qwen3-vl returned accurate descriptions of both.
+- **`browser.vision`** — capture the agent-browser tab's current page as a PNG screenshot and route it through the same vision provider. Replaces the v0.9.x stub with the real screenshot-then-analyze pipeline.
+- **`BrokerPool` (`@s0nderlabs/anima-core`)** — caches one `@0glabs/0g-serving-broker` instance per provider address keyed off the agent's signer. Provider acknowledgement runs once per provider, lazily, on first use. Exposes `chatCompletion()` for OpenAI-compat dispatch and `visionInferFor(provider)` for the `image_url` content-block shape. Future-proof slot for whisper-large-v3 STT and z-image T2I when those serviceTypes need a chat-completion path.
+- **`config.vision.provider`** — optional override for the multimodal provider. Defaults to `VISION_PROVIDER_DEFAULTS[network]` (qwen3-vl-30b on mainnet, none on testnet). Set to `null` to disable vision tooling on this agent.
+
+### Security
+
+- `vision.analyze` now runs `image_path` through the same `PathGuard` used by `fs.read` / `fs.write`. Without this, a brain could exfiltrate `~/.ssh/id_rsa` or any agent-state file by sending it as an "image" to qwen3-vl. Denies paths under `~/.ssh`, `~/.aws`, `~/.config/gcloud`, `~/Library/Keychains`, and the agent state tree.
+
+### Changed
+
+- `web-fetch` exports `collectUpToBytes` so vision URL fetches can stream + abort at the maxBytes cap instead of buffering the whole body before the size check.
+
 ## [0.10.5] - 2026-04-28
 
 ### Fixed
@@ -470,6 +487,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.11.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.11.0
 [0.10.5]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.5
 [0.10.4]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.4
 [0.10.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.3

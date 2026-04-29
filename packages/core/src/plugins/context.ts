@@ -1,9 +1,18 @@
+import type {
+  VisionInferFn as BrokerVisionInferFn,
+  VisionInferImage as BrokerVisionInferImage,
+  VisionInferInput as BrokerVisionInferInput,
+} from '../brain/broker-pool'
 import type { ClaudeAgent } from '../claude-plugins/types'
 import type { Listener } from '../events/listeners'
 import type { SandboxBackend } from '../sandbox/types'
 import type { ToolRegistry } from '../tools/registry'
 import type { ToolDef, ToolSchema } from '../tools/types'
 import type { HookBus, HookHandler, HookName } from './hooks'
+
+export type VisionInferFn = BrokerVisionInferFn
+export type VisionInferInput = BrokerVisionInferInput
+export type VisionInferImage = BrokerVisionInferImage
 
 /**
  * Factory chat.tsx supplies for `delegate.task` to spin up a sub-brain. The
@@ -78,6 +87,12 @@ export interface PluginContext {
   /** Brain model label (string). Surfaces in tool error messages. */
   brainModelLabel: string | null
   /**
+   * v0.11 vision routing: when set, vision.analyze + browser.vision call
+   * this function (backed by a BrokerPool entry pinned to the configured
+   * vision provider). Null when no vision provider is configured.
+   */
+  visionInfer?: VisionInferFn | null
+  /**
    * Phase 9.5: sandbox backend wrapping every spawn() in shell.run / code.execute /
    * shell.process_start. Optional for back-compat: legacy callers + tests that
    * don't supply one get a LocalBackend (passthrough) inside the plugin.
@@ -111,6 +126,7 @@ export interface PluginLoaderDeps {
   claudeAgents?: ClaudeAgent[]
   brainSupportsVision?: boolean
   brainModelLabel?: string | null
+  visionInfer?: VisionInferFn | null
   /** Phase 9.5 sandbox backend, propagated to plugin context. Optional. */
   sandbox?: SandboxBackend
   /**
@@ -142,6 +158,7 @@ export async function loadPlugins(
     claudeAgents: deps.claudeAgents ?? [],
     brainSupportsVision: deps.brainSupportsVision ?? false,
     brainModelLabel: deps.brainModelLabel ?? null,
+    visionInfer: deps.visionInfer ?? null,
     sandbox: deps.sandbox,
   }
   for (const name of names) {

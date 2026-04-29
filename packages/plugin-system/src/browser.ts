@@ -10,8 +10,15 @@ import {
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
-import { type ToolDef, coerceBool, coerceInt, redactEnv } from '@s0nderlabs/anima-core'
+import {
+  type ToolDef,
+  type VisionInferFn,
+  coerceBool,
+  coerceInt,
+  redactEnv,
+} from '@s0nderlabs/anima-core'
 import { z } from 'zod'
+import { sniffMimeFromBytes } from './vision'
 
 /**
  * Phase 9.4 + Task #74 browser tools. Wraps the `agent-browser` CLI with
@@ -523,23 +530,53 @@ const VisionSchema = z.object({
 })
 
 export function makeBrowserVision(
-  deps: BrowserDeps & { supportsVision: boolean; modelLabel?: string },
+  deps: BrowserDeps & { visionInfer: VisionInferFn | null },
 ): ToolDef<z.infer<typeof VisionSchema>> {
   return {
     name: 'browser.vision',
     description:
-      "Capture the current page as a screenshot and send it to the configured vision model with a prompt. Returns the model's reply. Currently inactive: 0G Compute is text-only as of Apr 2026.",
+      "Capture the current page as a screenshot and send it to the configured vision model with a prompt. Returns the model's reply. Routes to the configured vision provider on 0G Compute (qwen3-vl-30b on mainnet by default).",
     shouldDefer: true,
     searchHint: 'browser vision screenshot describe ocr image',
     schema: VisionSchema,
-    handler: async () => {
-      if (!deps.supportsVision) {
+    handler: async args => {
+      if (!deps.visionInfer) {
         return {
           ok: false,
-          error: `vision-capable brain provider required (current: ${deps.modelLabel ?? 'unknown'}).`,
+          error:
+            'vision provider not configured. Set `vision.provider` in ~/.anima/config.ts to a 0G Compute multimodal provider.',
         }
       }
-      return { ok: false, error: 'vision provider configured but no impl yet (Phase 9.4 stub)' }
+      const path = join(tmpdir(), `anima-vision-${Date.now()}-${process.pid}.png`)
+      const shot = await runAgentBrowser('screenshot', [path], deps)
+      if (!shot.ok) return shot
+      let bytes: Uint8Array
+      try {
+        bytes = new Uint8Array(readFileSync(path))
+      } catch (e) {
+        return { ok: false, error: `screenshot read failed: ${(e as Error).message}` }
+      } finally {
+        rmSafe(path)
+      }
+      const mediaType = sniffMimeFromBytes(bytes, 'png') ?? 'image/png'
+      try {
+        const result = await deps.visionInfer({
+          images: [{ bytes, mediaType }],
+          prompt: args.prompt,
+          maxOutputTokens: 1024,
+        })
+        return {
+          ok: true,
+          data: {
+            content: result.content,
+            model: result.model ?? null,
+            usage: result.usage,
+            finishReason: result.finishReason,
+          },
+        }
+      } catch (e) {
+        return { ok: false, error: `vision call failed: ${(e as Error).message.slice(0, 240)}` }
+      }
     },
   }
 }

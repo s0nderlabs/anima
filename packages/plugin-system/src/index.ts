@@ -22,7 +22,7 @@ import {
 } from './browser'
 import { makeCodeExecute } from './code-execute'
 import { WorkingDirState } from './cwd-state'
-import { makeDelegateTask, makeVisionAnalyze } from './delegate'
+import { makeDelegateTask } from './delegate'
 import { makeFsPatch, makeFsRead, makeFsSearch, makeFsWrite } from './fs'
 import { makeSessionSearch } from './session-search'
 import { makeShellRun } from './shell'
@@ -36,6 +36,7 @@ import {
 import { makeSkillsList, makeSkillsView } from './skills'
 import { makeSkillsManage } from './skills-manage'
 import { makeClarify, makeTodo } from './todo'
+import { makeVisionAnalyze } from './vision'
 import { makeWebFetch } from './web-fetch'
 
 export {
@@ -115,8 +116,8 @@ const plugin: NativePlugin = {
       makeShellProcessList() as ToolDef,
       makeShellProcessKill() as ToolDef,
       makeVisionAnalyze({
-        supportsVision: ctx.brainSupportsVision,
-        modelLabel: ctx.brainModelLabel ?? undefined,
+        visionInfer: ctx.visionInfer ?? null,
+        agentDir: ctx.agentDir,
       }) as ToolDef,
       makeBrowserNavigate({}) as ToolDef,
       makeBrowserSnapshot({}) as ToolDef,
@@ -127,10 +128,7 @@ const plugin: NativePlugin = {
       makeBrowserPress({}) as ToolDef,
       makeBrowserGetImages({}) as ToolDef,
       makeBrowserConsole({}) as ToolDef,
-      makeBrowserVision({
-        supportsVision: ctx.brainSupportsVision,
-        modelLabel: ctx.brainModelLabel ?? undefined,
-      }) as ToolDef,
+      makeBrowserVision({ visionInfer: ctx.visionInfer ?? null }) as ToolDef,
     ]
     if (ctx.delegateFactory) {
       tools.push(

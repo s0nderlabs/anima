@@ -5,6 +5,7 @@ import {
   ActivityLog,
   type AnimaConfig,
   type BrainMessage,
+  BrokerPool,
   type ClaudeAgent,
   type ClaudeCommand,
   HookBus,
@@ -23,6 +24,8 @@ import {
   type SandboxBackend,
   type SkillRef,
   ToolRegistry,
+  VISION_PROVIDER_DEFAULTS,
+  type VisionInferFn,
   agentPaths,
   buildFrozenPrefix,
   discoverClaudeExtras,
@@ -221,6 +224,19 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     })
   }
 
+  const brokerPool = new BrokerPool({
+    privkeyHex: agentPrivkey,
+    rpcUrl: NETWORK_RPC[config.network],
+  })
+  const visionProviderRaw = config.vision?.provider
+  const visionProvider =
+    visionProviderRaw === null
+      ? null
+      : (visionProviderRaw ?? VISION_PROVIDER_DEFAULTS[config.network])
+  const visionInfer: VisionInferFn | null = visionProvider
+    ? brokerPool.visionInferFor(visionProvider)
+    : null
+
   const pluginNames = (config.plugins ?? []).filter(p => p === 'system')
   const skillsDisabled = { current: [...(config.skills?.disabled ?? [])] }
   const loadResult = await loadPlugins(pluginNames, {
@@ -239,6 +255,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     claudeAgents,
     brainSupportsVision: false,
     brainModelLabel: config.brain.model ?? config.brain.provider,
+    visionInfer,
     sandbox,
     resolve: async name => {
       switch (name) {

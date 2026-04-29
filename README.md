@@ -72,6 +72,8 @@ The brain ships with a battery-included tool surface (Phase 9.0). Each tool runs
 | `shell.run` | Run a shell command. Permission-gated; wallet/API-key env vars are stripped from the subprocess |
 | `shell.cd` | Set persistent cwd for subsequent shell.run / code.execute / shell.process_start calls. Refuses credential dirs and the agent state tree. |
 | `web.fetch` | GET an http(s) URL and return body as markdown (HTML), pretty JSON, or plain text. GET-only; refuses private/loopback/metadata IPs. |
+| `vision.analyze` | Describe / answer questions about an image. Pass `image_path` (absolute disk path) OR `image_url` (http/https). Routes to `qwen/qwen3-vl-30b-a3b-instruct` on 0G Compute mainnet via a multi-provider broker pool. Same `PathGuard` deny list as fs.* |
+| `browser.vision` | Screenshot the agent-browser tab and route through the same vision provider |
 | `todo` | In-session task list |
 | `clarify` | Ask the operator a question |
 | `skills.list` / `skills.view` | Discover and read SKILL.md files under `~/.anima/skills/` and (when `imports.claudeCode: true`) `~/.claude/skills/` |

@@ -37,6 +37,13 @@ export {
   depositToLedger,
   type OpenLedgerOpts,
   type LedgerStatus,
+  BrokerPool,
+  VISION_PROVIDER_DEFAULTS,
+  type BrokerPoolOpts,
+  type ProviderHandle,
+  type ChatCompletionMessage,
+  type ChatCompletionRequest,
+  type ChatCompletionResult,
 } from './brain'
 
 export type {
@@ -228,6 +235,9 @@ export {
   type DelegateBrainFactoryOpts,
   type DelegateBrainHandle,
   type DelegateBrainTurn,
+  type VisionInferFn,
+  type VisionInferInput,
+  type VisionInferImage,
   makeToolSearchTool,
   type ToolSearchArgs,
 } from './plugins'

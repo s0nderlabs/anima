@@ -74,7 +74,7 @@ const PRIVATE_HOST_LITERALS = new Set([
   'metadata.google.internal',
 ])
 
-function hostIsPrivate(hostname: string): boolean {
+export function hostIsPrivate(hostname: string): boolean {
   const h = hostname.toLowerCase()
   if (PRIVATE_HOST_LITERALS.has(h)) return true
   if (h.endsWith('.local')) return true
@@ -121,7 +121,7 @@ async function fetchUrl(rawUrl: string, timeoutMs: number, maxBytes: number): Pr
     // the body never crosses the wire. Without this, a misleading URL pointing
     // at a multi-GB file would still pull the whole thing before truncation,
     // burning bandwidth + memory long before the cap kicks in.
-    const { bytes, truncated } = await collectUpTo(res.body, maxBytes)
+    const { bytes, truncated } = await collectUpToBytes(res.body, maxBytes)
     const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
     const body = renderBody(text, contentType)
     return {
@@ -144,7 +144,7 @@ async function fetchUrl(rawUrl: string, timeoutMs: number, maxBytes: number): Pr
   }
 }
 
-async function collectUpTo(
+export async function collectUpToBytes(
   body: ReadableStream<Uint8Array> | null,
   maxBytes: number,
 ): Promise<{ bytes: Uint8Array; truncated: boolean }> {

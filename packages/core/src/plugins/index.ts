@@ -16,5 +16,8 @@ export {
   type DelegateBrainFactoryOpts,
   type DelegateBrainHandle,
   type DelegateBrainTurn,
+  type VisionInferFn,
+  type VisionInferInput,
+  type VisionInferImage,
 } from './context'
 export { makeToolSearchTool, type ToolSearchArgs } from './tool-search'

@@ -116,6 +116,16 @@ export interface AnimaConfig {
    *  - `docker`: long-lived container per session, every spawn through `docker
    *    exec`. NOT YET IMPLEMENTED — separate Phase 9.5 follow-up bundle.
    */
+  /**
+   * v0.11 (Apr 29 2026): vision tool routing. Multimodal limbs (vision.analyze,
+   * browser.vision) call this provider on the same compute ledger; the brain
+   * stays on `brain.provider`. Defaults to qwen3-vl-30b-a3b-instruct on
+   * mainnet (the only vision provider on 0G Compute today). Set `null` to
+   * disable; tools then return a clear "not configured" error.
+   */
+  vision?: {
+    provider?: string | null
+  }
   sandbox?: {
     mode?: 'none' | 'os' | 'docker'
     /**
@@ -175,6 +185,7 @@ const DEFAULT_CONFIG: Omit<AnimaConfig, 'network' | 'storage'> = {
   approvals: { mode: 'prompt', allowlist: [] },
   skills: { disabled: [] },
   prompt: { append: null },
+  vision: { provider: undefined },
   sandbox: { mode: 'none' },
 }
 
@@ -192,6 +203,7 @@ export function defineConfig(input: AnimaConfigInput): AnimaConfig {
     approvals: input.approvals ?? DEFAULT_CONFIG.approvals,
     skills: input.skills ?? DEFAULT_CONFIG.skills,
     prompt: input.prompt ?? DEFAULT_CONFIG.prompt,
+    vision: input.vision ?? DEFAULT_CONFIG.vision,
     sandbox: input.sandbox ?? DEFAULT_CONFIG.sandbox,
   }
 }

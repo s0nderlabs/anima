@@ -22,3 +22,12 @@ export {
   type OpenLedgerOpts,
   type LedgerStatus,
 } from './ledger'
+export {
+  BrokerPool,
+  VISION_PROVIDER_DEFAULTS,
+  type BrokerPoolOpts,
+  type ProviderHandle,
+  type ChatCompletionMessage,
+  type ChatCompletionRequest,
+  type ChatCompletionResult,
+} from './broker-pool'
