@@ -54,10 +54,14 @@ function formatBalance(balance: number | null | undefined): string {
   return `${balance.toFixed(3)} 0G`
 }
 
-function balanceColor(balance: number | null | undefined): string {
+function balanceColor(
+  balance: number | null | undefined,
+  redBelow = 0.5,
+  yellowBelow = 1.5,
+): string {
   if (balance == null) return '#9ca3af'
-  if (balance < 0.5) return '#fca5a5'
-  if (balance < 1.5) return '#fbbf24'
+  if (balance < redBelow) return '#fca5a5'
+  if (balance < yellowBelow) return '#fbbf24'
   return '#9ca3af'
 }
 
@@ -426,9 +430,25 @@ export function ChatApp(props: AppProps) {
         <text fg={props.state.approvalsMode() === 'off' ? '#fbbf24' : '#9ca3af'} flexShrink={0}>
           {`perms: ${props.state.approvalsMode()}`}
         </text>
+        {/* opentui's <Show> renders in resolution order, not JSX order; matching
+            here keeps intent obvious. Gas first because EOA starves first. */}
+        <Show when={props.state.eoaBalance() != null}>
+          <text fg="#374151" flexShrink={0}>
+            {'  ·  '}
+          </text>
+          <text fg="#6b7280" flexShrink={0}>
+            {'gas '}
+          </text>
+          <text fg={balanceColor(props.state.eoaBalance(), 0.005, 0.02)} flexShrink={0}>
+            {formatBalance(props.state.eoaBalance())}
+          </text>
+        </Show>
         <Show when={props.state.balance() != null}>
           <text fg="#374151" flexShrink={0}>
             {'  ·  '}
+          </text>
+          <text fg="#6b7280" flexShrink={0}>
+            {'compute '}
           </text>
           <text fg={balanceColor(props.state.balance())} flexShrink={0}>
             {formatBalance(props.state.balance())}

@@ -250,6 +250,9 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
 
   // Plugin filter: system + comms ship today; onchain is empty.
   const pluginNames = (config.plugins ?? []).filter(p => p === 'system' || p === 'comms')
+  // viem clients live above the comms gate so the agent-EOA balance refresher
+  // works regardless of whether the comms plugin is loaded.
+  const viemClients = makeViemClients({ network: config.network, privkeyHex: agentPrivkey })
   // Phase 7 comms side-band ctx: viem clients + OGStorage adapter + SannClient +
   // AnimaInbox singleton + listener delivery callbacks. Skipped when 'comms'
   // isn't in the plugins list to avoid the eager construction cost.
@@ -269,7 +272,6 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
         `AnimaInbox address missing for network=${config.network}; check core/identity/deployments.ts`,
       )
     }
-    const viemClients = makeViemClients({ network: config.network, privkeyHex: agentPrivkey })
     const ogStorage = new OGStorage({ network: config.network, privkeyHex: agentPrivkey })
     sann = new SannClient({ privkeyHex: agentPrivkey })
     // Listener.catchUp fetches getBlockNumber itself; passing 0n here just
@@ -471,6 +473,23 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     approvalsMode: initialMode,
   })
 
+  // Statusline balance refreshers; fired at boot, post-turn, and post-/sync.
+  const refreshEoaBalance = () => {
+    viemClients.publicClient
+      .getBalance({ address: agentAddress })
+      .then(wei => state.setEoaBalance(Number(formatEther(wei))))
+      .catch(() => {})
+  }
+  const refreshBalances = () => {
+    brain
+      .getLedgerBalance()
+      .then(b => {
+        if (b != null) state.setBalance(b)
+      })
+      .catch(() => {})
+    refreshEoaBalance()
+  }
+
   permission.setPrompter(req => {
     return new Promise<PermissionDecision>(resolve => {
       state.pushRow({
@@ -567,13 +586,8 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     process.exit(1)
   }
 
-  // Initial ledger balance for the status bar (best-effort, never blocks boot).
-  brain
-    .getLedgerBalance()
-    .then(b => {
-      if (b != null) state.setBalance(b)
-    })
-    .catch(() => {})
+  // Initial balances for the status bar (best-effort, never blocks boot).
+  refreshBalances()
 
   // Redirect noisy SDK chatter (0G storage progress, ethers RPC errors) to a
   // log file so it doesn't fall through opentui's alt-screen and pollute the
@@ -659,12 +673,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
           })
           state.pushRow({ role: 'assistant', text: turn.content ?? '(no content)' })
           state.setStatus('idle')
-          brain
-            .getLedgerBalance()
-            .then(b => {
-              if (b != null) state.setBalance(b)
-            })
-            .catch(() => {})
+          refreshBalances()
           sync
             .flushTurn()
             .then(res => {
@@ -809,13 +818,8 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       })
       state.pushRow({ role: 'assistant', text: turn.content ?? '(no content)' })
       state.setStatus('idle')
-      // Refresh balance fire-and-forget so the bar reflects post-turn burn.
-      brain
-        .getLedgerBalance()
-        .then(b => {
-          if (b != null) state.setBalance(b)
-        })
-        .catch(() => {})
+      // Compute ledger drains via inference; agent EOA via tool chain writes.
+      refreshBalances()
       if (turn.usage) {
         state.setUsage({
           total: turn.usage.totalTokens,
@@ -892,6 +896,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
             role: 'system',
             text: `synced ${res.changedSlots.join(', ')} → ${explorerTxUrl(config.network, res.txHash)}`,
           })
+          refreshEoaBalance()
         } else {
           state.pushRow({ role: 'system', text: 'nothing to sync (everything up to date)' })
         }

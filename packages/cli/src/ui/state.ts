@@ -43,6 +43,10 @@ export function createChatState(opts: CreateChatStateOpts) {
   // 0G Compute ledger balance, in 0G. Refreshed at chat init and after each
   // per-turn auto-sync. null = not yet fetched / fetch failed.
   const [balance, setBalance] = createSignal<number | null>(null)
+  // Agent EOA balance, in 0G. Pays gas for chain writes (agent.message
+  // inbox.send, sync's updateSlots anchor). Typically starves before the
+  // compute ledger in long sessions (~0.001 0G/send at 4 gwei).
+  const [eoaBalance, setEoaBalance] = createSignal<number | null>(null)
   // ms epoch when current turn started (status flipped to 'thinking'). The
   // spinner row reads this and renders elapsed seconds. Cleared on idle.
   const [turnStartedAt, setTurnStartedAt] = createSignal<number | null>(null)
@@ -87,6 +91,7 @@ export function createChatState(opts: CreateChatStateOpts) {
     pendingApproval,
     approvalsMode,
     balance,
+    eoaBalance,
     turnStartedAt,
     activeAbort,
     setInput,
@@ -95,6 +100,7 @@ export function createChatState(opts: CreateChatStateOpts) {
     setPendingApproval,
     setApprovalsMode,
     setBalance,
+    setEoaBalance,
     setTurnStartedAt,
     setActiveAbort,
     pushRow,

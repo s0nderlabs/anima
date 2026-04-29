@@ -4,6 +4,19 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2] - 2026-04-29
+
+### Added
+
+- **Agent EOA balance in statusline.** New `gas X.XXX 0G` segment shows the agent's on-chain wallet balance alongside the compute ledger. Refreshed at chat boot, after every brain turn (user-prompted + inbound), and after `/sync`. The agent EOA pays gas for chain writes (`agent.message` inbox.send ≈0.001 0G/send at 4 gwei, sync's `updateSlots` anchor ≈0.005 0G); it typically starves before the compute ledger in long sessions, so it sits before `compute` in the bar. Color thresholds: red below 0.005 0G (~5 sends of runway), yellow below 0.02 0G (~20 sends). Live-verified on mainnet: `0.535 → 0.528` after one `agent.message`, `0.528 → 0.521` after one `/sync` flush.
+
+### Changed
+
+- `viemClients` lifted out of the `comms`-only construction gate so the EOA-balance refresher works regardless of whether the comms plugin is loaded; comms branch reuses the single instance.
+- `balanceColor(value, redBelow, yellowBelow)` parameterized so compute (0.5 / 1.5) and EOA (0.005 / 0.02) thresholds share one helper.
+- Wei → 0G display conversion uses `formatEther` (already imported) instead of `Number(wei) / 1e18`, matching the convention used in `init`, `topup`, `cost`, and other UI surfaces.
+- Paired `getLedgerBalance` + `refreshEoaBalance` call sites collapsed into a single `refreshBalances()` helper at boot, post-user-turn, and post-inbound-turn (3 callsites of duplicated 6-line patterns gone). `/sync` continues to refresh EOA only since it doesn't touch compute.
+
 ## [0.12.1] - 2026-04-29
 
 ### Fixed
@@ -536,6 +549,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.12.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.2
 [0.12.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.1
 [0.12.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.0
 [0.11.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.11.0
