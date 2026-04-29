@@ -40,8 +40,12 @@ export class ContactStore {
     this.state = loadJson(this.path, DEFAULT)
   }
 
+  find(addr: Address): Contact | null {
+    return this.state.contacts[addr.toLowerCase()] ?? null
+  }
+
   has(addr: Address): boolean {
-    return Boolean(this.state.contacts[addr.toLowerCase()])
+    return this.find(addr) !== null
   }
 
   isPending(addr: Address): boolean {
@@ -110,6 +114,20 @@ export class ContactStore {
 
   list(): Contact[] {
     return Object.values(this.state.contacts).sort((a, b) => a.addedAt - b.addedAt)
+  }
+
+  /**
+   * Find a contact by friendly name (case-insensitive). The brain naturally
+   * uses labels (`specter`) when sending, but the resolver only knows .0g
+   * names + 0x addresses; this hook lets `resolveAddrOrName` fall back to
+   * the local label table.
+   */
+  findByLabel(label: string): Contact | null {
+    const needle = label.toLowerCase()
+    for (const c of Object.values(this.state.contacts)) {
+      if (c.name && c.name.toLowerCase() === needle) return c
+    }
+    return null
   }
 
   listPending(): PendingRequest[] {

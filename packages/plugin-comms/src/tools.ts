@@ -29,9 +29,15 @@ export interface CommsDeps {
 }
 
 /**
- * Resolve a `who` argument that may be either an `.anima.0g` name or a raw
- * 0x address. Returns null on a malformed input or unresolvable name; callers
- * surface that as a tool error so the brain sees a consistent failure shape.
+ * Resolve a `who` argument that may be an `.anima.0g` name, a raw 0x address,
+ * OR a contact label the operator added via `agent.contact_add`. Returns
+ * null on malformed input or unresolvable name; callers surface that as a
+ * tool error so the brain sees a consistent failure shape.
+ *
+ * Why fall back to contact labels: the brain naturally writes `to: "specter"`
+ * after seeing it as a contact in `agent.contacts`, since labels are how it
+ * thinks about peers it has met before. Resolving via the local table is
+ * cheaper than re-resolving a full `.0g` name on every send.
  */
 async function resolveAddrOrName(
   deps: CommsDeps,
@@ -45,23 +51,53 @@ async function resolveAddrOrName(
   if (who.startsWith('0x') && who.length === 42) {
     return { addr: getAddress(who) as Address, name: null }
   }
+  const local = deps.contacts.findByLabel(who)
+  if (local) return { addr: local.addr, name: local.name ?? who }
   return null
 }
 
 /**
- * Helper: resolve recipient name/EOA, encrypt + send. Returns the tx hash.
+ * Resolve recipient (label/0x/.0g) → encrypt → send. ECIES needs the recipient's
+ * uncompressed pubkey, which lives only on .anima.0g text records (forward-only),
+ * so we always need a .0g name to look up. Raw 0x without a known label fails
+ * fast since there's no reverse mapping.
  */
 async function sendCore(deps: CommsDeps, to: string, plaintext: Uint8Array, forceStorage = false) {
-  const recipient = await deps.resolver.resolve(to)
-  const ciphertextHex = await eciesEncryptToHex(plaintext, recipient.pubkey)
-  // ciphertextHex is "0x...". buildSendArgs wants raw bytes for size check.
+  const r = await resolveAddrOrName(deps, to)
+  if (!r) {
+    throw new Error(
+      `unrecognized recipient: ${to}. Use a .anima.0g name, 0x address, or contact label.`,
+    )
+  }
+  const lookupName = r.name?.endsWith('.0g')
+    ? r.name
+    : to.startsWith('0x')
+      ? null
+      : `${to}.anima.0g`
+  if (!lookupName) {
+    throw new Error(`raw 0x address ${to} has no published pubkey; reach via .anima.0g name`)
+  }
+  const resolved = await deps.resolver.resolve(lookupName).catch(() => null)
+  if (!resolved) {
+    throw new Error(`recipient ${to} has no .anima.0g pubkey published; cannot encrypt`)
+  }
+  const ciphertextHex = await eciesEncryptToHex(plaintext, resolved.pubkey)
   const ciphertextBytes = Buffer.from(ciphertextHex.slice(2), 'hex')
   const args = await buildSendArgs({
     ciphertext: new Uint8Array(ciphertextBytes),
     storage: deps.storage,
     forceStorage,
   })
-  const txHash = await deps.inbox.send(recipient.eoa, args.payload, args.dataHash)
+  // Send to resolver's current eoa (not r.addr) so the recipient address
+  // matches the pubkey we encrypted to. If a .0g name was transferred since a
+  // contact was cached, r.addr (cached) and resolved.eoa (current) can differ;
+  // sending to the cached address with the new pubkey would silently fail.
+  const txHash = await deps.inbox.send(resolved.eoa, args.payload, args.dataHash)
+  const recipient = {
+    eoa: resolved.eoa,
+    pubkey: resolved.pubkey,
+    name: resolved.name ?? lookupName,
+  }
   return { txHash, recipient, dataHash: args.dataHash, inline: args.payload !== '0x' }
 }
 
@@ -296,7 +332,10 @@ export function makeContactAdd(deps: CommsDeps): ToolDef<ContactAddArgs> {
     handler: async args => {
       const r = await resolveAddrOrName(deps, args.who)
       if (!r) return { ok: false, error: `cannot resolve ${args.who}` }
-      const name = args.label ?? r.name ?? undefined
+      // Prefer the .anima.0g name when available (it's portable + resolves
+      // back to the same address). Custom `args.label` is a nickname; we
+      // store the canonical name and let the brain look up either form.
+      const name = r.name ?? args.label ?? undefined
       deps.contacts.add(r.addr, name)
       return { ok: true, data: { addr: r.addr, name: name ?? null } }
     },

@@ -4,6 +4,23 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-04-29
+
+### Fixed
+
+- **Contact-label resolution in `agent.message`** — `sendCore` and `resolveAddrOrName` now fall back to `ContactStore.findByLabel(who)` when `to` is neither an `.anima.0g` name nor a raw `0x` address. Brains naturally write `agent.message(to: "specter")` after seeing it as a contact in `agent.contacts`; the previous code returned `unrecognized recipient format: specter`. New `ContactStore.find(addr)` helper too. Live-verified: fox sent `to=specter` (label-only) directly without retrying.
+- **0G Storage replication-lag drops messages** — `resolveInbound` in `storage-spillover.ts` now retries with exponential backoff (8 tries × base 1.5s × 1.5x ≈ 73s budget) when `storage.get(dataHash)` returns null. 0G Storage is eventually-consistent: a sender's `putBlob` returns when the upload tx mines, but indexer/storage-node replication can lag a few seconds; the receiver hits the indexer immediately after seeing the chain event so the first read often misses. Configurable per-message via the new `retry?: { tries, delayMs, backoffMul }` field on `ReceiveChannelInput`.
+- **Inbound channel `from=` shows raw EOA instead of `.0g` name** — `DeliveredMessage` now carries `fromLabel: string | null`, set by the listener from `contacts.find(ev.from)?.name`. `formatA2AChannel` renders `<channel ... from="${m.fromLabel ?? m.from}" address="${m.from}" ...>` (preferred display first, raw address still available as fallback attribute), and `formatInboxPreview` shows `from <label-or-shortAddr>`. The brain can now reply via `agent.message(to=specter)` directly.
+- **TUI inbox row didn't render mid-turn** — `chat.tsx` `drainInbound` was gated by `state.status() === 'thinking'`, so when an A2A message arrived during a long brain turn the queue grew but no `inbox` row appeared in the operator's transcript. Inbox-row rendering moved to `onInboundDeliver` so display is independent of brain wake-up; `drainInbound` only handles single-flight gating now.
+- **Brain runaway: 4+ rephrased copies of one reply** — added explicit guidance in `frozen-prefix.ts`: when `agent.message` returns `{ok: true}`, the message is delivered. Do NOT send a rephrased copy of the same content; one ok = one delivered reply per inbound. (Live observation pre-fix: specter generated 4 alternative wordings of the same reply, all sent on chain.)
+- **Recipient address / pubkey divergence** — `sendCore` now uses `resolved.eoa` (current chain state) for both `inbox.send` recipient and the encryption pubkey, instead of mixing the cached contact `r.addr` with the freshly-resolved `pubkey`. If a `.0g` name was transferred since the contact was cached, the message would have gone to the cached recipient with the new owner's pubkey, silently failing to decrypt.
+- **`agent.contact_add` prefers canonical `.anima.0g` name** — when both `args.label` and resolver `r.name` are available, the canonical resolver name wins (it's portable + resolves back to the same address). Custom labels stay valid via `findByLabel` either way.
+
+### Changed
+
+- Single contact lookup per inbound message in `A2AListener.handleEvent` (was `has` + `find`).
+- `sendCore` simplified from a 27-line three-branch dispatch to ~15 lines that go through `resolveAddrOrName` and a single resolver call for pubkey.
+
 ## [0.12.0] - 2026-04-29
 
 ### Added
@@ -519,6 +536,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.12.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.1
 [0.12.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.0
 [0.11.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.11.0
 [0.10.5]: https://github.com/s0nderlabs/anima/releases/tag/v0.10.5

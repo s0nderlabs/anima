@@ -49,6 +49,12 @@ export interface DeliveredMessage {
   logIndex: number
   blockNumber: bigint
   from: Address
+  /**
+   * Friendly name for `from`: contact label if the receiver added the sender
+   * as a contact (preferring `.anima.0g` form when known), else null. Chat
+   * UI prefers this over the raw address; brain prompt context uses it too.
+   */
+  fromLabel: string | null
   envelope: Envelope
   /**
    * Chain-event dataHash. For msg envelopes this is ZERO_DATA_HASH (no
@@ -224,7 +230,8 @@ export class A2AListener {
     }
 
     // 7. contact gate
-    if (!this.contacts.has(ev.from)) {
+    const contact = this.contacts.find(ev.from)
+    if (!contact) {
       // Non-contact path: rate-limit FIRST, then surface pending notice.
       if (this.limiter.shouldDrop(ev.from)) {
         this.opts.onOperatorNotice?.({ kind: 'rate-limit-drop', from: ev.from })
@@ -243,6 +250,7 @@ export class A2AListener {
       logIndex: ev.logIndex,
       blockNumber: ev.blockNumber,
       from: ev.from,
+      fromLabel: contact.name ?? null,
       envelope: env,
       dataHash: ev.dataHash,
     })

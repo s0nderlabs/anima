@@ -624,7 +624,9 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       while (inboundQueue.length > 0) {
         const m = inboundQueue.shift()!
         const channelText = formatA2AChannel(m)
-        state.pushRow({ role: 'inbox', text: formatInboxPreview(m) })
+        // Inbox row is rendered at delivery time in `onInboundDeliver`; the
+        // listener can fire mid-turn, so display ≠ brain wake-up. Here we just
+        // wake the brain on the message that's been queued.
         state.setStatus('thinking')
         const abortCtrl = new AbortController()
         state.setActiveAbort(abortCtrl)
@@ -707,6 +709,11 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   const INBOUND_QUEUE_CAP = 100
   onInboundDeliver = m => {
     inboundQueue.push(m)
+    // Render the inbox row at delivery time, regardless of brain state.
+    // Display is independent of the single-flight brain wake-up below: a
+    // listener event during a long thinking turn must still appear in the
+    // operator's transcript, even if the brain wakeup waits its turn.
+    state.pushRow({ role: 'inbox', text: formatInboxPreview(m) })
     if (inboundQueue.length > INBOUND_QUEUE_CAP) {
       const dropped = inboundQueue.shift()!
       state.pushRow({
@@ -1153,12 +1160,16 @@ function formatInboxPreview(m: DeliveredMessage): string {
       ? env.content.replace(/\s+/g, ' ').trim()
       : `[file] ${env.filename} (${env.size} bytes)`
   const trimmed = body.length > 90 ? `${body.slice(0, 87)}...` : body
-  return `from ${shortAddr(m.from)} · "${trimmed}"`
+  return `from ${m.fromLabel ?? shortAddr(m.from)} · "${trimmed}"`
 }
 
 function formatA2AChannel(m: DeliveredMessage): string {
   const env = m.envelope
-  const head = `<channel source="anima.inbox" from="${m.from}" txHash="${m.txHash}">`
+  // Prefer the .anima.0g name (or contact label) over the raw address so the
+  // brain can use it directly with `agent.message`. Address only as fallback
+  // for unknown senders.
+  const fromDisplay = m.fromLabel ?? m.from
+  const head = `<channel source="anima.inbox" from="${fromDisplay}" address="${m.from}" txHash="${m.txHash}">`
   const body =
     env.type === 'msg'
       ? env.content

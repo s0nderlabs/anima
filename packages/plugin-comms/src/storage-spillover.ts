@@ -53,21 +53,47 @@ export interface ReceiveChannelInput {
   payload: Hex
   dataHash: Hex
   storage: StorageUploader
+  /** Override default retry schedule for the storage fetch path. */
+  retry?: { tries?: number; delayMs?: number; backoffMul?: number }
 }
+
+const DEFAULT_FETCH_TRIES = 8
+const DEFAULT_FETCH_DELAY_MS = 1500
+const DEFAULT_FETCH_BACKOFF = 1.5
 
 /**
  * Resolve the inbound ciphertext: either decode the inline payload bytes, or
  * fetch the blob from 0G Storage if `dataHash` is non-zero.
+ *
+ * 0G Storage is eventually-consistent: a sender's `putBlob` returns when the
+ * upload tx mines, but indexer/storage-node replication can lag a few seconds
+ * behind. The receiver hits the indexer immediately after seeing the chain
+ * event, so the first read often returns null. Retry with exponential backoff
+ * so a transient replication lag doesn't drop a message.
  */
 export async function resolveInbound(input: ReceiveChannelInput): Promise<Uint8Array> {
   const hasInline = input.payload && input.payload !== '0x' && input.payload.length > 2
   const hasHash = input.dataHash && input.dataHash !== ZERO_DATA_HASH
   if (hasInline && hasHash) {
-    // Both set: inline payload is the source of truth (sender chose to
-    // include both for some reason; treat extra dataHash as opaque metadata).
     return hexToBytes(input.payload)
   }
   if (hasInline) return hexToBytes(input.payload)
-  if (hasHash) return await input.storage.get(input.dataHash)
-  throw new Error('inbound message has neither inline payload nor dataHash')
+  if (!hasHash) throw new Error('inbound message has neither inline payload nor dataHash')
+
+  const tries = input.retry?.tries ?? DEFAULT_FETCH_TRIES
+  const baseDelay = input.retry?.delayMs ?? DEFAULT_FETCH_DELAY_MS
+  const backoff = input.retry?.backoffMul ?? DEFAULT_FETCH_BACKOFF
+  let lastErr: unknown = null
+  let delay = baseDelay
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await input.storage.get(input.dataHash)
+    } catch (e) {
+      lastErr = e
+      if (i === tries - 1) break
+      await new Promise(r => setTimeout(r, delay))
+      delay = Math.floor(delay * backoff)
+    }
+  }
+  throw lastErr ?? new Error(`storage fetch failed after ${tries} tries`)
 }
