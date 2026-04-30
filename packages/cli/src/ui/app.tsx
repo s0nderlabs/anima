@@ -121,6 +121,19 @@ function InboxRow(props: { text: string }) {
   )
 }
 
+function MarketRow(props: { text: string }) {
+  return (
+    <box flexDirection="row" marginBottom={1}>
+      <text fg="#c4b5fd" flexShrink={0}>
+        {renderPrefix('mkt')}
+      </text>
+      <text wrapMode="word" flexGrow={1} fg="#ddd6fe">
+        {props.text}
+      </text>
+    </box>
+  )
+}
+
 function AssistantTextRow(props: { text: string; firstOfBlock: boolean }) {
   return (
     <box flexDirection="row" marginTop={props.firstOfBlock ? 0 : 1} marginBottom={1}>
@@ -188,6 +201,7 @@ function ChatRowDispatch(props: { row: TurnRow }) {
     )
   if (r.role === 'tool-result') return <ToolResultRow text={r.text} failed={r.failed === true} />
   if (r.role === 'inbox') return <InboxRow text={r.text} />
+  if (r.role === 'market') return <MarketRow text={r.text} />
   return null
 }
 
@@ -431,13 +445,13 @@ export function ChatApp(props: AppProps) {
           {`perms: ${props.state.approvalsMode()}`}
         </text>
         {/* opentui's <Show> renders in resolution order, not JSX order; matching
-            here keeps intent obvious. Gas first because EOA starves first. */}
+            here keeps intent obvious. Wallet first because EOA gas starves first. */}
         <Show when={props.state.eoaBalance() != null}>
           <text fg="#374151" flexShrink={0}>
             {'  ·  '}
           </text>
           <text fg="#6b7280" flexShrink={0}>
-            {'gas '}
+            {'wallet '}
           </text>
           <text fg={balanceColor(props.state.eoaBalance(), 0.005, 0.02)} flexShrink={0}>
             {formatBalance(props.state.eoaBalance())}
@@ -452,6 +466,14 @@ export function ChatApp(props: AppProps) {
           </text>
           <text fg={balanceColor(props.state.balance())} flexShrink={0}>
             {formatBalance(props.state.balance())}
+          </text>
+        </Show>
+        <Show when={props.state.activeJobCount() > 0}>
+          <text fg="#374151" flexShrink={0}>
+            {'  ·  '}
+          </text>
+          <text fg="#fbbf24" flexShrink={0}>
+            {`${props.state.activeJobCount()} escrow`}
           </text>
         </Show>
         <Show when={props.state.usage()}>

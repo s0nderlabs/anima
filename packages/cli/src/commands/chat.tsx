@@ -3,6 +3,7 @@ import { homedir } from 'node:os'
 import { isCancel, select, spinner } from '@clack/prompts'
 import {
   ANIMA_INBOX_ADDRESS,
+  ANIMA_MARKET_ADDRESS,
   ActivityLog,
   type AnimaConfig,
   type BrainMessage,
@@ -51,8 +52,14 @@ import {
 import {
   type CommsRuntimeContext,
   type DeliveredMessage,
+  type JobEvent,
+  MARKETPLACE_GUIDANCE,
   type OperatorNotice,
   ensureOwnPubkeyPublished,
+  formatJobEvent,
+  formatJobEventForBrain,
+  isParticipant,
+  jobEventShouldWakeBrain,
 } from '@s0nderlabs/anima-plugin-comms'
 import { type Address, type Hex, formatEther } from 'viem'
 import { findAndLoadConfig } from '../config/load'
@@ -263,6 +270,11 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     inboundQueue.push(m)
   }
   let onInboundNotice: (n: OperatorNotice) => void = () => {}
+  // Phase 8: market events buffered the same way until UI mounts.
+  const jobEventQueue: JobEvent[] = []
+  let onMarketJobEvent: (e: JobEvent) => void = e => {
+    jobEventQueue.push(e)
+  }
   let comms: CommsRuntimeContext | undefined
   let sann: SannClient | undefined
   if (pluginNames.includes('comms')) {
@@ -272,6 +284,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
         `AnimaInbox address missing for network=${config.network}; check core/identity/deployments.ts`,
       )
     }
+    const marketAddress = ANIMA_MARKET_ADDRESS[config.network] as Address | undefined
     const ogStorage = new OGStorage({ network: config.network, privkeyHex: agentPrivkey })
     sann = new SannClient({ privkeyHex: agentPrivkey })
     // Listener.catchUp fetches getBlockNumber itself; passing 0n here just
@@ -295,6 +308,12 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       startBlock: 0n,
       onDeliver: m => onInboundDeliver(m),
       onOperatorNotice: n => onInboundNotice(n),
+      ...(marketAddress
+        ? {
+            marketAddress,
+            onJobEvent: (e: JobEvent) => onMarketJobEvent(e),
+          }
+        : {}),
     }
   }
   // Local listener registry: plugin-comms registers a single 'a2a-inbox'
@@ -429,6 +448,13 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     platform: process.platform,
     sandbox: sandbox.envHint?.() ?? null,
   }
+  // Plugin-contributed prompt sections. plugin-comms ships marketplace
+  // guidance only when AnimaMarket is actually wired (marketAddress set);
+  // gating on `comms?.marketAddress` keeps the prefix lean for non-market
+  // sessions and avoids paying tokens for unreachable behavior.
+  const extraGuidance: string[] = []
+  if (comms?.marketAddress) extraGuidance.push(MARKETPLACE_GUIDANCE)
+
   const buildPrefix = async () => {
     const idx = await readIndexFile(paths.memoryIndex).catch(() => null)
     return buildFrozenPrefix({
@@ -439,6 +465,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       skills: skillsRef.current,
       promptAppend,
       envInfo,
+      extraGuidance,
     })
   }
   const prefix = buildFrozenPrefix({
@@ -449,6 +476,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     skills: skillsRef.current,
     promptAppend,
     envInfo,
+    extraGuidance,
   })
   const activity = new ActivityLog(paths.activityLog)
 
@@ -628,6 +656,82 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   // Inbound messages arrive via plugin-comms's listener. We can't fire brain
   // turns concurrently with operator-typed prompts (single-flight gate), so
   // queue them and drain whenever status flips back to idle.
+  // ─── Market job-event drain (Phase 8) ─────────────────────────────────────
+  // Mirrors drainInbound but for AnimaMarket events. Same single-flight gate.
+  let drainingMarket = false
+  const drainMarketEvents = async () => {
+    if (drainingMarket) return
+    if (marketBrainQueue.length === 0) return
+    if (state.status() === 'thinking') return
+    drainingMarket = true
+    try {
+      while (marketBrainQueue.length > 0) {
+        const e = marketBrainQueue.shift()!
+        const channelText = formatJobEventForBrain(e)
+        state.setStatus('thinking')
+        const abortCtrl = new AbortController()
+        state.setActiveAbort(abortCtrl)
+        try {
+          const refreshed = await buildPrefix()
+          brain.refreshUserContext(refreshed)
+          await activity.append({
+            ts: Date.now(),
+            kind: 'wake',
+            data: { source: 'market', kind: e.kind, jobId: e.jobId.toString(), txHash: e.txHash },
+          })
+          const turn = await brain.infer({
+            event: {
+              id: newEventId(),
+              source: 'marketplace',
+              payload: { label: `market:${e.kind}`, data: channelText },
+              ts: Date.now(),
+            },
+            signal: abortCtrl.signal,
+          })
+          await activity.append({
+            ts: Date.now(),
+            kind: 'brain-response',
+            data: {
+              content: turn.content,
+              toolCalls: turn.toolCalls.length,
+              finishReason: turn.finishReason,
+              usage: turn.usage,
+            },
+          })
+          state.pushRow({ role: 'assistant', text: turn.content ?? '(no content)' })
+          state.setStatus('idle')
+          refreshBalances()
+          sync
+            .flushTurn()
+            .then(res => {
+              if (res.txHash && res.changedSlots.length > 0) {
+                state.pushRow({
+                  role: 'system',
+                  text: `synced ${res.changedSlots.join(', ')} → ${explorerTxUrl(config.network, res.txHash)}`,
+                })
+              }
+            })
+            .catch(() => {})
+        } catch (err) {
+          if ((err instanceof Error && err.name === 'AbortError') || abortCtrl.signal.aborted) {
+            state.pushRow({ role: 'system', text: 'market turn interrupted (esc).' })
+            state.setStatus('idle')
+          } else {
+            state.pushRow({
+              role: 'system',
+              text: `market turn error: ${(err as Error).message.slice(0, 200)}`,
+            })
+            state.setStatus('idle')
+          }
+        } finally {
+          state.setActiveAbort(null)
+        }
+      }
+    } finally {
+      drainingMarket = false
+    }
+  }
+
   let drainingInbound = false
   const drainInbound = async () => {
     if (drainingInbound) return
@@ -735,6 +839,30 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   onInboundNotice = notice => {
     const msg = describeOperatorNotice(notice)
     if (msg) state.pushRow({ role: 'system', text: msg })
+  }
+  // Phase 8: every market event for a job we're a party to renders a system
+  // row. Wake fires for every event we can react to except when we're the
+  // identifiable actor (already saw the tool response). String's pattern at
+  // `string/plugin/src/server.ts:887-958` is the reference.
+  const marketBrainQueue: JobEvent[] = []
+  const knownJobs = new Map<string, { buyer: Address; provider: Address }>()
+  const handleJobEvent = (e: JobEvent) => {
+    if (e.kind === 'created') {
+      knownJobs.set(e.jobId.toString(), { buyer: e.buyer, provider: e.provider })
+    }
+    const job = knownJobs.get(e.jobId.toString()) ?? null
+    if (!isParticipant(agentAddress, e, job)) return
+    state.bumpActiveJobs(e)
+    state.pushRow({ role: 'market', text: formatJobEvent(e) })
+    if (jobEventShouldWakeBrain(e, agentAddress, job)) {
+      marketBrainQueue.push(e)
+      void drainMarketEvents()
+    }
+  }
+  onMarketJobEvent = handleJobEvent
+  // Drain queued job events (catch-up may have fired them before UI mounted).
+  while (jobEventQueue.length > 0) {
+    handleJobEvent(jobEventQueue.shift()!)
   }
   // Listener catch-up + WS subscribe runs in the background. `start` only
   // resolves after catch-up finishes, which can be slow on long-restored
@@ -918,9 +1046,46 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       })
       return true
     }
+    if (cmd === '/jobs') {
+      const tool = tools.find('market.listMyJobs')
+      if (!tool) {
+        state.pushRow({
+          role: 'system',
+          text: 'market plugin not loaded; cannot list jobs.',
+        })
+        return true
+      }
+      state.pushRow({ role: 'system', text: 'fetching active jobs…' })
+      try {
+        const res = await tool.handler({ status: 'active', limit: 20 } as never)
+        const data = (res as { ok: boolean; data?: { jobs: unknown[] } }).data
+        const jobs = (data?.jobs ?? []) as Array<{
+          jobId: string
+          role: string
+          counterparty: string | null
+          amount0g: string
+          status: string
+        }>
+        if (jobs.length === 0) {
+          state.pushRow({ role: 'system', text: 'no active escrow jobs.' })
+        } else {
+          const lines = jobs.map(
+            j =>
+              `  job#${j.jobId} · ${j.role}${j.counterparty ? ` w/ ${shortAddr(j.counterparty)}` : ''} · ${j.amount0g} 0G · ${j.status}`,
+          )
+          state.pushRow({
+            role: 'system',
+            text: `active jobs (${jobs.length}):\n${lines.join('\n')}`,
+          })
+        }
+      } catch (e) {
+        state.pushRow({ role: 'system', text: `jobs error: ${summarizeError(e)}` })
+      }
+      return true
+    }
     if (cmd === '/help') {
       const builtins =
-        '  /sync   force memory + activity flush to 0G\n  /model  switch brain (run anima model after exiting)\n  /yolo   toggle approval prompts off/on for this session\n  /help   this message'
+        '  /sync   force memory + activity flush to 0G\n  /jobs   list active escrow jobs\n  /model  switch brain (run anima model after exiting)\n  /yolo   toggle approval prompts off/on for this session\n  /help   this message'
       const claudeBlock =
         commandIndex.size === 0
           ? ''

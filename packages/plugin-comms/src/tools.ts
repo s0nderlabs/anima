@@ -39,8 +39,21 @@ export interface CommsDeps {
  * thinks about peers it has met before. Resolving via the local table is
  * cheaper than re-resolving a full `.0g` name on every send.
  */
-async function resolveAddrOrName(
-  deps: CommsDeps,
+/**
+ * Resolve a `who` argument that may be an `.anima.0g` name, a raw 0x address,
+ * OR a contact label the operator added via `agent.contact_add`. Returns
+ * null on malformed input or unresolvable name; callers surface that as a
+ * tool error so the brain sees a consistent failure shape.
+ *
+ * Why fall back to contact labels: the brain naturally writes `to: "specter"`
+ * after seeing it as a contact in `agent.contacts`, since labels are how it
+ * thinks about peers it has met before. Resolving via the local table is
+ * cheaper than re-resolving a full `.0g` name on every send.
+ *
+ * Exported so market-tools.ts can reuse the same resolver chain.
+ */
+export async function resolveAddrOrName(
+  deps: { resolver: PubkeyResolver; contacts: ContactStore },
   who: string,
 ): Promise<{ addr: Address; name: string | null } | null> {
   if (who.endsWith('.0g')) {

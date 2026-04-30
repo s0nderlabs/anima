@@ -23,6 +23,17 @@ export const ANIMA_INBOX_ADDRESS: Record<AnimaNetwork, Address> = {
   '0g-mainnet': '0xcd92844cc0ec6Be0607B330D4BaCC707339f2589',
 }
 
+/**
+ * Canonical AnimaMarket deployment address. Native-0G fixed-price escrow.
+ * CREATE2 deterministic; same address on both networks. Mainnet deploy tx:
+ * 0x72de913e0e8062255a4625ef0401ca06f825048e780759558bef48fada58e6b0
+ * Fee recipient: dev.deployer (immutable).
+ */
+export const ANIMA_MARKET_ADDRESS: Record<AnimaNetwork, Address> = {
+  '0g-testnet': '0x3ebD21f5dd67acDeF199fACF28388627212bA2aB',
+  '0g-mainnet': '0x3ebD21f5dd67acDeF199fACF28388627212bA2aB',
+}
+
 export const EXPLORER_BASE: Record<AnimaNetwork, string> = {
   '0g-mainnet': 'https://chainscan.0g.ai',
   '0g-testnet': 'https://chainscan-galileo.0g.ai',

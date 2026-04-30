@@ -118,6 +118,11 @@ export interface BuildPrefixArgs {
   envInfo?: EnvInfo | null
   /** ISO timestamp of session start. Default: current time. */
   timestamp?: string | null
+  /**
+   * Plugin-contributed prompt sections (e.g. plugin-comms's MARKETPLACE_GUIDANCE
+   * when AnimaMarket is wired). Pushed into the toolGuidance array, deduped.
+   */
+  extraGuidance?: readonly string[] | null
 }
 
 const TOOL_GUIDANCE_MAP: Record<string, string> = {
@@ -156,6 +161,7 @@ export function buildFrozenPrefix({
   promptAppend,
   envInfo,
   timestamp,
+  extraGuidance,
 }: BuildPrefixArgs): FrozenPrefix {
   const sys = systemPrompt ?? DEFAULT_SYSTEM_PROMPT
   const idxText = memoryIndex ? stringifyIndex(memoryIndex) : null
@@ -165,6 +171,9 @@ export function buildFrozenPrefix({
   const filteredSkills = (skills ?? []).filter(s => !isNativeShadowedSkill(s))
   if (filteredSkills.length > 0 && !guidance.includes(SKILLS_GUIDANCE)) {
     guidance.push(SKILLS_GUIDANCE)
+  }
+  for (const extra of extraGuidance ?? []) {
+    if (extra && !guidance.includes(extra)) guidance.push(extra)
   }
   const skillIndexText = renderSkillIndex(filteredSkills)
   const ts = timestamp === undefined ? new Date().toISOString() : timestamp

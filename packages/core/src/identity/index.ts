@@ -11,6 +11,7 @@ export { AGENT_NFT_ABI } from './abi'
 export {
   ANIMA_AGENT_NFT_ADDRESS,
   ANIMA_INBOX_ADDRESS,
+  ANIMA_MARKET_ADDRESS,
   EXPLORER_BASE,
   type NetworkName,
   explorerTxUrl,

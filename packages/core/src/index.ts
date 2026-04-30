@@ -137,6 +137,7 @@ export {
   bootstrapHashFor,
   ANIMA_AGENT_NFT_ADDRESS,
   ANIMA_INBOX_ADDRESS,
+  ANIMA_MARKET_ADDRESS,
   EXPLORER_BASE,
   INTELLIGENT_DATA_SLOTS,
   type IntelligentDataSlot,

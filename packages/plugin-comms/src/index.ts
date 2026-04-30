@@ -22,6 +22,19 @@
 import type { NativePlugin, ToolDef } from '@s0nderlabs/anima-core'
 import { AnimaInboxClient } from './contract'
 import { A2AListener } from './listener'
+import { AnimaMarketClient } from './market'
+import { MarketListener } from './market-listener'
+import {
+  makeMarketAcceptResult,
+  makeMarketClaimTimeout,
+  makeMarketCreateJob,
+  makeMarketDispute,
+  makeMarketForceClose,
+  makeMarketGetJob,
+  makeMarketListMyJobs,
+  makeMarketMarkDone,
+  makeMarketProposeSplit,
+} from './market-tools'
 import { PubkeyResolver } from './pubkey-resolver'
 import {
   makeBlock,
@@ -42,6 +55,25 @@ export {
   ANIMA_INBOX_ABI,
   type InboxMessageEvent,
 } from './contract'
+export {
+  AnimaMarketClient,
+  ANIMA_MARKET_ABI,
+  JOB_STATUS,
+  JOB_STATUS_LABEL,
+  type Job,
+  type JobStatus,
+  type JobCreatedEvent,
+} from './market'
+export { MarketListener, type JobEvent } from './market-listener'
+export { MARKETPLACE_GUIDANCE } from './market-guidance'
+export {
+  formatJobEvent,
+  formatJobEventForBrain,
+  isActor,
+  isJobTerminalKind,
+  isParticipant,
+  jobEventShouldWakeBrain,
+} from './market-format'
 export { eciesEncryptToHex, eciesDecryptFromHex } from './crypto'
 export {
   type Envelope,
@@ -130,6 +162,48 @@ const plugin: NativePlugin = {
     ctx.registerTool(makeMute(deps) as ToolDef)
     ctx.registerTool(makeUnmute(deps) as ToolDef)
     ctx.registerTool(makePresence(deps) as ToolDef)
+
+    // Phase 8: AnimaMarket escrow. Optional — only registers if the harness
+    // injected `comms.marketAddress` (chat.tsx wiring).
+    if (comms.marketAddress) {
+      const market = new AnimaMarketClient({
+        address: comms.marketAddress,
+        publicClient: comms.publicClient,
+        walletClient: comms.walletClient,
+      })
+      const marketListener = new MarketListener({
+        agentEoa: comms.agentEoa,
+        market,
+        publicClient: comms.publicClient,
+        startBlock: comms.startBlock,
+        onEvent: comms.onJobEvent ?? (() => {}),
+      })
+      ctx.registerListener({
+        name: 'a2a-market',
+        start: async () => {
+          await marketListener.start()
+        },
+        stop: async () => {
+          marketListener.stop()
+        },
+      } as never)
+
+      const marketDeps = {
+        market,
+        resolver,
+        contacts: listener.getContacts(),
+        agentEoa: comms.agentEoa,
+      }
+      ctx.registerTool(makeMarketCreateJob(marketDeps) as ToolDef)
+      ctx.registerTool(makeMarketMarkDone(marketDeps) as ToolDef)
+      ctx.registerTool(makeMarketAcceptResult(marketDeps) as ToolDef)
+      ctx.registerTool(makeMarketDispute(marketDeps) as ToolDef)
+      ctx.registerTool(makeMarketClaimTimeout(marketDeps) as ToolDef)
+      ctx.registerTool(makeMarketForceClose(marketDeps) as ToolDef)
+      ctx.registerTool(makeMarketProposeSplit(marketDeps) as ToolDef)
+      ctx.registerTool(makeMarketGetJob(marketDeps) as ToolDef)
+      ctx.registerTool(makeMarketListMyJobs(marketDeps) as ToolDef)
+    }
   },
 }
 
@@ -150,6 +224,10 @@ export interface CommsRuntimeContext {
   startBlock: bigint
   onDeliver: (m: import('./listener').DeliveredMessage) => void
   onOperatorNotice?: (n: import('./listener').OperatorNotice) => void
+  /** Optional: AnimaMarket address. When set, plugin registers 9 market.* limbs + listener. */
+  marketAddress?: `0x${string}`
+  /** Push job lifecycle events to the harness for TUI rendering. */
+  onJobEvent?: (e: import('./market-listener').JobEvent) => void
 }
 
 export default plugin

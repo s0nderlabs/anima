@@ -1,7 +1,15 @@
 import type { PermissionDecision, PermissionMode, PermissionRequest } from '@s0nderlabs/anima-core'
+import { type JobEvent, isJobTerminalKind } from '@s0nderlabs/anima-plugin-comms'
 import { createSignal } from 'solid-js'
 
-export type TurnRole = 'user' | 'assistant' | 'system' | 'tool-call' | 'tool-result' | 'inbox'
+export type TurnRole =
+  | 'user'
+  | 'assistant'
+  | 'system'
+  | 'tool-call'
+  | 'tool-result'
+  | 'inbox'
+  | 'market'
 
 export interface TurnRow {
   id: string
@@ -51,6 +59,25 @@ export function createChatState(opts: CreateChatStateOpts) {
   // spinner row reads this and renders elapsed seconds. Cleared on idle.
   const [turnStartedAt, setTurnStartedAt] = createSignal<number | null>(null)
 
+  // Phase 8: in-flight escrow jobs the agent is a party to (buyer or
+  // provider). Incremented on JobCreated, decremented once per terminal
+  // event per jobId. The contract emits both JobForceClosed AND JobSettled
+  // when force-closing a Done job (force-close routes through _settle), so
+  // we de-dup by jobId here to keep the counter honest.
+  const [activeJobCount, setActiveJobCount] = createSignal(0)
+  const terminatedJobs = new Set<string>()
+  const bumpActiveJobs = (e: JobEvent) => {
+    if (e.kind === 'created') {
+      setActiveJobCount(c => c + 1)
+      return
+    }
+    if (!isJobTerminalKind(e.kind)) return
+    const id = e.jobId.toString()
+    if (terminatedJobs.has(id)) return
+    terminatedJobs.add(id)
+    setActiveJobCount(c => Math.max(0, c - 1))
+  }
+
   // Per-turn AbortController. Set when handleSubmit kicks off brain.infer;
   // cleared (set to null) after the turn ends or is aborted. The keyboard
   // handler reads it to wire Esc → abort.
@@ -94,6 +121,7 @@ export function createChatState(opts: CreateChatStateOpts) {
     eoaBalance,
     turnStartedAt,
     activeAbort,
+    activeJobCount,
     setInput,
     setStatus: setStatusTracked,
     setUsage,
@@ -103,6 +131,7 @@ export function createChatState(opts: CreateChatStateOpts) {
     setEoaBalance,
     setTurnStartedAt,
     setActiveAbort,
+    bumpActiveJobs,
     pushRow,
     identityLabel: opts.identityLabel,
     brainLabel: opts.brainLabel,

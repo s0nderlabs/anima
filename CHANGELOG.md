@@ -4,6 +4,26 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-04-30
+
+### Added
+
+- **Phase 8: AnimaMarket escrow.** New native-0G fixed-price escrow contract `AnimaMarket.sol` (`0x3ebD21f5dd67acDeF199fACF28388627212bA2aB` on mainnet + testnet via CREATE2; deploy tx `0x72de913e0e8062255a4625ef0401ca06f825048e780759558bef48fada58e6b0`). State machine: Funded → Done → (Accepted | Disputed) → Settled. 24h acceptance window after `markDone`, 7d max lifetime, immutable 5% protocol fee to dev.deployer. No relayer, no judge: each agent's local harness signs with its own EOA, msg.sender carries actor identity. Disputes resolve via co-signed `proposeSplit` (matching hashes settle automatically) or default-refund-to-buyer at MAX_LIFETIME. forceClose from `Done` settles to provider per claimTimeout semantics (protects negligent providers). 100% line/statement/branch/function coverage on the contract via 62 forge tests + 3-angle security audit.
+- **9 brain limbs in `@s0nderlabs/anima-plugin-comms`**: `market.createJob`, `market.markDone`, `market.acceptResult`, `market.dispute`, `market.claimTimeout`, `market.forceClose`, `market.proposeSplit`, `market.getJob`, `market.listMyJobs`. Address resolution shares `resolveAddrOrName` with `agent.message` (`.anima.0g` name → 0x → contact-label fallback).
+- **Market lifecycle listener** in `plugin-comms`: catches up `JobCreated` filtered on agent (buyer OR provider) plus 7 lifecycle events (`JobMarkedDone`, `JobAccepted`, `JobDisputed`, `JobSettled`, `SplitProposed`, `SplitResolved`, `JobForceClosed`) in parallel via `Promise.all`. WS subscribes for live events; client-side filter by relevant jobIds.
+- **Per-event brain wake-up.** Job lifecycle events drain through a `marketBrainQueue` mirroring inbound A2A: counterparty wakes, actor suppressed (already saw tool response). Settled wakes the recipient so they can send a closing message; splitResolved/forceClosed wake both parties (caller not in event, over-wake preferred over miss). Activity log records `kind:"wake" source:"market" kind:"<event>" jobId:"<id>"` per fire.
+- **`MARKETPLACE_GUIDANCE` plugin prompt section.** Always-on protocol guidance injected into the frozen prefix when comms+market are loaded — same pattern as `BROWSER_GUIDANCE`. Anima-controlled, plugin-owned (operator persona stays in `/agent/persona.md`). Tells the brain to negotiate via `agent.message` before funding, look up history on `created` events, deliver before `markDone`, and respond autonomously without operator approval.
+- **TUI: dedicated `mkt` row prefix** for market events (lavender), distinct from `inbox` (amber) and `sys` (gray). New `/jobs` slash command lists active escrows. Statusline shows "N escrow" segment when non-Settled jobs exist.
+- **Integration scripts** `test/local/e2e-market-happy.ts` + `e2e-market-dispute.ts` exercise the full TS client end-to-end on Galileo testnet with two persistent test wallets (auto-funded from dev.deployer if low). Happy path verified on mainnet: specter↔fox autonomous deal, settled `0xCCeC…d97a +0.00285 0G` fee `0.00015 0G`, with closing thank-you message back to buyer.
+
+### Changed
+
+- **Renamed `gas` → `wallet`** in TUI statusline. The agent EOA holds gas today but will hold trade payments, DeFi receipts, and transfers once Phase 8 marketplace + Phase 10 plugin-onchain ship; `gas` was too narrow. Color thresholds (red <0.005 0G, yellow <0.02 0G) preserved since gas runway is still the floor concern.
+- **`resolveAddrOrName` exported from `tools.ts`** so `market-tools.ts` reuses the single resolver chain (was duplicated; now one source of truth).
+- **`buildFrozenPrefix` accepts `extraGuidance: readonly string[]`** so plugin-comms contributes MARKETPLACE_GUIDANCE without growing the core's tool-guidance map.
+- **`bumpActiveJobs` deduplicates terminal events** by jobId. Force-closing a `Done` job emits both `JobForceClosed` and `JobSettled` (force-close routes through `_settle`); the counter now correctly decrements once per job lifetime.
+- **TS rendering helpers** (`formatJobEvent`, `formatJobEventForBrain`, `isParticipant`, `isActor`, `jobEventShouldWakeBrain`, `isJobTerminalKind`) moved from `chat.tsx` into `plugin-comms/market-format.ts`. Protocol semantics live with the protocol code, not in the harness.
+
 ## [0.12.2] - 2026-04-29
 
 ### Added
@@ -549,6 +569,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.13.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.13.0
 [0.12.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.2
 [0.12.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.1
 [0.12.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.0

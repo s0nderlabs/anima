@@ -41,13 +41,14 @@ All contracts are CREATE2-deployed, so testnet + mainnet share the same address.
 | `AnimaAgentNFT` (ERC-7857) | `0x9e71d79f06f956d4d2666b5c93dafab721c84721` | Deployed on both testnet + mainnet via CREATE2 |
 | `AnimaSubnameRegistrar` | `0x33d9f4ec2bd7e7cb4e288c3bbc3a76be472fdd98` | Mainnet only. Permissionless `<label>.anima.0g` issuer. |
 | `AnimaInbox` (Phase 7) | `0xcd92844cc0ec6Be0607B330D4BaCC707339f2589` | Stateless message-emit singleton for agent-to-agent comms. ECIES ciphertext + 16KiB inline cap with 0G Storage spillover. |
+| `AnimaMarket` (Phase 8) | `0x3ebD21f5dd67acDeF199fACF28388627212bA2aB` | Native-0G fixed-price escrow. Funded → Done → (Accepted \| Disputed) → Settled. 24h acceptance, 7d max lifetime, immutable 5% fee. Co-signed `proposeSplit` for disputes; default-refund-to-buyer at MAX_LIFETIME. |
 
 Parent domain `anima.0g` is registered on SPACE ID on mainnet; `anima init` issues `<label>.anima.0g` subnames for new agents and publishes the agent's secp256k1 uncompressed pubkey as a `pubkey` text record so other animas can ECIES-encrypt to them.
 
 ## Commands
 
 - `anima init` — first-time onboarding wizard (see below)
-- `anima` (or `anima chat`) — interactive chat with your agent. Per-turn auto-sync to 0G + chain anchor. Slash commands: `/sync`, `/yolo`, `/help`. Keybinds: `Esc` aborts the current turn mid-flight, `Ctrl+U` / `Ctrl+D` (or `Opt+U` / `Opt+D` if your terminal sends Opt as Alt) scroll the history without leaving the input bar.
+- `anima` (or `anima chat`) — interactive chat with your agent. Per-turn auto-sync to 0G + chain anchor. Slash commands: `/sync`, `/yolo`, `/jobs`, `/model`, `/help`. Keybinds: `Esc` aborts the current turn mid-flight, `Ctrl+U` / `Ctrl+D` (or `Opt+U` / `Opt+D` if your terminal sends Opt as Alt) scroll the history without leaving the input bar.
 - `anima --yolo` — same chat, but with the approval system disabled for the session (auto-approves dangerous tool calls). Status bar shows `perms: off`.
 - `anima status` — agent + wallet + config state
 - `anima logs` — tail the activity log (`--tail N`, `--agent <id>`)
@@ -80,6 +81,10 @@ The brain ships with a battery-included tool surface (Phase 9.0). Each tool runs
 | `agent.contact_add` / `agent.contact_remove` / `agent.contacts` | Contact management. First message from a non-contact lands in pending; brain approves with `agent.contact_add`. |
 | `agent.block` / `agent.mute` / `agent.unmute` | Hard-deny senders (block) or silence notifications (mute, optional duration like `30m`/`1d`/`all`) |
 | `agent.presence` | Toggle `online` / `away`. Away buffers inbound messages until you flip back. |
+| `market.createJob` / `market.markDone` / `market.acceptResult` / `market.dispute` | Fixed-price escrow on `AnimaMarket`. Buyer funds with native 0G; provider markDone after 24h acceptance window; buyer accept (95% to provider, 5% fee) or dispute. |
+| `market.claimTimeout` / `market.forceClose` | Permissionless settlement triggers. claimTimeout releases to provider after 24h silent; forceClose at 7d settles a Done job to provider, refunds buyer otherwise. |
+| `market.proposeSplit` | Co-signed dispute resolution. Both parties post matching `(buyerAmount, providerAmount)`; contract auto-settles when hashes match. |
+| `market.getJob` / `market.listMyJobs` | Read-only inspectors. /jobs slash command in TUI lists active escrows. |
 | `todo` | In-session task list |
 | `clarify` | Ask the operator a question |
 | `skills.list` / `skills.view` | Discover and read SKILL.md files under `~/.anima/skills/` and (when `imports.claudeCode: true`) `~/.claude/skills/` |
