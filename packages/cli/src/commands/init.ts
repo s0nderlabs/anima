@@ -44,6 +44,7 @@ import { estimateCosts, renderCostSummary } from './init/cost'
 import { fundingGate } from './init/funding-gate'
 import { pickBrainModel } from './init/model-picker'
 import { pickOperatorSigner } from './init/operator-picker'
+import { type SandboxProvisionResult, runSandboxProvision } from './init/sandbox-provision'
 import { initialWizardState, updateWizardState, writeWizardState } from './init/wizard-state'
 
 export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promise<void> {
@@ -77,6 +78,31 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     initialValue: '0g-mainnet' as AnimaNetwork,
   })) as AnimaNetwork
   if (isCancel(network)) {
+    cancel('Aborted.')
+    return
+  }
+
+  // Phase A.5 (Phase 11): pick deploy target. local = harness on this machine
+  // while CLI runs; sandbox = harness in 0G Sandbox TDX TEE on Galileo testnet
+  // (Hybrid Path 1 — iNFT/wallet/Storage/Compute on mainnet, container on
+  // Galileo). Sandbox mode requires the operator to also hold testnet 0G for
+  // the provider deposit (~1 0G + ~0.07 0G/min runtime).
+  const deployTarget = (await select({
+    message: 'Where will this agent run?',
+    options: [
+      {
+        value: 'local' as const,
+        label: 'Local (this machine, always-on while CLI is open)',
+      },
+      {
+        value: 'sandbox' as const,
+        label: '0G Sandbox (Galileo TDX TEE, persistent)',
+        hint: 'requires testnet 0G for provider deposit + per-min runtime',
+      },
+    ],
+    initialValue: 'local',
+  })) as 'local' | 'sandbox' | symbol
+  if (isCancel(deployTarget)) {
     cancel('Aborted.')
     return
   }
@@ -472,6 +498,72 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     }
   }
 
+  // Phase 11: deploy harness into 0G Sandbox if user picked sandbox target.
+  // Runs AFTER subname-records (so we know if subname is registered) but
+  // BEFORE config write (so the resulting sandbox.id + endpoint land in cfg).
+  // Tx + handoff cost paid in testnet 0G via the operator wallet's Galileo
+  // network. Idempotent: if balance already sufficient, deposit is skipped;
+  // if TEE signer already acknowledged, that step is skipped too.
+  let sandboxResult: SandboxProvisionResult | null = null
+  if (deployTarget === 'sandbox' && mintedTokenId !== null && contractAddress && modelPick) {
+    const sBox = spinner()
+    sBox.start('Deploying harness into 0G Sandbox (Galileo testnet)')
+    try {
+      sandboxResult = await runSandboxProvision({
+        operator,
+        agentPrivkey: agent.privkeyHex as Hex,
+        agentAddress: agent.address as Address,
+        iNFTRef: { contract: contractAddress, tokenId: mintedTokenId },
+        brain: { provider: modelPick.provider as Address, model: modelPick.model ?? '' },
+        iNFTNetwork: network,
+        name: requestedSubname || 'anima',
+        ref: process.env.ANIMA_BOOTSTRAP_REF ?? 'main',
+        onProgress: msg => sBox.message(msg),
+      })
+      await updateWizardState(paths.dir, draft => {
+        draft.steps.sandboxId = sandboxResult!.sandboxId
+        draft.steps.sandboxEndpoint = sandboxResult!.endpoint
+      })
+      sBox.stop(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`)
+
+      // Publish agent:endpoint text record on the subname so the chat client
+      // can discover where to talk. Skipped if subname registration failed.
+      if (registeredSubname) {
+        const sEp = spinner()
+        sEp.start(`Publishing agent:endpoint on ${registeredSubname}.anima.0g`)
+        try {
+          await withSilencedConsole(async () => {
+            const sann = new SannClient({ privkeyHex: agent.privkeyHex as Hex })
+            const tx = await sann.setText(
+              subnameNode(registeredSubname!),
+              'agent:endpoint',
+              sandboxResult!.endpoint,
+            )
+            await sann.waitForReceipt(tx)
+          })
+          sEp.stop('agent:endpoint published')
+        } catch (e) {
+          sEp.stop(`agent:endpoint publish failed: ${(e as Error).message.slice(0, 120)}`)
+        }
+      }
+    } catch (e) {
+      sBox.stop(`sandbox deploy failed: ${(e as Error).message.slice(0, 200)}`)
+      note(
+        [
+          'iNFT minted, agent funded, keystore on 0G Storage — recoverable.',
+          'Re-run `anima deploy` after fixing the sandbox-side issue.',
+          `Likely cause: insufficient testnet 0G at ${operatorAddress}, or provider 504/upstream timeout.`,
+        ].join('\n'),
+        'sandbox-deploy aborted (recoverable)',
+      )
+    }
+  } else if (deployTarget === 'sandbox') {
+    note(
+      'sandbox target selected but iNFT mint or model pick was missing; skipping handoff.',
+      'sandbox deploy skipped',
+    )
+  }
+
   // ─── Write final config ─────────────────────────────────────────────────
 
   const cfg = defineConfig({
@@ -497,6 +589,15 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     tools: {},
     imports: { claudeCode: true },
     operator: operatorHint,
+    deployTarget: sandboxResult ? 'sandbox' : 'local',
+    sandbox: sandboxResult
+      ? {
+          id: sandboxResult.sandboxId,
+          endpoint: sandboxResult.endpoint,
+          providerAddress: sandboxResult.providerAddress,
+          snapshotName: sandboxResult.snapshotName,
+        }
+      : undefined,
   })
   await writeConfigTs(configPath, cfg, {
     header: '// Regenerated by `anima init`. Edit freely; type-safe.',

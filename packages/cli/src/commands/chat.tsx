@@ -85,6 +85,13 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     console.log('Config has no iNFT or agent yet. Re-run `anima init`.')
     process.exit(1)
   }
+  // Phase 11: deployTarget=sandbox routes the chat loop to a thin client of
+  // the harness HTTP server. The agent's privkey lives only inside the
+  // container, so we skip keystore decrypt here. Local mode falls through.
+  if (config.deployTarget === 'sandbox' && config.sandbox?.endpoint) {
+    const { runChatSandbox } = await import('./chat-sandbox')
+    return runChatSandbox(config)
+  }
   const contractAddress = config.identity.iNFT.contract as Address
   const tokenId = BigInt(config.identity.iNFT.tokenId)
   const agentId = iNFTAgentId({ contractAddress, tokenId })

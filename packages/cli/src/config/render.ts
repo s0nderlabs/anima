@@ -26,6 +26,10 @@ export function renderConfigTs(cfg: AnimaConfig, opts: RenderConfigOpts = {}): s
   // the UX, not an interactive wizard. Default mode stays `none` (passthrough)
   // for back-compat.
   const sandboxBlock = renderSandboxBlock(cfg.sandbox)
+  const deployTargetLine =
+    cfg.deployTarget && cfg.deployTarget !== 'local'
+      ? `  deployTarget: ${JSON.stringify(cfg.deployTarget)},\n`
+      : ''
   return `${header ? `${header}\n\n` : ''}export default {
   identity: ${JSON.stringify(cfg.identity)},
   network: ${JSON.stringify(cfg.network)},
@@ -37,13 +41,19 @@ export function renderConfigTs(cfg: AnimaConfig, opts: RenderConfigOpts = {}): s
   plugins: ${JSON.stringify(cfg.plugins)},
   tools: ${JSON.stringify(cfg.tools)},
   imports: { claudeCode: ${cfg.imports.claudeCode} },
-${operatorLine}${subnameLine}${sandboxBlock}}
+${deployTargetLine}${operatorLine}${subnameLine}${sandboxBlock}}
 `
 }
 
 function renderSandboxBlock(sandbox: AnimaConfig['sandbox']): string {
-  // Operator already configured something: emit it verbatim, no template.
-  if (sandbox?.mode && sandbox.mode !== 'none') {
+  // Phase 11: deploy-target sandbox metadata (id/providerAddress/endpoint/
+  // snapshotName) OR Phase 9.5 limb-sandbox mode = anything non-default → emit
+  // verbatim. Only surface the doc-comment template when the operator has
+  // touched neither.
+  const hasPhase11Metadata =
+    sandbox?.id || sandbox?.providerAddress || sandbox?.endpoint || sandbox?.snapshotName
+  const hasNonDefaultLimbMode = sandbox?.mode && sandbox.mode !== 'none'
+  if (hasPhase11Metadata || hasNonDefaultLimbMode) {
     return `  sandbox: ${JSON.stringify(sandbox, null, 2).replace(/\n/g, '\n  ')},\n`
   }
   // Fresh install: write the active default + commented examples for the

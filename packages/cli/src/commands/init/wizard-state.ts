@@ -25,6 +25,9 @@ export interface WizardState {
     ledgerOpenedTx: boolean // broker.addLedger returns void
     subnameClaimedTx: string | null
     textRecordsSetTx: string | null
+    /** Phase 11: 0G Sandbox lifecycle. Set during sandbox-deploy branch. */
+    sandboxId: string | null
+    sandboxEndpoint: string | null
   }
   lastError: string | null
   updatedAt: string
@@ -55,6 +58,8 @@ export function initialWizardState(
       ledgerOpenedTx: false,
       subnameClaimedTx: null,
       textRecordsSetTx: null,
+      sandboxId: null,
+      sandboxEndpoint: null,
     },
     lastError: null,
     updatedAt: new Date().toISOString(),

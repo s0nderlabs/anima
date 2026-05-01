@@ -1,8 +1,54 @@
 import { readFile } from 'node:fs/promises'
-import { agentPaths } from '@s0nderlabs/anima-core'
+import {
+  SANDBOX_PROVIDER_URL_GALILEO,
+  SandboxProviderClient,
+  agentPaths,
+} from '@s0nderlabs/anima-core'
+import { findAndLoadConfig } from '../config/load'
 import { pickDefaultAgent } from './_agents'
+import { loadOrPickOperatorSigner } from './init/operator-picker'
 
 export async function runLogs(opts: { agent?: string; tail?: number } = {}): Promise<void> {
+  // Phase 11: in sandbox mode the activity log lives in the container at
+  // /var/log/anima-harness.log. Tail it via toolbox exec.
+  const found = await findAndLoadConfig().catch(() => null)
+  if (
+    found?.config.deployTarget === 'sandbox' &&
+    found.config.sandbox?.id &&
+    found.config.sandbox.endpoint
+  ) {
+    const operator = await loadOrPickOperatorSigner({
+      network: found.config.network,
+      hint: found.config.operator,
+    })
+    if (!operator) {
+      console.log('No operator wallet available; cannot authenticate to provider.')
+      process.exit(1)
+    }
+    const operatorAccount = await operator.account()
+    const provider = new SandboxProviderClient({
+      endpoint: SANDBOX_PROVIDER_URL_GALILEO,
+      operator: operatorAccount,
+    })
+    const tail = opts.tail ?? 200
+    try {
+      const r = await provider.execInToolbox(found.config.sandbox.id, {
+        command: `tail -n ${tail} /var/log/anima-harness.log`,
+        timeout: 60,
+      })
+      if (r.stdout) process.stdout.write(r.stdout)
+      if (r.stderr) process.stderr.write(r.stderr)
+      if (r.exitCode !== 0) {
+        process.stderr.write(`\n(toolbox exit=${r.exitCode})\n`)
+      }
+    } catch (e) {
+      console.log(`harness log fetch failed: ${(e as Error).message.slice(0, 200)}`)
+    }
+    await operator.close?.()
+    return
+  }
+
+  // Local mode: read from agentPaths
   const id = opts.agent ?? (await pickDefaultAgent())
   if (!id) {
     console.log('No agents found in ~/.anima/agents. Run `anima init` first.')

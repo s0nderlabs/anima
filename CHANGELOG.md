@@ -626,6 +626,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.15.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.0
 [0.14.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.14.1
 [0.14.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.14.0
 [0.13.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.13.0

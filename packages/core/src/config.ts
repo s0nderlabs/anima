@@ -140,7 +140,42 @@ export interface AnimaConfig {
   vision?: {
     provider?: string | null
   }
+  /**
+   * Phase 11 (May 2026): where the harness physically runs.
+   *
+   *  - `local` (default): harness lives on this machine while `anima` chat is
+   *    open. Listeners run only when CLI is open. Use for dev / always-on
+   *    laptop / VPS / home server.
+   *  - `sandbox`: harness runs in a 0G Sandbox TDX TEE container. Persistent
+   *    even when the operator laptop is closed. Set by `anima init --target
+   *    sandbox` or `anima deploy`. Co-exists with `sandbox.id`/`endpoint` etc
+   *    fields below.
+   */
+  deployTarget?: 'local' | 'sandbox'
   sandbox?: {
+    /**
+     * Phase 11: 0G Sandbox container UUID returned by `POST /api/sandbox`.
+     * Only set when `deployTarget === 'sandbox'`.
+     */
+    id?: string
+    /**
+     * Phase 11: provider wallet address (Galileo testnet). Identifies which
+     * sandbox provider hosts this agent's container. Used for settlement
+     * deposit/withdraw and `getSandbox` lookups.
+     */
+    providerAddress?: string
+    /**
+     * Phase 11: full URL of the harness HTTP server inside the container,
+     * routed through the provider's nip.io reverse proxy.
+     * Format: `http://<port>-<sandboxId>.43.106.147.28.nip.io:4000`.
+     */
+    endpoint?: string
+    /**
+     * Phase 11: snapshot name passed to `createSandbox`. Default
+     * `daytonaio/sandbox:0.5.0-slim`. Override for resource needs (e.g.
+     * `openclaw` for 2C/4G/10G).
+     */
+    snapshotName?: string
     mode?: 'none' | 'os' | 'docker'
     /**
      * docker mode only: container image. Default `oven/bun:1`. Compatible
@@ -201,6 +236,7 @@ const DEFAULT_CONFIG: Omit<AnimaConfig, 'network' | 'storage'> = {
   skills: { disabled: [] },
   prompt: { append: null },
   vision: { provider: undefined },
+  deployTarget: 'local',
   sandbox: { mode: 'none' },
 }
 
@@ -220,6 +256,7 @@ export function defineConfig(input: AnimaConfigInput): AnimaConfig {
     skills: input.skills ?? DEFAULT_CONFIG.skills,
     prompt: input.prompt ?? DEFAULT_CONFIG.prompt,
     vision: input.vision ?? DEFAULT_CONFIG.vision,
+    deployTarget: input.deployTarget ?? DEFAULT_CONFIG.deployTarget,
     sandbox: input.sandbox ?? DEFAULT_CONFIG.sandbox,
   }
 }

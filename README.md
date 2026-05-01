@@ -47,19 +47,20 @@ Parent domain `anima.0g` is registered on SPACE ID on mainnet; `anima init` issu
 
 ## Commands
 
-- `anima init` — first-time onboarding wizard (see below)
-- `anima` (or `anima chat`) — interactive chat with your agent. Per-turn auto-sync to 0G + chain anchor. Slash commands: `/sync`, `/yolo`, `/jobs`, `/model`, `/exit`, `/help`. Keybinds: `Esc` aborts the current turn mid-flight, `Ctrl+U` / `Ctrl+D` (or `Opt+U` / `Opt+D` if your terminal sends Opt as Alt) scroll the history without leaving the input bar.
+- `anima init` — first-time onboarding wizard (see below). Phase 11 adds a deploy-target select: `local` (this machine, default) or `sandbox` (0G Sandbox TDX TEE on Galileo testnet, persistent through laptop closure).
+- `anima` (or `anima chat`) — interactive chat with your agent. Per-turn auto-sync to 0G + chain anchor. Slash commands: `/sync`, `/yolo`, `/jobs`, `/model`, `/exit`, `/help`. Keybinds: `Esc` aborts the current turn mid-flight, `Ctrl+U` / `Ctrl+D` (or `Opt+U` / `Opt+D` if your terminal sends Opt as Alt) scroll the history without leaving the input bar. In sandbox mode, the laptop CLI is a thin client to the harness HTTP server; tool indicators arrive over SSE.
 - `anima --yolo` — same chat, but with the approval system disabled for the session (auto-approves dangerous tool calls). Status bar shows `perms: off`.
-- `anima status` — agent + wallet + config state
-- `anima logs` — tail the activity log (`--tail N`, `--agent <id>`)
+- `anima status` — agent + wallet + config state. In sandbox mode also probes `/healthz` + provider sandbox state in parallel.
+- `anima logs` — tail the activity log (`--tail N`, `--agent <id>`). In sandbox mode tails `/var/log/anima-harness.log` inside the container via the provider's toolbox exec.
 - `anima restore <iNFT-ref>` — recover an agent on a new machine from its iNFT (refs: `eip155:16661:0x...:N` or `0g-mainnet:0x...:N`)
 - `anima topup --agent N` — operator sends N 0G to the agent EOA (infra gas)
 - `anima topup --compute N` — agent deposits N 0G into the 0G Compute ledger
-- `anima sync` — force flush memory + activity-log to 0G Storage and anchor on chain
+- `anima sync` — force flush memory + activity-log to 0G Storage and anchor on chain. In sandbox mode proxies to the harness's `POST /sync` (no laptop-side keystore decrypt).
 - `anima inspect` — read what's anchored on chain for an iNFT. Default decrypts every IntelligentData slot via the operator wallet and prints the plaintext. Flags: `--slot <name>` (filter), `--tx <hash>` (decode an `update()` tx + show which slots have been superseded), `--raw` (no decrypt, root hashes + ciphertext sizes only), `--diff` (compare local memory files vs chain plaintext via keccak256), `--json` (structured output), `--full` (skip the 40-line truncation), `--out <dir>` (dump every decrypted slot to disk). Foreign iNFTs auditable via positional ref: `anima inspect 0g-mainnet:0xCONTRACT:tokenId` (raw view only).
 - `anima model` — re-pick brain provider/model
 - `anima migrate-keystore` — one-time v0.5 (passphrase) → v0.6 (operator-wallet) keystore upgrade
-- `anima deploy` — Local→Sandbox migration via Option 3 ECIES handoff (Phase 11 wires the actual sandbox call)
+- `anima deploy` — Local→Sandbox migration. Decrypts existing keystore via operator wallet, runs Galileo deposit + acknowledge → createSandbox → bootstrap → Option 3 ECIES handoff → publish `agent:endpoint` text record on subname. Operator never plaintexts the privkey on the laptop after handoff.
+- `anima upgrade [--ref vX.Y.Z] [--yes]` — swap the sandbox harness container while preserving identity + memory. Operator unlocks keystore once; old container is deleted, fresh one is provisioned with the same agent privkey. ~60-90s downtime. `agent:endpoint` text record auto-updated.
 - `anima init --resume` — pick up a partial init from the last incomplete step
 
 ## Tools the agent can call

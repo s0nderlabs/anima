@@ -1,28 +1,36 @@
-import { cancel, intro, isCancel, note, outro, select } from '@clack/prompts'
-import type { Address } from 'viem'
+import { cancel, intro, isCancel, note, outro, select, spinner } from '@clack/prompts'
+import { NETWORK_CHAIN_ID } from '@s0nderlabs/anima-core'
+import type { Address, Hex } from 'viem'
 import { findAndLoadConfig } from '../config/load'
+import { writeConfigTs } from '../config/render'
+import { loadOrPickOperatorSigner } from './init/operator-picker'
+import {
+  publishSandboxEndpoint,
+  runSandboxProvision,
+  unlockAgentKeystore,
+} from './init/sandbox-provision'
 
 /**
- * `anima deploy` — migrate a Local-mode agent to 0G Sandbox via Option 3
- * (project-anima.md / phase-6.6-operator-wallet-keystore-decision.md).
+ * `anima deploy` — migrate an existing local-mode agent into 0G Sandbox via
+ * Option 3 ECIES handoff.
  *
- * Phase 6.6 lands the crypto + CLI scaffold; Phase 11 lands the actual
- * gateway endpoint and sandbox harness. Until then this command:
+ * Pre-conditions:
+ *   - Config exists, deployTarget is `local`
+ *   - iNFT minted, agent EOA funded, keystore on 0G Storage
+ *   - Operator wallet can decrypt the keystore (Phase 6.6 sign-derived-key)
  *
- *   1. Confirms config has an iNFT
- *   2. Decrypts agent keystore via operator wallet (uses Phase 6.6 keystore-blob)
- *   3. Stubs the sandbox container handoff: prints what would happen and
- *      exits, so the user can see the migration plan without burning compute.
+ * Flow:
+ *   1. Decrypt agent privkey (operator wallet, Phase 6.6 keystore-blob)
+ *   2. Galileo testnet: deposit + acknowledge TEE signer (idempotent)
+ *   3. createSandbox + bootstrap + poll /bootstrap/pubkey
+ *   4. encryptToPubkey(agentPrivkey, bootstrapPubkey) + operator-sign envelope
+ *   5. POST /bootstrap/provision → harness adopts the agent privkey
+ *   6. Wait for /healthz Ready
+ *   7. Update `agent:endpoint` text record on subname (if registered)
+ *   8. Rewrite config with deployTarget=sandbox + sandbox.id/endpoint/etc
  *
- * When Phase 11 ships, this command will:
- *   - Call `sandbox.create` with operator pubkey + iNFT ref (no privkey)
- *   - Poll container's `GET /bootstrap/pubkey` for its ephemeral pubkey
- *     (and TEE attestation if sealed mode)
- *   - encryptToPubkey() the agent privkey to that bootstrap pubkey
- *   - POST the ciphertext to container's `/bootstrap/provision`
- *   - Wait for container's `/healthz`
- *   - Update iNFT subname's `agent:endpoint` text record
- *   - Local gateway shuts down after handoff
+ * Local mode keystore + mainnet iNFT + agent EOA all stay valid; if the
+ * sandbox container is later deleted, operator can re-`anima deploy`.
  */
 export async function runDeploy(): Promise<void> {
   intro('anima deploy')
@@ -32,10 +40,37 @@ export async function runDeploy(): Promise<void> {
     cancel('No anima.config.ts found. Run `anima init` first.')
     return
   }
-  const { config } = loaded
+  let { config } = loaded
 
   if (!config.identity.iNFT || !config.identity.agent) {
     cancel('Config has no iNFT or agent. Run `anima init` first.')
+    return
+  }
+  if (config.deployTarget === 'sandbox' && config.sandbox?.id) {
+    note(
+      `Already deployed: sandbox=${config.sandbox.id}\nEndpoint: ${config.sandbox.endpoint}\nTo move to a new container, run \`anima upgrade\` instead.`,
+      'sandbox already attached',
+    )
+    cancel('No-op.')
+    return
+  }
+  if (!config.brain.provider) {
+    cancel('Brain provider not configured. Run `anima model` first.')
+    return
+  }
+
+  const target = (await select({
+    message: 'Migrate to which target?',
+    options: [
+      {
+        value: 'sandbox-galileo' as const,
+        label: '0G Sandbox (Galileo testnet, TDX TEE)',
+      },
+    ],
+    initialValue: 'sandbox-galileo',
+  })) as 'sandbox-galileo' | symbol
+  if (isCancel(target)) {
+    cancel('Aborted.')
     return
   }
 
@@ -43,54 +78,108 @@ export async function runDeploy(): Promise<void> {
   const tokenId = BigInt(config.identity.iNFT.tokenId)
   const agentAddress = config.identity.agent as Address
 
-  const target = (await select({
-    message: 'Migrate to which target?',
-    options: [
-      {
-        value: 'sandbox-testnet' as const,
-        label: '0G Sandbox (testnet, Daytona TDX)',
-        hint: 'Phase 11 — full handoff lands when sandbox harness ships',
-      },
-      {
-        value: 'self-hosted' as const,
-        label: 'Self-hosted gateway (Hetzner / VPS / home server)',
-        hint: 'post-MVP',
-      },
-    ],
-    initialValue: 'sandbox-testnet',
-  })) as 'sandbox-testnet' | 'self-hosted' | symbol
-  if (isCancel(target)) {
-    cancel('Aborted.')
+  const operator = await loadOrPickOperatorSigner({
+    network: config.network,
+    hint: config.operator,
+  })
+  if (!operator) {
+    cancel('No operator wallet available; cannot decrypt keystore.')
     return
   }
 
-  if (target === 'self-hosted') {
+  const sUnlock = spinner()
+  sUnlock.start('Fetching keystore + decrypting via operator wallet')
+  let agentPrivkey: Hex
+  try {
+    agentPrivkey = await unlockAgentKeystore({
+      operator,
+      network: config.network,
+      contractAddress,
+      tokenId,
+      agentAddress,
+    })
+    sUnlock.stop('unlocked')
+  } catch (e) {
+    sUnlock.stop(`unlock failed: ${(e as Error).message.slice(0, 160)}`)
+    await operator.close?.()
+    return
+  }
+
+  const sBox = spinner()
+  sBox.start('Provisioning 0G Sandbox container (Galileo testnet)')
+  let sandboxResult: Awaited<ReturnType<typeof runSandboxProvision>>
+  try {
+    sandboxResult = await runSandboxProvision({
+      operator,
+      agentPrivkey,
+      agentAddress,
+      iNFTRef: { contract: contractAddress, tokenId },
+      brain: {
+        provider: config.brain.provider as Address,
+        model: config.brain.model ?? '',
+      },
+      iNFTNetwork: config.network,
+      name: config.subname || 'anima',
+      ref: process.env.ANIMA_BOOTSTRAP_REF ?? 'main',
+      onProgress: msg => sBox.message(msg),
+    })
+    sBox.stop(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`)
+  } catch (e) {
+    sBox.stop(`sandbox deploy failed: ${(e as Error).message.slice(0, 200)}`)
     note(
-      'Self-hosted target is post-MVP. The same Option 3 crypto applies but the destination endpoint is your own deployment.',
-      'not implemented yet',
+      [
+        'Local agent untouched; iNFT + EOA + keystore remain on 0G Storage.',
+        'Common causes:',
+        '  - insufficient testnet 0G at operator wallet',
+        '  - provider 504 / Daytona upstream timeout',
+        '  - bootstrap script git clone failed (pin a different ref via ANIMA_BOOTSTRAP_REF)',
+      ].join('\n'),
+      'recoverable',
     )
-    cancel('Aborted.')
+    await operator.close?.()
     return
   }
 
-  // Phase 11 lands the actual sandbox.create + bootstrap polling + provision
-  // relay. The Option 3 crypto primitive (encryptToPubkey) is already in core.
-  // Until the sandbox harness ships, this command prints the plan and exits
-  // without unlocking the keystore — no operator signature wasted on a stub.
-  note(
+  if (config.subname) {
+    const sEp = spinner()
+    sEp.start(`Updating agent:endpoint on ${config.subname}.anima.0g`)
+    try {
+      await publishSandboxEndpoint({
+        subname: config.subname,
+        agentPrivkey,
+        endpoint: sandboxResult.endpoint,
+      })
+      sEp.stop('agent:endpoint published')
+    } catch (e) {
+      sEp.stop(`agent:endpoint publish failed: ${(e as Error).message.slice(0, 120)}`)
+    }
+  }
+
+  config = {
+    ...config,
+    deployTarget: 'sandbox' as const,
+    sandbox: {
+      ...(config.sandbox ?? {}),
+      id: sandboxResult.sandboxId,
+      providerAddress: sandboxResult.providerAddress,
+      endpoint: sandboxResult.endpoint,
+      snapshotName: sandboxResult.snapshotName,
+    },
+  }
+  await writeConfigTs(loaded.path, config, { subname: config.subname ?? null })
+
+  await operator.close?.()
+
+  outro(
     [
-      `Agent ${agentAddress} on iNFT #${tokenId.toString()} (${contractAddress}).`,
-      'Phase 11 will:',
-      '  1. POST /api/sandbox (operator pubkey + iNFT ref, NO privkey)',
-      '  2. Poll container GET /bootstrap/pubkey for ephemeral keypair + TEE attestation',
-      '  3. encryptToPubkey(agentPrivkey, containerBootstrapPubkey) — locally',
-      '  4. POST envelope to container /bootstrap/provision',
-      '  5. Wait for /healthz, update iNFT subname agent:endpoint',
-      '  6. Shut down local gateway',
       '',
-      'Crypto primitives shipped (Bundle 11 of Phase 6.6); HTTP endpoints land with Phase 11.',
+      `  sandbox id    ${sandboxResult.sandboxId}`,
+      `  endpoint      ${sandboxResult.endpoint}`,
+      `  agent (in TEE) ${agentAddress}`,
+      `  iNFT          #${tokenId.toString()} on chain ${NETWORK_CHAIN_ID[config.network]}`,
+      '',
+      'Next: `anima` to chat (now routes through the sandbox harness)',
+      '      `anima upgrade` to swap the container while preserving identity',
     ].join('\n'),
-    'sandbox handoff plan',
   )
-  outro('Phase 11 will wire this command to a live sandbox. Skipping for now.')
 }

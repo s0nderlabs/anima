@@ -16,6 +16,10 @@ import { loadOrPickOperatorSigner } from './init/operator-picker'
  * anchor on chain via iNFT updateSlots. Useful pre-transfer or as a
  * scheduled cron. Per-turn auto-sync covers the common path; this is the
  * "force flush now" backstop.
+ *
+ * Phase 11: in sandbox mode (`deployTarget === 'sandbox'`), proxy to the
+ * remote harness's POST /sync — agent privkey lives in the container, so
+ * the laptop never needs to decrypt the keystore.
  */
 export async function runSync(): Promise<void> {
   intro('anima sync')
@@ -28,6 +32,40 @@ export async function runSync(): Promise<void> {
   const { config } = loaded
   if (!config.identity.iNFT || !config.identity.agent) {
     cancel('Config has no iNFT or agent. Run `anima init` first.')
+    return
+  }
+
+  // Sandbox-mode proxy: POST /sync, render result. Skip keystore decrypt.
+  if (config.deployTarget === 'sandbox' && config.sandbox?.endpoint && config.sandbox.id) {
+    const operator = await loadOrPickOperatorSigner({
+      network: config.network,
+      hint: config.operator,
+    })
+    if (!operator) {
+      cancel('No operator wallet available.')
+      return
+    }
+    const { SandboxClient } = await import('../sandbox/client')
+    const operatorAccount = await operator.account()
+    const client = new SandboxClient({
+      endpoint: config.sandbox.endpoint,
+      sandboxId: config.sandbox.id,
+      operator: operatorAccount,
+    })
+    const sFlush = spinner()
+    sFlush.start('Forcing remote harness flush via POST /sync')
+    try {
+      const r = await client.sync()
+      if (r.tx) {
+        sFlush.stop(`flushed ${r.slots.length} slot(s)`)
+        outro(['', `  slots: ${r.slots.join(', ')}`, `  tx: ${r.tx}`].join('\n'))
+      } else {
+        sFlush.stop('nothing to sync (everything up to date)')
+      }
+    } catch (e) {
+      sFlush.stop(`sync failed: ${(e as Error).message.slice(0, 200)}`)
+    }
+    await operator.close?.()
     return
   }
 

@@ -4,7 +4,7 @@
  * values (e.g. an `.0g` name, `'?'`, or empty), so callers can pass any
  * identifier without checking type first.
  */
-export function shortAddr(addr?: string): string {
+export function shortAddr(addr?: string | null): string {
   if (!addr) return '?'
   if (!addr.startsWith('0x') || addr.length <= 12) return addr
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`

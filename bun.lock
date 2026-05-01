@@ -33,6 +33,7 @@
         "@opentui/core": "^0.1.97",
         "@opentui/solid": "^0.1.97",
         "@s0nderlabs/anima-core": "workspace:*",
+        "@s0nderlabs/anima-harness": "workspace:*",
         "@s0nderlabs/anima-plugin-comms": "workspace:*",
         "@s0nderlabs/anima-plugin-onchain": "workspace:*",
         "@s0nderlabs/anima-plugin-system": "workspace:*",
@@ -61,6 +62,21 @@
       },
       "devDependencies": {
         "@types/qrcode-terminal": "^0.12.2",
+      },
+    },
+    "packages/harness": {
+      "name": "@s0nderlabs/anima-harness",
+      "version": "0.0.0",
+      "bin": {
+        "anima-harness": "./bin/anima-harness",
+      },
+      "dependencies": {
+        "@s0nderlabs/anima-core": "workspace:*",
+        "@s0nderlabs/anima-plugin-comms": "workspace:*",
+        "@s0nderlabs/anima-plugin-onchain": "workspace:*",
+        "@s0nderlabs/anima-plugin-system": "workspace:*",
+        "viem": "^2.21.55",
+        "zod": "^3.24.1",
       },
     },
     "packages/plugin-comms": {
@@ -427,6 +443,8 @@
     "@s0nderlabs/anima-cli": ["@s0nderlabs/anima-cli@workspace:packages/cli"],
 
     "@s0nderlabs/anima-core": ["@s0nderlabs/anima-core@workspace:packages/core"],
+
+    "@s0nderlabs/anima-harness": ["@s0nderlabs/anima-harness@workspace:packages/harness"],
 
     "@s0nderlabs/anima-plugin-comms": ["@s0nderlabs/anima-plugin-comms@workspace:packages/plugin-comms"],
 

@@ -18,6 +18,7 @@
     "@opentui/core": "^0.1.97",
     "@opentui/solid": "^0.1.97",
     "@s0nderlabs/anima-core": "workspace:*",
+    "@s0nderlabs/anima-harness": "workspace:*",
     "@s0nderlabs/anima-plugin-comms": "workspace:*",
     "@s0nderlabs/anima-plugin-onchain": "workspace:*",
     "@s0nderlabs/anima-plugin-system": "workspace:*",
