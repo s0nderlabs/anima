@@ -38,10 +38,17 @@ export interface ToolboxExecBody {
   env?: Record<string, string>
 }
 
+/**
+ * Daytona's `process/execute` returns `{exitCode, result}` (combined stdout +
+ * stderr) — NOT separate stdout / stderr streams. Older docs imply both
+ * shapes exist depending on endpoint, so we type all three as optional and
+ * callers should prefer `result` when present.
+ */
 export interface ToolboxExecResponse {
   exitCode: number
-  stdout: string
-  stderr: string
+  result?: string
+  stdout?: string
+  stderr?: string
   durationMs?: number
 }
 
@@ -73,6 +80,17 @@ export interface SandboxProviderClientOpts {
   endpoint: string
   operator: LocalAccount
   fetchImpl?: typeof fetch
+  /**
+   * Optional retry policy for 504 / 502 / 503 / network errors. Defaults: 3
+   * retries with 2s base + linear backoff. Daytona's upstream periodically
+   * hits 60s timeouts; without retry, every request that races the upstream
+   * timeout fails the deploy. POST + PUT methods retry too because the only
+   * non-idempotent endpoint is `createSandbox`, and 504 there means the
+   * upstream never received the request (no orphan side-effect).
+   */
+  retries?: number
+  /** Default 2000ms. Each attempt waits attempt * baseMs. */
+  retryBaseMs?: number
 }
 
 /**
@@ -86,15 +104,62 @@ export interface SandboxProviderClientOpts {
  *   https://provider-private-sandbox-testnet.0g.ai
  * with provider address 0xB831371eb2703305f1d9F8542163633D0675CEd7.
  */
+/**
+ * Statuses worth retrying. Daytona's upstream periodically times out at 60s
+ * and surfaces 504 Gateway Timeout; provider proxy returns 502/503 during
+ * Daytona restarts. Anima's deploy/poll flow is idempotent for these so a
+ * short retry loop saves the operator from "redeploy from scratch" cycles.
+ */
+const RETRYABLE_STATUSES = new Set([502, 503, 504])
+
 export class SandboxProviderClient {
   endpoint: string
   operator: LocalAccount
   #fetch: typeof fetch
+  #retries: number
+  #retryBaseMs: number
 
   constructor(opts: SandboxProviderClientOpts) {
     this.endpoint = opts.endpoint.replace(/\/$/, '')
     this.operator = opts.operator
     this.#fetch = opts.fetchImpl ?? globalThis.fetch
+    this.#retries = opts.retries ?? 3
+    this.#retryBaseMs = opts.retryBaseMs ?? 2000
+  }
+
+  /**
+   * Retry helper. Each attempt re-runs the `buildInit` closure to mint a
+   * FRESH signed-request envelope (fresh nonce + fresh expiry). This is
+   * critical: Daytona's auth middleware rejects nonce reuse (`401 nonce
+   * already used`) and stale expiries (`401 request expired`), so retrying
+   * with the same headers after a 504 always fails. Public reads (no headers)
+   * pass `() => undefined`.
+   */
+  async #fetchWithRetry(
+    url: string,
+    buildInit: () => Promise<RequestInit | undefined> | RequestInit | undefined,
+  ): Promise<Response> {
+    let attempt = 0
+    let lastErr: unknown
+    let lastResponse: Response | null = null
+    while (attempt <= this.#retries) {
+      try {
+        const init = await buildInit()
+        const r = await this.#fetch(url, init)
+        if (!RETRYABLE_STATUSES.has(r.status)) return r
+        lastResponse = r
+        lastErr = new Error(`${init?.method ?? 'GET'} ${url}: ${r.status} (retryable)`)
+      } catch (e) {
+        lastErr = e
+      }
+      attempt += 1
+      if (attempt > this.#retries) break
+      await new Promise(r => setTimeout(r, this.#retryBaseMs * attempt))
+    }
+    // If the final attempt was a retryable status, surface that Response to
+    // the caller so they can read .text() / .status. Otherwise re-throw.
+    if (lastResponse) return lastResponse
+    throw lastErr
   }
 
   async info(): Promise<ProviderInfo> {
@@ -114,127 +179,120 @@ export class SandboxProviderClient {
   }
 
   async createSandbox(body: CreateSandboxBody): Promise<SandboxRecord> {
-    const headers = await signRequest({
-      operator: this.operator,
-      action: 'create',
-      payload: body as Record<string, unknown>,
-    })
-    return this.#post('/api/sandbox', body, headers)
+    return this.#postSigned('/api/sandbox', body, () =>
+      signRequest({
+        operator: this.operator,
+        action: 'create',
+        payload: body as Record<string, unknown>,
+      }),
+    )
   }
 
   async getSandbox(id: string): Promise<SandboxRecord> {
-    const headers = await signRequest({
-      operator: this.operator,
-      action: 'list',
-      resourceId: id,
-    })
-    return this.#getAuth(`/api/sandbox/${encodeURIComponent(id)}`, headers)
+    return this.#getSigned(`/api/sandbox/${encodeURIComponent(id)}`, () =>
+      signRequest({ operator: this.operator, action: 'list', resourceId: id }),
+    )
   }
 
   async listSandboxes(): Promise<SandboxRecord[]> {
-    const headers = await signRequest({ operator: this.operator, action: 'list' })
-    return this.#getAuth('/api/sandbox', headers)
+    return this.#getSigned('/api/sandbox', () =>
+      signRequest({ operator: this.operator, action: 'list' }),
+    )
   }
 
   async deleteSandbox(id: string): Promise<void> {
-    const headers = await signRequest({
-      operator: this.operator,
-      action: 'delete',
-      resourceId: id,
-    })
-    const r = await this.#fetch(`${this.endpoint}/api/sandbox/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-      headers,
-    })
+    const r = await this.#fetchWithRetry(
+      `${this.endpoint}/api/sandbox/${encodeURIComponent(id)}`,
+      async () => ({
+        method: 'DELETE',
+        headers: await signRequest({
+          operator: this.operator,
+          action: 'delete',
+          resourceId: id,
+        }),
+      }),
+    )
     if (!r.ok) throw new Error(`deleteSandbox(${id}) failed: ${r.status} ${await safeText(r)}`)
   }
 
   async stopSandbox(id: string): Promise<void> {
-    const headers = await signRequest({
-      operator: this.operator,
-      action: 'stop',
-      resourceId: id,
-    })
-    await this.#postRaw(`/api/sandbox/${encodeURIComponent(id)}/stop`, {}, headers)
-  }
-
-  async startSandbox(id: string): Promise<void> {
-    const headers = await signRequest({
-      operator: this.operator,
-      action: 'start',
-      resourceId: id,
-    })
-    await this.#postRaw(`/api/sandbox/${encodeURIComponent(id)}/start`, {}, headers)
-  }
-
-  async ensureBilling(id: string): Promise<void> {
-    const headers = await signRequest({
-      operator: this.operator,
-      action: 'ensure-billing',
-      resourceId: id,
-    })
-    await this.#postRaw(`/api/sandbox/${encodeURIComponent(id)}/ensure-billing`, {}, headers)
-  }
-
-  async sshAccess(id: string): Promise<{ sshCommand: string; token: string }> {
-    const headers = await signRequest({
-      operator: this.operator,
-      action: 'ssh-access',
-      resourceId: id,
-    })
-    return this.#post<{ sshCommand: string; token: string }>(
-      `/api/sandbox/${encodeURIComponent(id)}/ssh-access`,
-      {},
-      headers,
+    await this.#postSignedVoid(`/api/sandbox/${encodeURIComponent(id)}/stop`, {}, () =>
+      signRequest({ operator: this.operator, action: 'stop', resourceId: id }),
     )
   }
 
-  /**
-   * Run a command inside the sandbox via the toolbox proxy. Returns when the
-   * command exits or the timeout is reached.
-   */
+  async startSandbox(id: string): Promise<void> {
+    await this.#postSignedVoid(`/api/sandbox/${encodeURIComponent(id)}/start`, {}, () =>
+      signRequest({ operator: this.operator, action: 'start', resourceId: id }),
+    )
+  }
+
+  async ensureBilling(id: string): Promise<void> {
+    await this.#postSignedVoid(`/api/sandbox/${encodeURIComponent(id)}/ensure-billing`, {}, () =>
+      signRequest({ operator: this.operator, action: 'ensure-billing', resourceId: id }),
+    )
+  }
+
+  async sshAccess(id: string): Promise<{ sshCommand: string; token: string }> {
+    return this.#postSigned<{ sshCommand: string; token: string }>(
+      `/api/sandbox/${encodeURIComponent(id)}/ssh-access`,
+      {},
+      () => signRequest({ operator: this.operator, action: 'ssh-access', resourceId: id }),
+    )
+  }
+
   async execInToolbox(id: string, body: ToolboxExecBody): Promise<ToolboxExecResponse> {
-    const headers = await signRequest({
-      operator: this.operator,
-      action: 'toolbox',
-      resourceId: id,
-      payload: body as unknown as Record<string, unknown>,
-    })
-    return this.#post<ToolboxExecResponse>(
+    return this.#postSigned<ToolboxExecResponse>(
       `/api/toolbox/${encodeURIComponent(id)}/toolbox/process/execute`,
       body,
-      headers,
+      () =>
+        signRequest({
+          operator: this.operator,
+          action: 'toolbox',
+          resourceId: id,
+          payload: body as unknown as Record<string, unknown>,
+        }),
     )
   }
 
   async #getPublic<T>(path: string): Promise<T> {
-    const r = await this.#fetch(`${this.endpoint}${path}`)
+    const r = await this.#fetchWithRetry(`${this.endpoint}${path}`, () => undefined)
     if (!r.ok) throw new Error(`GET ${path}: ${r.status}`)
     return (await r.json()) as T
   }
 
-  async #getAuth<T>(path: string, headers: SignedHeaders): Promise<T> {
-    const r = await this.#fetch(`${this.endpoint}${path}`, { headers })
+  async #getSigned<T>(path: string, sign: () => Promise<SignedHeaders>): Promise<T> {
+    const r = await this.#fetchWithRetry(`${this.endpoint}${path}`, async () => ({
+      headers: await sign(),
+    }))
     if (!r.ok) throw new Error(`GET ${path}: ${r.status} ${await safeText(r)}`)
     return (await r.json()) as T
   }
 
-  async #post<T>(path: string, body: unknown, headers: SignedHeaders): Promise<T> {
-    const r = await this.#fetch(`${this.endpoint}${path}`, {
+  async #postSigned<T>(
+    path: string,
+    body: unknown,
+    sign: () => Promise<SignedHeaders>,
+  ): Promise<T> {
+    const r = await this.#fetchWithRetry(`${this.endpoint}${path}`, async () => ({
       method: 'POST',
-      headers: { ...headers, 'content-type': 'application/json' },
+      headers: { ...(await sign()), 'content-type': 'application/json' },
       body: JSON.stringify(body),
-    })
+    }))
     if (!r.ok) throw new Error(`POST ${path}: ${r.status} ${await safeText(r)}`)
     return (await r.json()) as T
   }
 
-  async #postRaw(path: string, body: unknown, headers: SignedHeaders): Promise<void> {
-    const r = await this.#fetch(`${this.endpoint}${path}`, {
+  async #postSignedVoid(
+    path: string,
+    body: unknown,
+    sign: () => Promise<SignedHeaders>,
+  ): Promise<void> {
+    const r = await this.#fetchWithRetry(`${this.endpoint}${path}`, async () => ({
       method: 'POST',
-      headers: { ...headers, 'content-type': 'application/json' },
+      headers: { ...(await sign()), 'content-type': 'application/json' },
       body: JSON.stringify(body),
-    })
+    }))
     if (!r.ok) throw new Error(`POST ${path}: ${r.status} ${await safeText(r)}`)
   }
 }

@@ -3,25 +3,24 @@
  * a 0G Sandbox container. Returned as a string the init/deploy/upgrade
  * commands feed to `provider-client.execInToolbox(id, { command })`.
  *
- * Goals:
- *  1. Install runtime deps (bun, git, system libs for chromium/Xvfb).
- *  2. Pull anima source pinned to a specific git tag.
- *  3. Install package deps via bun install (frozen lockfile).
- *  4. Launch `anima-harness` in the background with required env vars.
- *  5. Echo the harness pid so the caller can verify launch.
+ * Design constraint: the Daytona toolbox `process/execute` endpoint caps each
+ * exec call at ~60s. apt-get install (chromium + xvfb) plus bun install on
+ * the anima monorepo blow that easily (3-5 min cold start). We solve this by
+ * detaching the slow work into a background subshell via `nohup bash -c '...' &`
+ * and returning exit 0 immediately. Progress is observable via two files the
+ * background subshell writes:
+ *
+ *  - `/tmp/anima-bootstrap-progress.log` (tail-able, line-by-line stages)
+ *  - `/tmp/anima-bootstrap-done` (created only on full success, contains harness pid)
+ *
+ * The caller (`sandbox-provision.ts`) launches the bootstrap, polls for the
+ * `done` marker (then for `/bootstrap/pubkey` from the harness HTTP server).
  *
  * Robustness rules:
- *  - `set -e` so the first failure surfaces (bash drops back to caller with
- *    non-zero exit code, which provider-client.execInToolbox surfaces as
- *    `exitCode !== 0`).
- *  - All variables shell-quote-escaped to defeat injection from the operator
- *    address or sandbox id (both are validated before reaching here, but
- *    defense-in-depth).
- *  - `nohup` + `&` + `&> /var/log/anima-harness.log` so the harness survives
- *    the exec session ending. provider-client returns when the script
- *    finishes, so without nohup the harness would die.
- *  - Idempotent install: if /opt/anima already exists, fetches + checkouts
- *    the requested tag rather than failing on `git clone`.
+ *  - All variables shell-quote-escaped to defeat injection from operator
+ *    address or sandbox id (validated upstream, defense-in-depth).
+ *  - Idempotent: re-running the script over an existing /opt/anima checkout
+ *    just fetches + checkouts the new ref without re-cloning from scratch.
  */
 
 export interface BuildBootstrapScriptOpts {
@@ -40,17 +39,31 @@ export interface BuildBootstrapScriptOpts {
   port?: number
   /**
    * Extra `apt-get install` packages. Defaults to chromium + xvfb (for browser
-   * tools) + git + ca-certificates + curl + unzip. Caller can append (e.g. for
-   * specific MCP server deps).
+   * tools) + git + ca-certificates + curl + unzip. Caller can append.
    */
   extraAptPackages?: string[]
+  /**
+   * GitHub PAT for cloning private anima repos. Embedded in clone URL as
+   * `https://x-access-token:TOKEN@github.com/...`. For public repos, leave
+   * unset. Token is base64-wrapped inside the inner script (which itself is
+   * base64-encoded into the outer command), and the inner script is written
+   * to /tmp on the container; ensure the container is single-tenant (Daytona
+   * containers are by-operator). Gets cleared from container env after clone.
+   */
+  githubToken?: string
 }
 
 export interface BuildBootstrapScriptResult {
-  /** Multi-line bash script. Pass to `provider-client.execInToolbox(id, { command })`. */
+  /** Outer script: launches the inner subshell + returns exit 0. ~1s execution. */
   script: string
-  /** Echo line the harness emits on successful launch (caller can grep for it). */
-  successMarker: string
+  /**
+   * Path the caller should poll via `execInToolbox(id, { command: cat <path> })`
+   * to detect bootstrap completion. Returns success line `anima-harness-pid=<N>`
+   * once everything is up; absent until then.
+   */
+  doneMarkerPath: string
+  /** Path the caller can tail to surface bootstrap progress. */
+  progressLogPath: string
 }
 
 /**
@@ -70,74 +83,132 @@ const DEFAULT_APT_PACKAGES: readonly string[] = [
   'chromium',
 ] as const
 
-const SUCCESS_MARKER_PREFIX = 'anima-harness-pid='
+const PROGRESS_LOG = '/tmp/anima-bootstrap-progress.log'
+const DONE_MARKER = '/tmp/anima-bootstrap-done'
+const FAIL_MARKER = '/tmp/anima-bootstrap-failed'
 
 export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBootstrapScriptResult {
   const port = opts.port ?? 8080
   const repoUrl = opts.repoUrl ?? 'https://github.com/s0nderlabs/anima.git'
   const aptPkgs = [...DEFAULT_APT_PACKAGES, ...(opts.extraAptPackages ?? [])]
-  // Dedupe: each package once.
   const aptList = [...new Set(aptPkgs)].join(' ')
+  // Auth-injected URL when token is supplied. Falls back to anonymous clone
+  // for public repos.
+  const cloneUrl = opts.githubToken
+    ? repoUrl.replace(
+        'https://github.com/',
+        `https://x-access-token:${opts.githubToken}@github.com/`,
+      )
+    : repoUrl
 
-  const successMarker = `${SUCCESS_MARKER_PREFIX}<pid>`
-  const script = [
+  // Inner subshell: the slow work. Runs nohup'd in background. Heredoc body
+  // single-quoted so all literal vars stay literal at the outer-shell layer;
+  // we inject runtime fields via shQuote'd env exports at the top of inner.
+  const inner = [
     '#!/bin/bash',
-    'set -euo pipefail',
+    'set -uo pipefail',
     '',
-    '# anima harness bootstrap',
-    `#   sandbox=${opts.sandboxId}`,
-    `#   ref=${opts.ref}`,
-    `#   repo=${repoUrl}`,
-    `#   operator=${opts.operatorAddress}`,
+    '# Redirect everything to the progress log so operator can tail it.',
+    `exec > ${PROGRESS_LOG} 2>&1`,
+    '',
+    'echo "[$(date -u +%FT%TZ)] bootstrap-start"',
+    `echo "  ref=${opts.ref}"`,
+    `echo "  repo=${repoUrl}"`,
+    `echo "  sandbox=${opts.sandboxId}"`,
     '',
     'export DEBIAN_FRONTEND=noninteractive',
-    'apt-get update -qq',
-    `apt-get install -y -qq ${aptList}`,
+    '# Daytona container runs as non-root `daytona` user. apt-get + writes to',
+    '# /var/log require sudo (passwordless). Anima clones to $HOME so no sudo.',
+    'echo "[apt-get update]"',
+    `sudo -n apt-get update -qq || { echo "apt-update-failed" > ${FAIL_MARKER}; exit 11; }`,
+    `echo "[apt-get install ${aptList}]"`,
+    `sudo -n apt-get install -y -qq ${aptList} || { echo "apt-install-failed" > ${FAIL_MARKER}; exit 12; }`,
     '',
-    '# Install bun (idempotent: bun.sh script no-ops if already present)',
     'if ! command -v bun >/dev/null 2>&1; then',
-    '  curl -fsSL https://bun.sh/install | bash',
+    '  echo "[install bun]"',
+    `  curl -fsSL https://bun.sh/install | bash || { echo "bun-install-failed" > ${FAIL_MARKER}; exit 13; }`,
     'fi',
     'export PATH="$HOME/.bun/bin:$PATH"',
     '',
-    '# Clone or fetch anima at the requested ref',
-    'if [ ! -d /opt/anima/.git ]; then',
-    `  git clone --depth 1 --branch ${shQuote(opts.ref)} ${shQuote(repoUrl)} /opt/anima`,
-    'else',
-    '  cd /opt/anima',
-    `  git fetch --depth 1 origin ${shQuote(opts.ref)}`,
-    '  git checkout --quiet FETCH_HEAD',
-    'fi',
+    'ANIMA_DIR="$HOME/anima"',
+    '# Always clone fresh. Daytona sometimes leaves prior volumes after delete,',
+    '# and re-using a stale checkout can break with cached credential helpers.',
+    'rm -rf "$ANIMA_DIR"',
+    `echo "[git clone ${opts.ref}]"`,
+    `git clone --depth 1 --branch ${shQuote(opts.ref)} ${shQuote(cloneUrl)} "$ANIMA_DIR" || { echo "git-clone-failed" > ${FAIL_MARKER}; exit 14; }`,
+    `cd "$ANIMA_DIR" && git remote set-url origin ${shQuote(repoUrl)}`,
     '',
-    'cd /opt/anima',
-    'bun install --frozen-lockfile',
+    'cd "$ANIMA_DIR"',
+    'echo "[bun install]"',
+    `bun install --frozen-lockfile || { echo "bun-install-failed" > ${FAIL_MARKER}; exit 17; }`,
     '',
-    'mkdir -p /var/log /workspace',
+    'mkdir -p "$HOME/anima-logs" "$HOME/workspace"',
     '',
-    '# Launch harness daemon. nohup + & detaches from this exec session so the',
-    '# harness survives the toolbox/exec request closing. Output goes to the',
-    '# log file the operator can tail via `anima logs`.',
     `export SANDBOX_ID=${shQuote(opts.sandboxId)}`,
     `export ANIMA_OPERATOR_ADDRESS=${shQuote(opts.operatorAddress)}`,
     `export HARNESS_PORT=${shQuote(String(port))}`,
-    `export HARNESS_HOST='0.0.0.0'`,
-    'nohup bun /opt/anima/packages/harness/bin/anima-harness > /var/log/anima-harness.log 2>&1 &',
+    "export HARNESS_HOST='0.0.0.0'",
+    '',
+    'echo "[launch harness daemon]"',
+    'nohup bun "$ANIMA_DIR/packages/harness/bin/anima-harness" > "$HOME/anima-logs/anima-harness.log" 2>&1 &',
     'HARNESS_PID=$!',
     'disown',
-    '',
-    '# Wait briefly to confirm the process actually starts (avoids reporting',
-    '# success when bun crashes immediately on a syntax error / missing dep).',
-    'sleep 2',
+    'sleep 3',
     'if ! kill -0 "$HARNESS_PID" 2>/dev/null; then',
-    '  echo "anima-harness exited within 2s, dumping log:" >&2',
-    '  tail -n 200 /var/log/anima-harness.log >&2 || true',
-    '  exit 1',
+    '  echo "harness-died-early"',
+    '  tail -n 200 "$HOME/anima-logs/anima-harness.log"',
+    `  echo "harness-died-early" > ${FAIL_MARKER}`,
+    '  exit 18',
     'fi',
-    'echo "anima-harness-pid=$HARNESS_PID"',
+    `echo "anima-harness-pid=$HARNESS_PID" > ${DONE_MARKER}`,
+    'echo "[$(date -u +%FT%TZ)] bootstrap-done pid=$HARNESS_PID"',
     '',
   ].join('\n')
 
-  return { script, successMarker }
+  // Daytona's `process/execute` API does NOT run via a shell — it splits the
+  // command string argv-style. Heredocs / pipes / `>` redirects fail because
+  // they're passed as literal args to the first binary. To run our complex
+  // inner script we base64-encode it (yields only [A-Za-z0-9+/=], no shell
+  // metachars) and have `bash -c '...'` decode + write + launch. The single-
+  // quoted bash -c wrapper has no internal quotes to escape.
+  //
+  // Sequencing rules:
+  //   - File-write steps chain with `&&` (must succeed in order).
+  //   - `nohup ... &` sends the inner script to background. After `&` you
+  //     CANNOT use `&&` (syntax error: `& && X`) so we use `;` to follow up
+  //     with the success marker echo. The launching shell exits ~instantly.
+  const innerPath = '/tmp/anima-bootstrap-inner.sh'
+  const innerB64 = Buffer.from(inner).toString('base64')
+  const fileWrites = [
+    `rm -f ${PROGRESS_LOG} ${DONE_MARKER} ${FAIL_MARKER}`,
+    `echo ${innerB64} | base64 -d > ${innerPath}`,
+    `chmod +x ${innerPath}`,
+  ].join(' && ')
+  const launchBody = `${fileWrites} && nohup bash ${innerPath} >/dev/null 2>&1 & echo bootstrap-launched`
+  const outerScript = `bash -c '${launchBody}'`
+
+  return {
+    script: outerScript,
+    doneMarkerPath: DONE_MARKER,
+    progressLogPath: PROGRESS_LOG,
+  }
 }
 
-export const BOOTSTRAP_SUCCESS_MARKER_PREFIX = SUCCESS_MARKER_PREFIX
+export const BOOTSTRAP_DONE_MARKER = DONE_MARKER
+export const BOOTSTRAP_FAIL_MARKER = FAIL_MARKER
+export const BOOTSTRAP_PROGRESS_LOG = PROGRESS_LOG
+export const BOOTSTRAP_SUCCESS_MARKER_PREFIX = 'anima-harness-pid='
+
+/**
+ * The exact strings the inner subshell writes to FAIL_MARKER on each step
+ * failure. Kept in sync with the per-step `echo "X-failed"` calls inside
+ * `buildBootstrapScript`. Pollers compare via substring match (the marker
+ * file may also contain bash setlocale warnings).
+ */
+export const BOOTSTRAP_FAIL_KEYWORDS = [
+  'apt-update-failed',
+  'apt-install-failed',
+  'bun-install-failed',
+  'git-clone-failed',
+  'harness-died-early',
+] as const

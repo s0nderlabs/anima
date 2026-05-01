@@ -9,14 +9,23 @@ import {
   SandboxProviderClient,
   SandboxSettlementClient,
   SannClient,
+  type ToolboxExecResponse,
   agentPaths,
   buildSandboxEndpoint,
   encryptToPubkey,
   fetchAndDecryptKeystore,
   iNFTAgentId,
   subnameNode,
+  waitForReceiptResilient,
 } from '@s0nderlabs/anima-core'
-import { buildBootstrapScript } from '@s0nderlabs/anima-harness'
+import {
+  BOOTSTRAP_DONE_MARKER,
+  BOOTSTRAP_FAIL_KEYWORDS,
+  BOOTSTRAP_FAIL_MARKER,
+  BOOTSTRAP_PROGRESS_LOG,
+  BOOTSTRAP_SUCCESS_MARKER_PREFIX,
+  buildBootstrapScript,
+} from '@s0nderlabs/anima-harness'
 import { type Address, type Hex, hexToBytes, parseEther } from 'viem'
 import { SandboxClient } from '../../sandbox/client'
 import { withSilencedConsole } from '../../util/silence-console'
@@ -48,6 +57,11 @@ export interface SandboxProvisionOpts {
   snapshotName?: string
   /** Initial deposit to provider contract (testnet 0G). Default 1.0 0G. */
   depositOg?: number
+  /**
+   * GitHub PAT for cloning private anima repo from inside the container.
+   * Falls back to `ANIMA_GITHUB_TOKEN` env var. Public repos can leave unset.
+   */
+  githubToken?: string
   /** Optional progress callback for spinner UX. */
   onProgress?: (msg: string) => void
 }
@@ -115,7 +129,7 @@ export async function runSandboxProvision(
       provider: SANDBOX_PROVIDER_GALILEO,
       amountWei: need,
     })
-    await galileoPublic.waitForTransactionReceipt({ hash: depositTx })
+    await waitForReceiptResilient(galileoPublic, depositTx, { tries: 60, delayMs: 2000 })
   }
   let acknowledgeTx: Hex | undefined
   if (!ackd) {
@@ -124,7 +138,7 @@ export async function runSandboxProvision(
       provider: SANDBOX_PROVIDER_GALILEO,
       acknowledged: true,
     })
-    await galileoPublic.waitForTransactionReceipt({ hash: acknowledgeTx })
+    await waitForReceiptResilient(galileoPublic, acknowledgeTx, { tries: 60, delayMs: 2000 })
   }
 
   // Step 2: createSandbox
@@ -158,19 +172,82 @@ export async function runSandboxProvision(
     )
   }
 
-  // Step 3: bootstrap script
+  // Step 3: launch bootstrap. The script detaches the slow apt+bun+install
+  // work into a nohup'd subshell and returns exit 0 in <2s; the Daytona exec
+  // 60s cap then doesn't bite. We poll the done/fail markers for actual
+  // completion before moving on to /bootstrap/pubkey.
+  //
+  // For private anima repos, pass a GitHub PAT via ANIMA_GITHUB_TOKEN env (or
+  // the explicit `githubToken` opt). Token is embedded in the clone URL inside
+  // the bootstrap script. Public repos skip auth entirely.
+  const githubToken = opts.githubToken ?? process.env.ANIMA_GITHUB_TOKEN
   const { script } = buildBootstrapScript({
     sandboxId,
     operatorAddress,
     ref: opts.ref,
     repoUrl,
+    githubToken,
   })
-  progress('running bootstrap script (apt + bun + git clone + harness launch)')
-  const bootRes = await provider.execInToolbox(sandboxId, { command: script, timeout: 600 })
-  if (bootRes.exitCode !== 0) {
+  progress('launching bootstrap (apt + bun + git clone + harness daemon, runs ~3-5 min)')
+  const launchRes = await provider.execInToolbox(sandboxId, { command: script, timeout: 60 })
+  if (launchRes.exitCode !== 0) {
+    const launchOut = extractExecOutput(launchRes)
     throw new Error(
-      `bootstrap exec failed: exitCode=${bootRes.exitCode} stderr=${bootRes.stderr.slice(0, 400)}`,
+      `bootstrap launch failed: exitCode=${launchRes.exitCode} output=${launchOut.slice(0, 400)}`,
     )
+  }
+
+  // Poll the done/fail markers. Bootstrap runs ~3-8 min depending on the
+  // image cache; surface progress every 30s so the operator sees movement.
+  progress('waiting for bootstrap completion (apt + bun + git clone + harness ready)')
+  const bootstrapDeadline = Date.now() + 600_000 // 10 min max
+  let lastProgressEcho = 0
+  // Single coalesced poll: read FAIL + DONE + 1-line PROGRESS in one exec
+  // round-trip per tick. Saves ~2/3 of HTTP+EIP-191-sign overhead vs three
+  // separate execs. Sentinels split the response.
+  const execRead = makeExecRead(provider, sandboxId)
+  const COALESCED_POLL = [
+    'echo --F--',
+    `cat ${BOOTSTRAP_FAIL_MARKER} 2>/dev/null`,
+    'echo --D--',
+    `cat ${BOOTSTRAP_DONE_MARKER} 2>/dev/null`,
+    'echo --P--',
+    `tail -n 1 ${BOOTSTRAP_PROGRESS_LOG} 2>/dev/null`,
+  ].join('; ')
+  let lastDone = ''
+  while (Date.now() < bootstrapDeadline) {
+    const out = await execRead(COALESCED_POLL)
+    const fail = sliceBetween(out, '--F--', '--D--')
+    const done = sliceBetween(out, '--D--', '--P--')
+    const tailLog = sliceAfter(out, '--P--').trim()
+    const failKeyword = BOOTSTRAP_FAIL_KEYWORDS.find(k => fail.includes(k))
+    if (failKeyword) {
+      const log = await execRead(`tail -n 80 ${BOOTSTRAP_PROGRESS_LOG} 2>/dev/null`)
+      throw new Error(`bootstrap-failed: ${failKeyword} log-tail=${log.slice(-400)}`)
+    }
+    if (done.includes(BOOTSTRAP_SUCCESS_MARKER_PREFIX)) {
+      lastDone = done
+      const pidLine =
+        done
+          .split('\n')
+          .find(l => l.includes(BOOTSTRAP_SUCCESS_MARKER_PREFIX))
+          ?.trim() ?? done.trim()
+      progress(`bootstrap complete (${pidLine})`)
+      break
+    }
+    if (Date.now() - lastProgressEcho > 30_000) {
+      lastProgressEcho = Date.now()
+      const real = tailLog
+        .split('\n')
+        .filter(l => !l.includes('setlocale'))
+        .pop()
+      if (real) progress(`bootstrap: ${real}`)
+    }
+    await sleep(5000)
+  }
+  if (!lastDone.includes(BOOTSTRAP_SUCCESS_MARKER_PREFIX)) {
+    const log = await execRead(`tail -n 80 ${BOOTSTRAP_PROGRESS_LOG} 2>/dev/null`)
+    throw new Error(`bootstrap timeout (10 min): no done marker. log-tail=${log.slice(-400)}`)
   }
 
   // Step 4: poll /bootstrap/pubkey
@@ -229,6 +306,51 @@ export async function runSandboxProvision(
     depositTx,
     acknowledgeTx,
   }
+}
+
+/**
+ * Read tool output from Daytona's `process/execute` endpoint, normalizing
+ * the `{exitCode, result}` (older docs claimed `{stdout, stderr}` but live
+ * runs return `result` for the combined stream). Wraps the command in
+ * `bash -c '<cmd>'` so pipes / redirects / `2>/dev/null` work — Daytona's
+ * exec splits argv-style without a shell.
+ *
+ * Used by the bootstrap poll loop, deploy/upgrade flows, and `anima logs`
+ * sandbox-mode tail.
+ */
+function makeExecRead(
+  provider: SandboxProviderClient,
+  sandboxId: string,
+): (cmd: string) => Promise<string> {
+  return async (cmd: string) => {
+    const r = await provider
+      .execInToolbox(sandboxId, { command: `bash -c '${cmd}'`, timeout: 30 })
+      .catch(() => null)
+    return r ? extractExecOutput(r) : ''
+  }
+}
+
+/**
+ * Pull combined stdout from a ToolboxExecResponse regardless of which shape
+ * the provider returned. Prefers `result` (Daytona's actual format); falls
+ * back to `stdout || stderr` for older endpoints.
+ */
+export function extractExecOutput(r: ToolboxExecResponse): string {
+  if (typeof r.result === 'string') return r.result
+  return r.stdout ?? r.stderr ?? ''
+}
+
+function sliceBetween(s: string, start: string, end: string): string {
+  const i = s.indexOf(start)
+  if (i < 0) return ''
+  const j = s.indexOf(end, i + start.length)
+  if (j < 0) return s.slice(i + start.length)
+  return s.slice(i + start.length, j)
+}
+
+function sliceAfter(s: string, marker: string): string {
+  const i = s.indexOf(marker)
+  return i < 0 ? '' : s.slice(i + marker.length)
 }
 
 async function pollPubkey(

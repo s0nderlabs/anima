@@ -63,5 +63,9 @@ export {
   type BuildBootstrapScriptOpts,
   type BuildBootstrapScriptResult,
   BOOTSTRAP_SUCCESS_MARKER_PREFIX,
+  BOOTSTRAP_DONE_MARKER,
+  BOOTSTRAP_FAIL_MARKER,
+  BOOTSTRAP_PROGRESS_LOG,
+  BOOTSTRAP_FAIL_KEYWORDS,
   buildBootstrapScript,
 } from './bootstrap'

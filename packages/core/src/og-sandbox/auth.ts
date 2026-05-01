@@ -20,7 +20,13 @@ export interface SignRequestOpts {
   action: string
   payload?: Record<string, unknown>
   resourceId?: string
-  /** Defaults to now + 60s. Server clamps to (now, now+5min]. */
+  /**
+   * Defaults to now + 300s (5 minutes — server's max allowance). 60s was too
+   * short when paired with retry-on-504: Daytona upstream timeouts take 60s
+   * each, and a single retry would arrive after the original signed-message
+   * expired. 300s gives 4-5 retries headroom while still being short enough
+   * to fail-fast on truly stale requests.
+   */
   expiresAtSec?: number
   /** Override nonce (test fixture). Otherwise crypto-random 16 bytes. */
   nonce?: string
@@ -36,7 +42,7 @@ export interface SignRequestOpts {
  * - Headers carry: address, base64(JSON), 65-byte sig
  */
 export async function signRequest(opts: SignRequestOpts): Promise<SignedHeaders> {
-  const expires = opts.expiresAtSec ?? Math.floor(Date.now() / 1000) + 60
+  const expires = opts.expiresAtSec ?? Math.floor(Date.now() / 1000) + 300
   const nonce = opts.nonce ?? randomNonce()
   const req: SignedRequest = {
     action: opts.action,

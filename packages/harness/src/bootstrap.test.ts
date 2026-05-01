@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { BOOTSTRAP_SUCCESS_MARKER_PREFIX, buildBootstrapScript } from './bootstrap'
+import {
+  BOOTSTRAP_DONE_MARKER,
+  BOOTSTRAP_FAIL_MARKER,
+  BOOTSTRAP_PROGRESS_LOG,
+  BOOTSTRAP_SUCCESS_MARKER_PREFIX,
+  buildBootstrapScript,
+} from './bootstrap'
 
 describe('buildBootstrapScript', () => {
   const baseOpts = {
@@ -8,74 +14,102 @@ describe('buildBootstrapScript', () => {
     ref: 'v0.15.0',
   }
 
-  test('shape: shebang + set -euo pipefail + success-marker echo', () => {
-    const { script, successMarker } = buildBootstrapScript(baseOpts)
-    expect(script.startsWith('#!/bin/bash\n')).toBe(true)
-    expect(script).toContain('set -euo pipefail')
-    expect(successMarker).toBe(`${BOOTSTRAP_SUCCESS_MARKER_PREFIX}<pid>`)
-    expect(script).toContain('echo "anima-harness-pid=$HARNESS_PID"')
+  test('outer wrapper is `bash -c` with base64 inner; no shell metachars in payload', () => {
+    const { script, doneMarkerPath, progressLogPath } = buildBootstrapScript(baseOpts)
+    expect(script.startsWith("bash -c '")).toBe(true)
+    expect(script.endsWith("'")).toBe(true)
+    expect(script).toContain('base64 -d')
+    expect(script).toContain('nohup bash /tmp/anima-bootstrap-inner.sh')
+    expect(script).toContain('echo bootstrap-launched')
+    expect(doneMarkerPath).toBe(BOOTSTRAP_DONE_MARKER)
+    expect(progressLogPath).toBe(BOOTSTRAP_PROGRESS_LOG)
+    // The outer payload (between the bash -c quotes) must not contain nested
+    // single quotes that would prematurely close the wrapper.
+    const inside = script.slice("bash -c '".length, -1)
+    expect(inside).not.toContain("'")
+    // Exactly one `echo BASE64 | base64 -d` pipe in the launch body.
+    expect(inside.split(' | ').length).toBe(2)
   })
 
-  test('embeds the requested ref + repo url', () => {
-    const { script } = buildBootstrapScript({ ...baseOpts, repoUrl: 'https://x.test/foo.git' })
-    expect(script).toContain("'https://x.test/foo.git'")
-    expect(script).toContain("'v0.15.0'")
-    expect(script).toContain('git clone --depth 1 --branch')
-    expect(script).toContain('git fetch --depth 1 origin')
-  })
-
-  test('passes sandbox id and operator address as env exports', () => {
+  test('inner subshell (base64-decoded) carries apt + bun + git + harness launch', () => {
     const { script } = buildBootstrapScript(baseOpts)
-    expect(script).toContain("export SANDBOX_ID='sbx-abc-123'")
-    expect(script).toContain(
+    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
+    expect(m).not.toBeNull()
+    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    expect(inner).toContain('sudo -n apt-get update -qq')
+    expect(inner).toMatch(/sudo -n apt-get install -y -qq .*chromium/)
+    expect(inner).toContain('curl -fsSL https://bun.sh/install')
+    expect(inner).toContain('git clone --depth 1 --branch')
+    expect(inner).toContain('bun install --frozen-lockfile')
+    // Harness clones to $HOME/anima (daytona user has no /opt write perm).
+    expect(inner).toContain('nohup bun "$ANIMA_DIR/packages/harness/bin/anima-harness"')
+    expect(inner).toContain(`echo "anima-harness-pid=$HARNESS_PID" > ${BOOTSTRAP_DONE_MARKER}`)
+  })
+
+  test('inner subshell writes fail marker on each step failure', () => {
+    const { script } = buildBootstrapScript(baseOpts)
+    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
+    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    expect(inner).toContain('apt-update-failed')
+    expect(inner).toContain('apt-install-failed')
+    expect(inner).toContain('bun-install-failed')
+    expect(inner).toContain('git-clone-failed')
+    expect(inner).toContain('harness-died-early')
+    expect(inner).toContain(BOOTSTRAP_FAIL_MARKER)
+  })
+
+  test('embeds the requested ref + repo url + sandbox id + operator', () => {
+    const { script } = buildBootstrapScript({ ...baseOpts, repoUrl: 'https://x.test/foo.git' })
+    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
+    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    expect(inner).toContain("'https://x.test/foo.git'")
+    expect(inner).toContain("'v0.15.0'")
+    expect(inner).toContain("export SANDBOX_ID='sbx-abc-123'")
+    expect(inner).toContain(
       "export ANIMA_OPERATOR_ADDRESS='0xC635e6Eb223aE14143E23cEEa9440bC773dc87Ec'",
     )
-    expect(script).toContain("export HARNESS_PORT='8080'")
-    expect(script).toContain("export HARNESS_HOST='0.0.0.0'")
   })
 
   test('honors custom port', () => {
     const { script } = buildBootstrapScript({ ...baseOpts, port: 9090 })
-    expect(script).toContain("export HARNESS_PORT='9090'")
+    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
+    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    expect(inner).toContain("export HARNESS_PORT='9090'")
   })
 
-  test('apt list contains chromium + xvfb + git defaults', () => {
+  test('apt list defaults include chromium + xvfb + git', () => {
     const { script } = buildBootstrapScript(baseOpts)
-    expect(script).toMatch(/apt-get install .* chromium/)
-    expect(script).toMatch(/apt-get install .* xvfb/)
-    expect(script).toMatch(/apt-get install .* git/)
+    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
+    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    expect(inner).toMatch(/sudo -n apt-get install .* chromium/)
+    expect(inner).toMatch(/sudo -n apt-get install .* xvfb/)
+    expect(inner).toMatch(/sudo -n apt-get install .* git/)
   })
 
   test('extra apt packages are appended and deduped', () => {
     const { script } = buildBootstrapScript({
       ...baseOpts,
-      extraAptPackages: ['ffmpeg', 'chromium'], // duplicate of default
+      extraAptPackages: ['ffmpeg', 'chromium'],
     })
-    const aptLine = script.split('\n').find(l => l.includes('apt-get install -y -qq'))!
+    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
+    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    const aptLine = inner.split('\n').find(l => l.includes('apt-get install -y -qq'))!
     expect(aptLine).toContain('ffmpeg')
-    // chromium appears once (dedupe)
     const chromiumCount = (aptLine.match(/chromium/g) ?? []).length
     expect(chromiumCount).toBe(1)
   })
 
-  test('shell-quotes injection-prone fields', () => {
-    // pathological sandbox id with single quotes — should still quote-escape safely
+  test('shell-quotes injection-prone fields safely', () => {
     const { script } = buildBootstrapScript({
       ...baseOpts,
       sandboxId: "abc'; rm -rf /; echo '",
     })
-    // The dangerous payload must be inside a single-quoted shell literal where
-    // its `'` is escaped. The literal opens with `'` and any `'` inside is
-    // converted to `'\''`. So the quote sequence appears intact in the output.
-    expect(script).toContain("export SANDBOX_ID='abc'\\''; rm -rf /; echo '\\'''")
-    // Bash will parse this back to the original string when expanded.
+    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
+    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    expect(inner).toContain("export SANDBOX_ID='abc'\\''; rm -rf /; echo '\\'''")
   })
 
-  test('starts harness with nohup and checks pid liveness', () => {
-    const { script } = buildBootstrapScript(baseOpts)
-    expect(script).toContain('nohup bun /opt/anima/packages/harness/bin/anima-harness')
-    expect(script).toContain('disown')
-    expect(script).toContain('HARNESS_PID=$!')
-    expect(script).toContain('kill -0 "$HARNESS_PID"')
+  test('exposes BOOTSTRAP_SUCCESS_MARKER_PREFIX for callers that grep done file', () => {
+    expect(BOOTSTRAP_SUCCESS_MARKER_PREFIX).toBe('anima-harness-pid=')
   })
 })

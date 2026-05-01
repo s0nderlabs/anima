@@ -7,6 +7,7 @@ import {
 import { findAndLoadConfig } from '../config/load'
 import { pickDefaultAgent } from './_agents'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
+import { extractExecOutput } from './init/sandbox-provision'
 
 export async function runLogs(opts: { agent?: string; tail?: number } = {}): Promise<void> {
   // Phase 11: in sandbox mode the activity log lives in the container at
@@ -33,11 +34,14 @@ export async function runLogs(opts: { agent?: string; tail?: number } = {}): Pro
     const tail = opts.tail ?? 200
     try {
       const r = await provider.execInToolbox(found.config.sandbox.id, {
-        command: `tail -n ${tail} /var/log/anima-harness.log`,
+        // Harness logs to ~/anima-logs/ inside the container (daytona user;
+        // /var/log needs root). bash -c needed because Daytona exec splits
+        // argv-style without a shell.
+        command: `bash -c 'tail -n ${tail} ~/anima-logs/anima-harness.log'`,
         timeout: 60,
       })
-      if (r.stdout) process.stdout.write(r.stdout)
-      if (r.stderr) process.stderr.write(r.stderr)
+      const out = extractExecOutput(r)
+      if (out) process.stdout.write(out)
       if (r.exitCode !== 0) {
         process.stderr.write(`\n(toolbox exit=${r.exitCode})\n`)
       }
