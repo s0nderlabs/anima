@@ -143,13 +143,13 @@ export class PermissionService {
   private applyDecision(
     decision: PermissionDecision,
     sigKey: string,
-  ): { allowed: boolean; via: 'session-allow' | 'once' | 'deny' } {
+  ): { allowed: boolean; reason?: string; via: 'session-allow' | 'once' | 'deny' } {
     if (decision === 'allow-session') {
       this.sessionAllowed.add(sigKey)
       return { allowed: true, via: 'session-allow' }
     }
     if (decision === 'allow-once') return { allowed: true, via: 'once' }
-    return { allowed: false, via: 'deny' }
+    return { allowed: false, reason: 'rejected in approval modal', via: 'deny' }
   }
 
   private signature(req: PermissionRequest): string {

@@ -69,6 +69,7 @@ import {
 import { type Address, type Hex, formatEther } from 'viem'
 import { findAndLoadConfig } from '../config/load'
 import { writeConfigTs } from '../config/render'
+import { shortAddr } from '../util/format'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 
 export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<void> {
@@ -591,7 +592,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     return {
       short: {
         ok: false,
-        error: `Denied by approval system: ${result.reason ?? 'no reason'} (mode=${permission.getMode()}).`,
+        error: `Denied: ${result.reason ?? 'permission check failed'} (mode=${permission.getMode()}). Operator rejected this call. Do NOT retry, instruct another tool, or claim the transaction is queued. Surface the rejection to the operator and ask whether to proceed differently.`,
       },
     }
   })
@@ -1063,6 +1064,11 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   }
 
   const handleSlash = async (cmd: string): Promise<boolean> => {
+    if (cmd === '/exit' || cmd === '/quit') {
+      state.pushRow({ role: 'system', text: 'goodbye.' })
+      handleExit()
+      return true
+    }
     if (cmd === '/model') {
       state.pushRow({
         role: 'system',
@@ -1140,7 +1146,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     }
     if (cmd === '/help') {
       const builtins =
-        '  /sync   force memory + activity flush to 0G\n  /jobs   list active escrow jobs\n  /model  switch brain (run anima model after exiting)\n  /yolo   toggle approval prompts off/on for this session\n  /help   this message'
+        '  /sync   force memory + activity flush to 0G\n  /jobs   list active escrow jobs\n  /model  switch brain (run anima model after exiting)\n  /yolo   toggle approval prompts off/on for this session\n  /exit   quit anima (drains 0G storage flush, releases process)\n  /help   this message'
       const claudeBlock =
         commandIndex.size === 0
           ? ''
@@ -1277,10 +1283,6 @@ async function runModelPicker(
   }
   await writeConfigTs(configPath, updated)
   return updated
-}
-
-function shortAddr(a: string): string {
-  return `${a.slice(0, 6)}…${a.slice(-4)}`
 }
 
 /**

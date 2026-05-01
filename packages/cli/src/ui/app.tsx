@@ -1,5 +1,6 @@
 import { useKeyboard, useTerminalDimensions } from '@opentui/solid'
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js'
+import { summarizeApprovalSubject } from './approval-summary'
 import { MarkdownSegments } from './markdown'
 import type { ChatState, TurnRow } from './state'
 
@@ -72,14 +73,6 @@ function formatElapsed(startedAt: number | null | undefined): string {
   const m = Math.floor(sec / 60)
   const s = sec % 60
   return `${m}m${s.toString().padStart(2, '0')}s`
-}
-
-function summarizeApprovalSubject(req: {
-  kind: string
-  command?: string
-  path?: string
-}): string {
-  return req.command ?? req.path ?? '(unspecified)'
 }
 
 function UserRow(props: { text: string }) {

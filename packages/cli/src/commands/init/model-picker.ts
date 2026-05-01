@@ -1,6 +1,7 @@
 import { cancel, isCancel, select, spinner } from '@clack/prompts'
 import { type AnimaNetwork, NETWORK_RPC, OGComputeBrain } from '@s0nderlabs/anima-core'
 import { formatEther } from 'viem'
+import { shortAddr } from '../../util/format'
 import { withSilencedConsole } from '../../util/silence-console'
 
 export interface ModelPick {
@@ -77,8 +78,4 @@ export async function pickBrainModel(opts: {
     inputPricePerTokenWei: svc.inputPrice ? BigInt(svc.inputPrice) : 0n,
     outputPricePerTokenWei: svc.outputPrice ? BigInt(svc.outputPrice) : 0n,
   }
-}
-
-function shortAddr(a: string): string {
-  return `${a.slice(0, 6)}…${a.slice(-4)}`
 }

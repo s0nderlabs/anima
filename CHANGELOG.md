@@ -4,6 +4,28 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.1] - 2026-05-01
+
+### Fixed
+
+- **Approval modal body rendered `(unspecified)` for every value-moving onchain kind.** `summarizeApprovalSubject` only checked `command`/`path`, so chain.send/swap/stake/write all dropped the friendly text in the modal. The sys row above had it (via `describePermissionCheck`), but the modal box itself was useless. Caught live on specter mainnet during the post-v0.14.0 prompt-mode drive. Bodies now render `send 0.001 0G to 0xC635…87Ec`, `0.01 0G→W0G`, `swap 0.0005 0G→USDCe`, `0.011 0G→stOG`, `transfer(address,uint256) (value: 1 wei) on 0x9e71…4721`, etc.
+- **Permission deny path returned no `reason`, so brain hallucinated `"queued for approval"` after operator pressed `n`.** `applyDecision` deny branch now sets `reason: 'rejected in approval modal'`. Brain-facing error text rewritten with explicit "do NOT retry, instruct another tool, or claim the transaction is queued. Surface the rejection to the operator" guidance. Brain replies are now correct: "rejected, would you like to retry?".
+- **iNFT `mintBlock` auto-backfill caught a wrong existing value.** specter's config had `mintBlock: 31365203` (predates token 1's mint at block 31365569). `discoverMintBlock` walked from chain head and returned the actual mint at block 31560769; cast-verified by matching `Transfer(0x0, *, tokenId=4)`.
+
+### Added
+
+- **`/exit` and `/quit` slash commands.** Graceful TUI exit through `handleExit` (drains 0G storage flush, kills MCP servers + background processes, releases the process). `/help` lists `/exit`. Was Ctrl+C only.
+- **`packages/cli/src/util/format.ts` shared `shortAddr`.** Three local copies (chat.tsx + model-picker.ts + the new approval-summary.ts) consolidated. New module also handles `undefined`, short, and non-0x inputs (e.g. `.0g` names) safely; the two prior local copies would have thrown on `undefined`.
+- New permission `applyDecision` `reason` field on the return type. Tests pin it.
+
+### Changed
+
+- `packages/cli/src/ui/approval-summary.ts` extracted from inline app.tsx. Owns the modal body rendering for every PermissionRequest kind.
+
+### Verification
+
+Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (no `--yolo`). 11 fresh mainnet tx hashes covering chain.send (y/s/n + signature dedup per recipient), chain.wrap, chain.unwrap, swap.execute (0G→USDCe + USDCe→0G + USDCe→W0G), stake.stake, chain.write with `value > 0`. Strict mode verified via `approvals: { mode: "strict" }` config + chain.send → `Denied: value-moving tx denied in strict mode`. mintBlock backfill verified by deleting the field and observing config rewrite. 406 unit tests + 124 forge tests pass; lint + typecheck clean.
+
 ## [0.14.0] - 2026-05-01
 
 ### Added
@@ -604,6 +626,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.14.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.14.1
 [0.14.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.14.0
 [0.13.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.13.0
 [0.12.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.2

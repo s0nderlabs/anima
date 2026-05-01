@@ -171,6 +171,22 @@ describe('PermissionService', () => {
     expect(out.allowed).toBe(true)
     expect(out.via).toBe('allow')
   })
+  it('prompt mode deny returns a clear reason for the brain', async () => {
+    const svc = new PermissionService({
+      mode: 'prompt',
+      prompter: async () => 'deny',
+    })
+    const out = await svc.resolve({
+      kind: 'chain.send',
+      amount: '0.01',
+      recipient: '0xC635e6Eb223aE14143E23cEEa9440bC773dc87Ec',
+      token: '0G',
+      reason: 'native/ERC-20 transfer',
+    })
+    expect(out.allowed).toBe(false)
+    expect(out.via).toBe('deny')
+    expect(out.reason).toBe('rejected in approval modal')
+  })
   it('setMode flips active resolution', async () => {
     const svc = new PermissionService({ mode: 'strict' })
     svc.setMode('off')
