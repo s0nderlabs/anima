@@ -1,0 +1,53 @@
+[
+  {
+    "type": "function",
+    "name": "stake",
+    "inputs": [{ "name": "referrer", "type": "string" }],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "unstake",
+    "inputs": [{ "name": "amount", "type": "uint256" }],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "withdraw",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "event",
+    "name": "Staked",
+    "inputs": [
+      { "name": "user", "type": "address", "indexed": true },
+      { "name": "amount0g", "type": "uint256", "indexed": false },
+      { "name": "stogMinted", "type": "uint256", "indexed": false },
+      { "name": "referrer", "type": "string", "indexed": false }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Unstaked",
+    "inputs": [
+      { "name": "user", "type": "address", "indexed": true },
+      { "name": "stogBurned", "type": "uint256", "indexed": false },
+      { "name": "amount0g", "type": "uint256", "indexed": false }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Withdrawn",
+    "inputs": [
+      { "name": "user", "type": "address", "indexed": true },
+      { "name": "amount0g", "type": "uint256", "indexed": false }
+    ],
+    "anonymous": false
+  }
+]

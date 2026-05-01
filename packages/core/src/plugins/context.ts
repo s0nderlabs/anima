@@ -104,6 +104,11 @@ export interface PluginContext {
    * `unknown` keeps core free of a back-edge to the comms package.
    */
   comms?: unknown
+  /**
+   * Phase 10 side-band runtime context for plugin-onchain. Same opaque
+   * pattern as `comms`.
+   */
+  onchain?: unknown
 }
 
 export interface NativePlugin {
@@ -137,6 +142,8 @@ export interface PluginLoaderDeps {
   sandbox?: SandboxBackend
   /** Phase 7 side-band runtime context for plugin-comms. Opaque to core. */
   comms?: unknown
+  /** Phase 10 side-band runtime context for plugin-onchain. Opaque to core. */
+  onchain?: unknown
   /**
    * Resolver for `name` → ESM module path. Defaults to dynamic import of
    * `@s0nderlabs/anima-plugin-<name>`. Tests pass a stub.
@@ -169,6 +176,7 @@ export async function loadPlugins(
     visionInfer: deps.visionInfer ?? null,
     sandbox: deps.sandbox,
     comms: deps.comms,
+    onchain: deps.onchain,
   }
   for (const name of names) {
     try {

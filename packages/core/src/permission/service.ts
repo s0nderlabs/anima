@@ -14,9 +14,24 @@ export type PermissionMode = 'strict' | 'prompt' | 'off'
 export type PermissionDecision = 'allow-once' | 'allow-session' | 'deny'
 
 export interface PermissionRequest {
-  kind: 'shell.run' | 'shell.process' | 'code.execute' | 'fs.write' | 'fs.patch'
+  kind:
+    | 'shell.run'
+    | 'shell.process'
+    | 'code.execute'
+    | 'fs.write'
+    | 'fs.patch'
+    | 'chain.send'
+    | 'chain.swap'
+    | 'chain.stake'
+    | 'chain.write'
   command?: string
   path?: string
+  /** For value-moving tx tools: human-readable amount (e.g. "0.05 0G"). */
+  amount?: string
+  /** For value-moving tx tools: 0x recipient or contract address. */
+  recipient?: string
+  /** For value-moving tx tools: token symbol. */
+  token?: string
   /** Description of why approval is needed (e.g. "delete in root path"). */
   reason: string
 }
@@ -77,19 +92,40 @@ export class PermissionService {
 
     const dangerous = req.command ? detectDangerousCommand(req.command) : { match: false as const }
 
+    // Value-moving on-chain tools: ALWAYS prompt in `prompt` mode regardless
+    // of dangerous-pattern match (which is regex-based and doesn't fire here).
+    // In `strict` mode they're denied — strict means "no autonomous spending".
+    const isValueMoving =
+      req.kind === 'chain.send' ||
+      req.kind === 'chain.swap' ||
+      req.kind === 'chain.stake' ||
+      req.kind === 'chain.write'
     if (this.mode === 'strict') {
+      if (isValueMoving) {
+        return {
+          allowed: false,
+          reason: 'value-moving tx denied in strict mode',
+          via: 'strict-deny',
+        }
+      }
       if (dangerous.match) {
         return { allowed: false, reason: dangerous.description, via: 'strict-deny' }
       }
       return { allowed: true, via: 'allow' }
     }
 
-    // mode === 'prompt': dangerous patterns + every shell-class invocation consult the prompter.
+    // mode === 'prompt': dangerous patterns + every shell-class invocation
+    // + every value-moving on-chain tx consult the prompter.
     if (dangerous.match) {
       const decision = await this.prompter({ ...req, reason: dangerous.description })
       return this.applyDecision(decision, sigKey)
     }
-    if (req.kind === 'shell.run' || req.kind === 'shell.process' || req.kind === 'code.execute') {
+    if (
+      req.kind === 'shell.run' ||
+      req.kind === 'shell.process' ||
+      req.kind === 'code.execute' ||
+      isValueMoving
+    ) {
       const decision = await this.prompter(req)
       return this.applyDecision(decision, sigKey)
     }
@@ -117,6 +153,8 @@ export class PermissionService {
   }
 
   private signature(req: PermissionRequest): string {
-    return [req.kind, req.command ?? '', req.path ?? ''].join('|')
+    return [req.kind, req.command ?? '', req.path ?? '', req.recipient ?? '', req.token ?? ''].join(
+      '|',
+    )
   }
 }

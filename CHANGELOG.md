@@ -4,6 +4,41 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-05-01
+
+### Added
+
+- **Phase 10: `@s0nderlabs/anima-plugin-onchain` ships 19 brain limbs** for on-chain operations on 0G mainnet. JAINE-only swap routing (Factory `0x9bdcA579..7ef4`, SwapRouter `0x8B598A7C..f2e2`, Quoter V1 `0xd008837..bE02`, W0G `0x1Cd0690f..109c`), Gimo-only LST (pool `0xac06d1df..2135af`, stOG `0x7bbc63d0..1404`), Multicall3 universal `0xcA11bde0..76CA11`. No new contracts deployed; all integration with existing 0G primitives.
+- **Wallet/account**: `account.info` (single-call snapshot bundling agent EOA + iNFT + brain provider + balance + recent activity).
+- **Balance**: `chain.balance` discovers tokens via Transfer-event scan + Multicall3 batched `balanceOf` (no curated list); caches at `<agentDir>/onchain/tokens-cache.json`.
+- **Tokens**: `tokens.info` resolves symbol/address with priority cache → vendored JAINE list → on-chain ERC-20 reads.
+- **Transfers**: `chain.send` (auto-detects native vs ERC-20 by token symbol), `chain.wrap`/`chain.unwrap` for native ↔ W0G via WETH9 deposit/withdraw.
+- **Trading**: `swap.quote` (3-tier scan via JAINE Quoter V1) + `swap.execute` (re-quotes at exec time; auto-approves router for ERC-20 input; native via `multicall([exactInputSingle, refundETH])`; native-out via chained `unwrapWETH9`). Quote and allowance race in parallel.
+- **Stake**: `stake.stake`, `stake.unstake`, `stake.claim`, `stake.position` against Gimo. Min 0.01 0G hard-floor. Unstake queues a withdrawal; cooldown ~72h. `stake.claim` decodes `0xd6d9e665` revert into "claimable in ~Xh" friendly error.
+- **Blockchain**: `chain.block` (block summary at any tag/number), `chain.gas` (current gas price with floor).
+- **Analysis**: `chain.tx` (decode any tx via vendored ABIs first, 4byte directory fallback with canonical-first spam filter, cached at `<agentDir>/onchain/4byte-cache.json`); `chain.contract` (bytecode + EIP-1967 proxy slot + ERC-165 + ERC-20 detection); `chain.activity` (Transfer events for any address, in + out, sorted newest-first).
+- **Generic**: `chain.read` (eth_call by signature), `chain.write` (state-changing call by signature). Both gated by approval modal in `prompt` mode.
+- **`ONCHAIN_GUIDANCE` plugin prompt section** wired through `extraGuidance` (mirrors `MARKETPLACE_GUIDANCE` from Phase 8). Always-on when plugin-onchain is loaded.
+- **PermissionRequest extended** with new kinds (`chain.send`, `chain.swap`, `chain.stake`, `chain.write`) plus optional `amount`, `recipient`, `token` fields. Modal renders friendly "send 0.05 0G to 0xC635…" instead of raw command. `strict` mode denies value-moving txs; `prompt` always asks; `yolo` is operator-explicit.
+- **`discoverMintBlock` helper** auto-backfills `INFTRef.mintBlock` at chat boot when absent: chunked rawGetLogs scan from chain head backwards (50k-block × 30-chunk cap), persists to `~/.anima/config.ts`.
+- **30 unit tests** in plugin-onchain (`tokens.test.ts`, `swap.test.ts`, `analysis.test.ts`, `constants.test.ts`). 6 integration scripts in `test/local/e2e-onchain-*.ts` driving real mainnet via `_onchain.ts` bootstrap.
+
+### Changed
+
+- **Plugin filter in chat.tsx** now loads `'onchain'` (was filtered out as empty); plugin contributes 19 tools when `OnchainRuntimeContext` is supplied.
+- **`describePermissionCheck`** refactored from a 90-line if-ladder to a table-driven map (`PERMISSION_DESCRIBERS`) covering all gated tools.
+- **`balances.ts` ERC-20 metadata fetch** parallelized via `Promise.all` over discovered addresses (was sequential, 20 round-trips for 20 tokens).
+- **`writeLastScannedBlock`** now skips the file write when the head hasn't advanced past the cached cursor.
+- **Vendored JAINE ABIs** (`packages/plugin-onchain/abis/{swap-router,quoter,factory,erc20,weth9,multicall3,gimo-pool,stog}.json`) + canonical token list (`packages/plugin-onchain/data/tokens.json`).
+- **`waitForReceipt` helper** (1.5s poll, 90s timeout) replaces viem's `waitForTransactionReceipt` for write paths — works around 0G mainnet RPC's intermittent receipt-not-found windows on freshly-mined txs.
+
+### Fixed
+
+- **`getLogs` topic-stripping workaround** via new `rawGetLogs` helper in plugin-onchain. viem v2's `getLogs` strips sparse topic positions when no `event` arg is supplied; against 0G mainnet this falls through to `topics:[]` which the RPC rejects with "result set exceeds 10000 logs". `rawGetLogs` sends the JSON-RPC payload verbatim, preserving `[topic0, null, indexed_addr]` shape exactly. Used in `balances.ts` discovery, `gimo.ts` Unstake event scan, `tools/analysis.ts` chain.activity, and `mint-block.ts`.
+- **`pickCanonical` 4byte-spam filter**: removed dead `lc` score (regex `/^[a-z0-9]+$/i` matched everything thanks to the `i` flag, defeating the casing tiebreaker).
+- **`decodeCalldata` cache hit**: was returning `source: decoded ? 'cache' : 'cache'` (both branches identical). Simplified to a constant `'cache'` source label.
+- **Gimo Unstake event topic** corrected: vendored ABI declared `Unstaked(address,uint256,uint256)` but the deployed contract emits `Unstake(address,address,uint256,uint256,uint256)` (different name + 5 args). Pinned the actual topic hash `0xfe7007b2..a32` so filtering works regardless of the partial ABI mismatch.
+
 ## [0.13.0] - 2026-04-30
 
 ### Added
@@ -569,6 +604,7 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and th
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.14.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.14.0
 [0.13.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.13.0
 [0.12.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.2
 [0.12.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.1

@@ -61,6 +61,11 @@ import {
   isParticipant,
   jobEventShouldWakeBrain,
 } from '@s0nderlabs/anima-plugin-comms'
+import {
+  ONCHAIN_GUIDANCE,
+  type OnchainRuntimeContext,
+  discoverMintBlock,
+} from '@s0nderlabs/anima-plugin-onchain'
 import { type Address, type Hex, formatEther } from 'viem'
 import { findAndLoadConfig } from '../config/load'
 import { writeConfigTs } from '../config/render'
@@ -255,8 +260,10 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     ? brokerPool.visionInferFor(visionProvider)
     : null
 
-  // Plugin filter: system + comms ship today; onchain is empty.
-  const pluginNames = (config.plugins ?? []).filter(p => p === 'system' || p === 'comms')
+  // Plugin filter: system + comms + onchain all ship.
+  const pluginNames = (config.plugins ?? []).filter(
+    p => p === 'system' || p === 'comms' || p === 'onchain',
+  )
   // viem clients live above the comms gate so the agent-EOA balance refresher
   // works regardless of whether the comms plugin is loaded.
   const viemClients = makeViemClients({ network: config.network, privkeyHex: agentPrivkey })
@@ -274,6 +281,44 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   const jobEventQueue: JobEvent[] = []
   let onMarketJobEvent: (e: JobEvent) => void = e => {
     jobEventQueue.push(e)
+  }
+  // Phase 10 onchain side-band ctx: viem clients (already built above) +
+  // agent EOA + iNFT mint block (used as Transfer-event scan floor). Pre-
+  // Phase-10 configs lack `mintBlock`; we backfill at chat boot by querying
+  // the iNFT contract's ERC-721 Transfer logs for `tokenId` from `0x0` and
+  // persist the value back to ~/.anima/config.ts so subsequent runs skip it.
+  let onchain: OnchainRuntimeContext | undefined
+  if (pluginNames.includes('onchain')) {
+    const iNFT = config.identity.iNFT
+    if (!iNFT) {
+      throw new Error('plugin-onchain requires identity.iNFT in config')
+    }
+    let mintBlock = iNFT.mintBlock ? BigInt(iNFT.mintBlock) : null
+    if (mintBlock === null) {
+      mintBlock = await discoverMintBlock(viemClients.publicClient, contractAddress, tokenId)
+      if (mintBlock !== null) {
+        const updated: typeof config = {
+          ...config,
+          identity: {
+            ...config.identity,
+            iNFT: { ...iNFT, mintBlock: mintBlock.toString() },
+          },
+        }
+        await writeConfigTs(configPath, updated, { subname: config.subname })
+        config = updated
+      }
+    }
+    onchain = {
+      agentEoa: agentAddress,
+      network: config.network,
+      publicClient: viemClients.publicClient,
+      walletClient: viemClients.walletClient,
+      agentDir: paths.dir,
+      mintBlock: mintBlock ?? 0n,
+      iNFT: { contract: contractAddress, tokenId },
+      brainProvider: config.brain.provider,
+      brainModel: config.brain.model,
+    }
   }
   let comms: CommsRuntimeContext | undefined
   let sann: SannClient | undefined
@@ -345,12 +390,15 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     visionInfer,
     sandbox,
     comms,
+    onchain,
     resolve: async name => {
       switch (name) {
         case 'system':
           return await import('@s0nderlabs/anima-plugin-system')
         case 'comms':
           return await import('@s0nderlabs/anima-plugin-comms')
+        case 'onchain':
+          return await import('@s0nderlabs/anima-plugin-onchain')
         default:
           throw new Error(`unknown first-party plugin: ${name}`)
       }
@@ -454,6 +502,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   // sessions and avoids paying tokens for unreachable behavior.
   const extraGuidance: string[] = []
   if (comms?.marketAddress) extraGuidance.push(MARKETPLACE_GUIDANCE)
+  if (onchain) extraGuidance.push(ONCHAIN_GUIDANCE)
 
   const buildPrefix = async () => {
     const idx = await readIndexFile(paths.memoryIndex).catch(() => null)
@@ -520,9 +569,15 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
 
   permission.setPrompter(req => {
     return new Promise<PermissionDecision>(resolve => {
+      // Value-moving onchain ops carry amount/recipient/token so we render a
+      // friendlier "send 0.05 0G to 0xC635...87Ec" instead of a raw command.
+      const detail =
+        req.amount !== undefined
+          ? `${req.amount}${req.token ? ` ${req.token}` : ''}${req.recipient ? ` to ${req.recipient}` : ''}`
+          : (req.command ?? req.path ?? '(?)')
       state.pushRow({
         role: 'system',
-        text: `[approval requested] ${req.reason}: ${req.command ?? req.path ?? '(?)'}`,
+        text: `[approval requested] ${req.reason}: ${detail}`,
       })
       state.setPendingApproval({ request: req, resolve })
     })
@@ -1259,35 +1314,87 @@ function summarizeError(e: unknown): string {
   return s.length > 90 ? `${s.slice(0, 87)}...` : s
 }
 
+type PermArgs = Record<string, unknown>
+const _str = (v: unknown): string => (typeof v === 'string' ? v : '')
+const _strOpt = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined)
+
+const PERMISSION_DESCRIBERS: Record<string, (a: PermArgs) => PermissionRequest | null> = {
+  'shell.run': a => ({
+    kind: 'shell.run',
+    command: _str(a.command),
+    reason: 'shell command execution',
+  }),
+  'code.execute': a => ({
+    kind: 'code.execute',
+    command: `[${_str(a.language) || '?'}] ${_str(a.code)}`,
+    reason: 'arbitrary code execution',
+  }),
+  'shell.process_start': a => ({
+    kind: 'shell.process',
+    command: _str(a.command),
+    reason: 'background process start',
+  }),
+  'shell.process_output': () => null,
+  'shell.process_list': () => null,
+  'shell.process_kill': () => null,
+  'fs.write': a => ({ kind: 'fs.write', path: _str(a.path), reason: 'fs.write request' }),
+  'fs.patch': a => ({ kind: 'fs.patch', path: _str(a.path), reason: 'fs.patch request' }),
+  // Phase 10: value-moving on-chain tools. Pre-fill amount/recipient/token
+  // so the modal renders "send 0.05 0G to 0xC635..." not a raw command.
+  'chain.send': a => ({
+    kind: 'chain.send',
+    amount: _strOpt(a.amount) ?? '?',
+    recipient: _strOpt(a.to) ?? '?',
+    token: _strOpt(a.token) ?? '0G',
+    reason: 'native/ERC-20 transfer',
+  }),
+  'swap.execute': a => ({
+    kind: 'chain.swap',
+    amount: _strOpt(a.amountIn) ?? '?',
+    token: `${_strOpt(a.tokenIn) ?? '?'}→${_strOpt(a.tokenOut) ?? '?'}`,
+    reason: 'JAINE swap execution',
+  }),
+  'chain.wrap': a => ({
+    kind: 'chain.send',
+    amount: _strOpt(a.amount) ?? '?',
+    token: '0G→W0G',
+    reason: 'wrap native to W0G',
+  }),
+  'chain.unwrap': a => ({
+    kind: 'chain.send',
+    amount: _strOpt(a.amount) ?? '?',
+    token: 'W0G→0G',
+    reason: 'unwrap W0G to native',
+  }),
+  'stake.stake': a => ({
+    kind: 'chain.stake',
+    amount: _strOpt(a.amount) ?? '',
+    token: '0G→stOG',
+    reason: 'Gimo stake',
+  }),
+  'stake.unstake': a => ({
+    kind: 'chain.stake',
+    amount: _strOpt(a.amountStog) ?? '',
+    token: 'stOG→0G (queued)',
+    reason: 'Gimo unstake',
+  }),
+  'stake.claim': () => ({
+    kind: 'chain.stake',
+    token: 'claim queued 0G',
+    reason: 'Gimo claim',
+  }),
+  'chain.write': a => ({
+    kind: 'chain.write',
+    recipient: _strOpt(a.to) ?? '?',
+    command: _strOpt(a.signature) ?? '?',
+    amount: _strOpt(a.value) ? `${_strOpt(a.value)} wei` : undefined,
+    reason: 'arbitrary state-changing call',
+  }),
+}
+
 function describePermissionCheck(call: { name: string; args: unknown }): PermissionRequest | null {
-  if (call.name === 'shell.run') {
-    const args = (call.args ?? {}) as { command?: string }
-    const command = typeof args.command === 'string' ? args.command : ''
-    return { kind: 'shell.run', command, reason: 'shell command execution' }
-  }
-  if (call.name === 'code.execute') {
-    const args = (call.args ?? {}) as { code?: string; language?: string }
-    const command = `[${args.language ?? '?'}] ${typeof args.code === 'string' ? args.code : ''}`
-    return { kind: 'code.execute', command, reason: 'arbitrary code execution' }
-  }
-  if (call.name === 'shell.process_start') {
-    const args = (call.args ?? {}) as { command?: string }
-    const command = typeof args.command === 'string' ? args.command : ''
-    return { kind: 'shell.process', command, reason: 'background process start' }
-  }
-  if (
-    call.name === 'shell.process_output' ||
-    call.name === 'shell.process_list' ||
-    call.name === 'shell.process_kill'
-  ) {
-    return null
-  }
-  if (call.name === 'fs.write' || call.name === 'fs.patch') {
-    const args = (call.args ?? {}) as { path?: string }
-    const path = typeof args.path === 'string' ? args.path : ''
-    return { kind: call.name, path, reason: `${call.name} request` }
-  }
-  return null
+  const fn = PERMISSION_DESCRIBERS[call.name]
+  return fn ? fn((call.args ?? {}) as PermArgs) : null
 }
 
 function summarizeArgs(args: unknown): string {

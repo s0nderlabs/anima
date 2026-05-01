@@ -27,6 +27,13 @@ export interface INFTRef {
   tokenId: string
   /** Network where the iNFT lives. */
   network: AnimaNetwork
+  /**
+   * Block at which the iNFT was minted. Used as the floor for Transfer-event
+   * discovery scans (`chain.balance` no-arg). Optional for backward compat;
+   * pre-Phase-10 configs lack this and the harness backfills lazily by
+   * scanning ERC-721 Transfer logs for the tokenId.
+   */
+  mintBlock?: string
 }
 
 export type OperatorSourceKind = 'walletconnect' | 'keychain' | 'keystore-file' | 'raw-privkey'
