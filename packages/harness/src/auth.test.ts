@@ -186,6 +186,40 @@ describe('provision sig verification', () => {
     expect(r.ok).toBe(false)
     if (!r.ok) expect(r.reason).toBe('ts-future')
   })
+
+  test('survives JSON.stringify→parse roundtrip when config carries undefined-valued optional fields', async () => {
+    // Regression for the v0.15.2 → v0.15.3 sandbox-upgrade sig-mismatch:
+    // CLI builds RuntimeConfig with `promptAppend: undefined` (caller didn't
+    // set it). It signs the in-memory config, JSON.stringify drops the field
+    // on the wire, and the harness's parsed config has no `promptAppend` key.
+    // If `stableStringify` hashed `undefined` as the literal text "undefined"
+    // for the CLI but skipped the key for the harness, hashes differed.
+    const { req, bootstrapPub } = makeRequest()
+    const operatorPriv = generatePrivateKey()
+    req.operatorAddress = privateKeyToAccount(operatorPriv).address
+    req.config = {
+      ...req.config,
+      // biome-ignore lint/suspicious/noExplicitAny: deliberately exercising the optional-undefined path
+      promptAppend: undefined as any,
+      // biome-ignore lint/suspicious/noExplicitAny: same
+      plugins: undefined as any,
+    }
+    const hashCli = provisionMessageHash(req, bootstrapPub)
+    const sig = await sign(operatorPriv, hashCli)
+
+    // Simulate the wire roundtrip the harness sees.
+    const reqOnWire = JSON.parse(JSON.stringify(req)) as ProvisionRequest
+    expect((reqOnWire.config as unknown as Record<string, unknown>).promptAppend).toBeUndefined()
+    expect(Object.hasOwn(reqOnWire.config, 'promptAppend')).toBe(false)
+
+    const r = await verifyProvisionSig({
+      request: reqOnWire,
+      signature: sig,
+      bootstrapPubkey: bootstrapPub,
+      expectedOperator: req.operatorAddress,
+    })
+    expect(r.ok).toBe(true)
+  })
 })
 
 describe('chat sig verification', () => {

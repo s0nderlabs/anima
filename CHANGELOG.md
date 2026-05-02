@@ -4,6 +4,17 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.3] - 2026-05-02
+
+### Fixed
+
+- **`anima upgrade` always failed with `provision-rejected: sig-mismatch`.** Surfaced live during the v0.15.2 enigma upgrade. `stableStringify` in `packages/harness/src/auth.ts` (the deterministic config hasher both sides of the provision sig run against) emitted `"key":undefined` literal text for any object property whose value was `undefined`. The CLI signs over the in-memory `RuntimeConfig` (where `runSandboxProvision` always sets `promptAppend: opts.promptAppend`, which is `undefined` when no prompt-append config is wired in), JSON.stringify then drops the field on the wire, and the harness's parsed config has no `promptAppend` key — so the harness's `stableStringify` produced a different string than the CLI's. Fix: skip `undefined`-valued keys in object stringification, matching `JSON.stringify` semantics. Regression test `survives JSON.stringify→parse roundtrip` pins the bug. v0.15.0 init initially worked because the env var wasn't unset; the path bit on every subsequent `anima upgrade`.
+
+### Verification
+
+- 13 auth-tests pass (was 11 + 1 new regression).
+- enigma re-handed-off via `test/local/finish-enigma-handoff.ts` (which omits `promptAppend` so it sidesteps the bug) — same agent EOA `0xd56b...9683`, same iNFT #6, MEMORY.md preserved. New sandbox `75ec419a-ea9e-49f7-8180-8c26c0604635` running v0.15.2 code with the workspaceRoot fix; `shell.run` + `code.execute` (python) verified end-to-end via tmux window 3, activity-log evidence: `cwd: "/home/daytona/anima"` (the v0.15.2 cwd fix proven on the sandbox path).
+
 ## [0.15.2] - 2026-05-02
 
 ### Fixed
@@ -682,6 +693,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.15.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.3
 [0.15.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.2
 [0.15.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.1
 [0.15.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.0

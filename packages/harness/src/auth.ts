@@ -41,10 +41,17 @@ function envelopeHash(env: ProvisionEnvelope): Hex {
 function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
-  const keys = Object.keys(value as Record<string, unknown>).sort()
-  const props = keys.map(
-    k => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`,
-  )
+  // Skip undefined-valued keys to match `JSON.stringify` semantics. Critical
+  // because the wire path is `JSON.stringify` → JSON.parse, which silently
+  // drops undefined object values. If we hashed them as the literal text
+  // `undefined`, the CLI's pre-wire hash and the harness's post-wire hash
+  // would diverge for any optional field the caller leaves unset (e.g.
+  // `RuntimeConfig.promptAppend`), surfacing as `provision-rejected: sig-mismatch`.
+  const v = value as Record<string, unknown>
+  const keys = Object.keys(v)
+    .filter(k => v[k] !== undefined)
+    .sort()
+  const props = keys.map(k => `${JSON.stringify(k)}:${stableStringify(v[k])}`)
   return `{${props.join(',')}}`
 }
 
