@@ -50,11 +50,10 @@ describe('buildBootstrapScript', () => {
     const { script } = buildBootstrapScript(baseOpts)
     const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
     const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
-    // Pre-launch port kill (defensive against pre-existing service in snapshot)
-    expect(inner).toContain('[free port 8080]')
-    expect(inner).toContain('fuser -k 8080/tcp 2>/dev/null || true')
-    // Per-attempt port kill (defensive against zombie bun from a prior attempt)
-    expect(inner.match(/fuser -k 8080\/tcp/g)?.length).toBeGreaterThanOrEqual(2)
+    // Pre-launch + per-attempt port kill (defensive against pre-existing service or zombie bun)
+    expect(
+      inner.match(/fuser -k 8080\/tcp 2>\/dev\/null \|\| true/g)?.length,
+    ).toBeGreaterThanOrEqual(2)
     // psmisc apt package required for fuser
     expect(inner).toMatch(/sudo -n apt-get install .* psmisc/)
   })
@@ -63,8 +62,8 @@ describe('buildBootstrapScript', () => {
     const { script } = buildBootstrapScript({ ...baseOpts, port: 9090 })
     const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
     const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
-    expect(inner).toContain('[free port 9090]')
     expect(inner).toContain('fuser -k 9090/tcp 2>/dev/null || true')
+    expect(inner).not.toContain('fuser -k 8080/tcp')
   })
 
   test('harness launch has 3-attempt retry with 10s startup wait (bun cold-start jitter)', () => {
@@ -74,9 +73,8 @@ describe('buildBootstrapScript', () => {
     expect(inner).toContain('for h_attempt in 1 2 3; do')
     expect(inner).toContain('HARNESS_OK=0')
     expect(inner).toContain('HARNESS_OK=1')
-    expect(inner).toContain('[harness launch attempt $h_attempt/3]')
-    // Initial wait bumped from 3s to 10s to absorb bun cold-start jitter on
-    // Daytona containers. Verified May 2 2026 oracle init.
+    expect(inner).toContain('[launch attempt $h_attempt/3]')
+    // Initial wait bumped from 3s to 10s to absorb bun cold-start jitter
     expect(inner).toMatch(/sleep 10[^\d]/)
     // 5s backoff between attempts.
     expect(inner).toMatch(/\[retrying in 5s\][\s\S]*sleep 5/)

@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.7] - 2026-05-02
+
+### Fixed
+
+- **Bootstrap script size**: v0.16.6's added inline comments and apt-list change pushed the generated bootstrap script from 5340 bytes to 6136 bytes, which crossed Daytona's toolbox `process/execute` request limit (`400 Request Header Or Cookie Too Large`). Verified May 2 2026 via enigma upgrade attempt that failed twice in a row on v0.16.6. Stripped the inline comments (the `feedback-*.md` memory files retain the rationale), keeping all the v0.16.4 git-clone retry + v0.16.5 harness retry + v0.16.6 port-kill behavior. New script size: 4288 bytes (under the prior v0.16.5 ceiling of 5340). Tests updated to match the simplified output.
+
 ## [0.16.6] - 2026-05-02
 
 ### Fixed
