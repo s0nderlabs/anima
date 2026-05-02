@@ -46,6 +46,24 @@ describe('buildBootstrapScript', () => {
     expect(inner).toContain(`echo "anima-harness-pid=$HARNESS_PID" > ${BOOTSTRAP_DONE_MARKER}`)
   })
 
+  test('harness launch has 3-attempt retry with 10s startup wait (bun cold-start jitter)', () => {
+    const { script } = buildBootstrapScript(baseOpts)
+    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
+    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    expect(inner).toContain('for h_attempt in 1 2 3; do')
+    expect(inner).toContain('HARNESS_OK=0')
+    expect(inner).toContain('HARNESS_OK=1')
+    expect(inner).toContain('[harness launch attempt $h_attempt/3]')
+    // Initial wait bumped from 3s to 10s to absorb bun cold-start jitter on
+    // Daytona containers. Verified May 2 2026 oracle init.
+    expect(inner).toMatch(/sleep 10[^\d]/)
+    // 5s backoff between attempts.
+    expect(inner).toMatch(/\[retrying in 5s\][\s\S]*sleep 5/)
+    // Failure marker still written if all 3 fail.
+    expect(inner).toContain('if [ "$HARNESS_OK" -ne 1 ]; then')
+    expect(inner).toContain('echo "harness-died-early" >')
+  })
+
   test('git clone has 3-attempt retry-with-backoff (transient github 429/DNS resilience)', () => {
     const { script } = buildBootstrapScript(baseOpts)
     const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)

@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.5] - 2026-05-02
+
+### Fixed
+
+- **Harness launch resilience**: bootstrap script now retries the harness daemon launch up to 3 times with 5s backoff, and the per-attempt liveness wait bumped from 3s to 10s. Verified May 2 2026 during oracle iNFT #9 init: even though git-clone + bun-install + bun runtime were all healthy, the post-launch `kill -0` check at sleep 3 occasionally raced bun's cold-start (importing core + plugins + viem under Daytona's container can take longer than 3s), surfacing as `harness-died-early` even when the daemon would have come up fine. With the new retry + longer wait, that race is invisible. Each failed attempt also dumps the harness log into the bootstrap progress log so future failures self-diagnose without needing container access.
+
 ## [0.16.4] - 2026-05-02
 
 ### Fixed
