@@ -8,6 +8,7 @@ import {
   SANDBOX_PROVIDER_URL_GALILEO,
   SANDBOX_TEE_SIGNER_GALILEO,
   SandboxProviderClient,
+  type SandboxRecord,
   SandboxSettlementClient,
   SannClient,
   type ToolboxExecResponse,
@@ -149,7 +150,7 @@ export async function runSandboxProvision(
   })
 
   progress(`creating sandbox snapshot=${snapshotName}`)
-  const created = await provider.createSandbox({ snapshot: snapshotName, name: opts.name })
+  const created = await createSandboxWithOrphanRetry(provider, snapshotName, opts.name, progress)
   if (!created.id) throw new Error('createSandbox returned no id')
   const sandboxId = created.id
 
@@ -371,6 +372,38 @@ async function pollPubkey(
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
+}
+
+/**
+ * createSandbox + 409-orphan recovery. The Daytona provider rejects new
+ * sandbox names that already exist with HTTP 409. This bites whenever a
+ * prior `anima init` / `anima deploy` partially succeeded (sandbox created
+ * but bootstrap failed) and the operator retries: the orphan is still on
+ * the provider holding the name. Catch the 409 once, list-by-name + delete
+ * the orphan, then retry create. Keeps OOB clean without exposing operators
+ * to raw provider API or a manual cleanup CLI.
+ */
+export async function createSandboxWithOrphanRetry(
+  provider: Pick<SandboxProviderClient, 'createSandbox' | 'listSandboxes' | 'deleteSandbox'>,
+  snapshot: string,
+  name: string | undefined,
+  progress: (m: string) => void,
+): Promise<SandboxRecord> {
+  try {
+    return await provider.createSandbox({ snapshot, name })
+  } catch (e) {
+    const msg = (e as Error).message
+    if (!name || !/\b409\b/.test(msg) || !/already exists/i.test(msg)) {
+      throw e
+    }
+    progress(`sandbox name '${name}' collides with an orphan; cleaning up + retrying`)
+    const orphans = (await provider.listSandboxes().catch(() => [])).filter(s => s.name === name)
+    if (orphans.length === 0) throw e
+    for (const o of orphans) {
+      await provider.deleteSandbox(o.id).catch(() => {})
+    }
+    return await provider.createSandbox({ snapshot, name })
+  }
 }
 
 function formatOg(wei: bigint): string {

@@ -4,6 +4,23 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.5] - 2026-05-02
+
+### Fixed
+
+- **Orphan sandbox blocks `anima init` / `anima deploy` retry on name conflict.** When `runSandboxProvision` partially succeeds (sandbox created but bootstrap fails), the operator's retry hits HTTP 409 "Sandbox with name X already exists" and there's no CLI affordance for cleanup. New `createSandboxWithOrphanRetry` helper detects the 409, lists sandboxes by name, deletes the orphan, and retries `createSandbox` once. Keeps OOB recovery clean without exposing operators to raw provider API or a manual cleanup CLI. Surfaced live during the v0.15.4 phantom fresh-init verification on Galileo. Also: `SandboxRecord` interface now declares the `name` field that the Daytona provider already returns (was missing from the type).
+- **Init wizard: keychain-service text prompt pre-fills the default value, so typing extends instead of replacing.** Operator enters `dev.deployer` at a prompt showing default `anima.operator` and the wizard concatenates them into `anima.operatordev.deployer`. Caused live during phantom init drive — operators with non-default keychain names couldn't get past the prompt without a Ctrl+U workaround. Removed the redundant `initialValue: 'anima.operator'` (kept the `placeholder` so the example still appears as ghost text); typing now starts from an empty buffer.
+- **Brain answers URL-fetch prompts from training data instead of calling `web.fetch`.** v0.15.4 enigma drive showed qwen3.6-plus responding with stale training-data answers ("0G TypeScript SDK", "Update README.md") for `fetch the json from <url>` prompts, no `web.fetch` tool-call entry in activity.jsonl. Tightened the system-prompt clause for HTTP GETs with explicit anti-training-bias wording: "Whenever the operator gives you a URL — even one you 'recognize' (github API, popular docs, news sites) — fetch the URL. Your training data is stale and the live response may differ; never recite an answer for content behind a URL without fetching it." Frozen-prefix change invalidates the 0G Compute prompt cache once on next session start (one-time cost, then re-warms).
+
+### Added
+
+- 5 new unit tests in `sandbox-provision.test.ts` covering `createSandboxWithOrphanRetry`: first-try success, 409+cleanup+retry success, non-409 propagation, anonymous-create propagation, empty-list re-throw.
+
+### Verification
+
+- 498 unit tests pass (+5 new); 124 forge tests pass; typecheck + lint clean; 6/6 CLI smoke probes pass.
+- Live verification on enigma deferred to post-tag — `anima upgrade --version v0.15.5` will deploy the new prompt + orphan-retry to enigma, after which the URL-fetch + cleanup paths can be re-driven.
+
 ## [0.15.4] - 2026-05-02
 
 ### Added

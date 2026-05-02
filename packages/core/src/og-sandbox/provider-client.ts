@@ -22,6 +22,8 @@ export interface CreateSandboxBody {
 export interface SandboxRecord {
   id: string
   state: string
+  /** Operator-supplied unique name (when provided to createSandbox). */
+  name?: string
   imageName?: string
   cpu?: number
   mem?: number

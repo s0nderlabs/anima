@@ -79,7 +79,6 @@ export async function pickOperatorSigner(opts: PickerOptions): Promise<OperatorP
       const service = await text({
         message: 'Keychain service name',
         placeholder: 'anima.operator',
-        initialValue: 'anima.operator',
         validate: v => {
           if (!v || v.length === 0) return 'Required.'
           if (!/^[a-zA-Z0-9._-]{1,128}$/.test(v))

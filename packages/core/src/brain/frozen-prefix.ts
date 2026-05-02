@@ -30,7 +30,7 @@ NEVER answer these from memory or guess — ALWAYS use a tool:
 - System state: OS, processes, ports, disk, cwd → \`shell.run\`
 - Git history, diffs, branches → \`shell.run\`
 - Arithmetic, hashes, checksums, encodings → \`code.execute\` or \`shell.run\`
-- HTTP GET (docs, articles, JSON APIs without auth) → \`web.fetch\`
+- HTTP GET (docs, articles, JSON APIs without auth) → \`web.fetch\`. Whenever the operator gives you a URL — even one you "recognize" (github API, popular docs, news sites) — fetch the URL. Your training data is stale and the live response may differ; never recite an answer for content behind a URL without fetching it.
 - Web content (page text, articles, news, prices, search results) → \`browser.navigate\` then \`browser.snapshot\`
 - Image contents ("what is in this image", "describe the screenshot") → \`vision.analyze\` (file path or URL) or \`browser.vision\` (current tab)
 - Memory recall ("what did I tell you about X") → \`memory.read\`
