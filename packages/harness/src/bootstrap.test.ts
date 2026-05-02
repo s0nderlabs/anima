@@ -46,6 +46,27 @@ describe('buildBootstrapScript', () => {
     expect(inner).toContain(`echo "anima-harness-pid=$HARNESS_PID" > ${BOOTSTRAP_DONE_MARKER}`)
   })
 
+  test('frees port 8080 via fuser before harness launch (Daytona snapshot guard)', () => {
+    const { script } = buildBootstrapScript(baseOpts)
+    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
+    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    // Pre-launch port kill (defensive against pre-existing service in snapshot)
+    expect(inner).toContain('[free port 8080]')
+    expect(inner).toContain('fuser -k 8080/tcp 2>/dev/null || true')
+    // Per-attempt port kill (defensive against zombie bun from a prior attempt)
+    expect(inner.match(/fuser -k 8080\/tcp/g)?.length).toBeGreaterThanOrEqual(2)
+    // psmisc apt package required for fuser
+    expect(inner).toMatch(/sudo -n apt-get install .* psmisc/)
+  })
+
+  test('honors custom port — port-kill uses the same port', () => {
+    const { script } = buildBootstrapScript({ ...baseOpts, port: 9090 })
+    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
+    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    expect(inner).toContain('[free port 9090]')
+    expect(inner).toContain('fuser -k 9090/tcp 2>/dev/null || true')
+  })
+
   test('harness launch has 3-attempt retry with 10s startup wait (bun cold-start jitter)', () => {
     const { script } = buildBootstrapScript(baseOpts)
     const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)

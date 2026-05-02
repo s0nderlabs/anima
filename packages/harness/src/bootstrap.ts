@@ -83,6 +83,9 @@ const DEFAULT_APT_PACKAGES: readonly string[] = [
   'git',
   'xvfb',
   'chromium',
+  // psmisc provides `fuser` which the harness launch step uses to free port
+  // 8080 if Daytona's snapshot ships a default service squatting on it.
+  'psmisc',
 ] as const
 
 const PROGRESS_LOG = '/tmp/anima-bootstrap-progress.log'
@@ -167,6 +170,17 @@ export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBoots
     `export HARNESS_PORT=${shQuote(String(port))}`,
     "export HARNESS_HOST='0.0.0.0'",
     '',
+    '# Free port 8080 first. Some Daytona snapshot revisions ship a default',
+    '# service on 8080 (preview/web-app) that blocks our harness from binding.',
+    '# Verified May 2 2026 enigma upgrade: every harness launch hit EADDRINUSE',
+    '# until we explicitly killed whatever was squatting on the port.',
+    '# Also covers stale-PID scenarios from any earlier failed launch in this',
+    '# bootstrap (defensive — retry loop should not have leftovers but the kill',
+    '# is idempotent and cheap).',
+    `echo "[free port ${port}]"`,
+    `fuser -k ${port}/tcp 2>/dev/null || true`,
+    'sleep 2',
+    '',
     '# Harness launch with 3-attempt retry. Verified May 2 2026 oracle init: bun',
     '# cold-start under Daytona container can race the kill -0 alive-check at',
     '# sleep 3, surfacing as "harness-died-early" even when the daemon is fine.',
@@ -177,6 +191,8 @@ export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBoots
     'HARNESS_OK=0',
     'for h_attempt in 1 2 3; do',
     '  echo "[harness launch attempt $h_attempt/3]"',
+    `  fuser -k ${port}/tcp 2>/dev/null || true`,
+    '  sleep 1',
     '  nohup bun "$ANIMA_DIR/packages/harness/bin/anima-harness" > "$HOME/anima-logs/anima-harness.log" 2>&1 &',
     '  HARNESS_PID=$!',
     '  disown',

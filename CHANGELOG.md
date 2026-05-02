@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.6] - 2026-05-02
+
+### Fixed
+
+- **Bootstrap port conflict**: harness launch now explicitly frees port 8080 (`fuser -k 8080/tcp`) both before the launch and at the start of each retry attempt. Some Daytona snapshot revisions ship a default service on 8080 that blocked the harness from binding, surfacing as `harness-died-early — Is port 8080 in use?` even with the v0.16.5 retry coverage. `psmisc` added to the apt install list so `fuser` is available. Also covers stale-PID scenarios from any prior failed launch in the same bootstrap (defensive — should not happen with the v0.16.5 retry but cheap to handle). Verified May 2 2026 enigma upgrade: 2 attempts hit EADDRINUSE on the new container, third succeeded only because the squatting service died on its own. With the explicit port-kill, the first attempt would have succeeded.
+
 ## [0.16.5] - 2026-05-02
 
 ### Fixed
