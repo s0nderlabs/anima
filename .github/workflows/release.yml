@@ -54,38 +54,56 @@ jobs:
       - name: Forge tests
         run: forge test
 
+      # bun publish does NOT honor `~/.npmrc` reliably on CI runners (verified
+      # silently broken on v0.16.3 manual recovery: workflow reported success
+      # but every publish step output `error: missing authentication`, masked
+      # by a former `|| true`). Use the npm-cli env convention `NPM_CONFIG_TOKEN`
+      # which bun does respect. Keep `~/.npmrc` write as belt-and-suspenders
+      # for any tooling that needs it.
       - name: Configure npm auth
         run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
 
       # Publish in topo order. Each `bun publish` rewrites workspace:* deps to
       # the resolved semver in the published tarball; source stays workspace:*.
-      # If a version is already on the registry, bun publish fails fast — that's
-      # expected behavior on the first tag (manual publish already happened) and
-      # we treat it as a no-op via `|| true` for resilience on re-runs of the
-      # same tag.
+      # NO `|| true` masking: if publish fails (auth, version conflict, network)
+      # the workflow MUST fail loudly. A "version already exists" error means
+      # the tag was re-pushed against an already-published version, which is
+      # operator error and should surface clearly.
       - name: Publish @s0nderlabs/anima-core
         working-directory: packages/core
-        run: bun publish --access=public || true
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun publish --access=public
 
       - name: Publish @s0nderlabs/anima-plugin-comms
         working-directory: packages/plugin-comms
-        run: bun publish --access=public || true
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun publish --access=public
 
       - name: Publish @s0nderlabs/anima-plugin-onchain
         working-directory: packages/plugin-onchain
-        run: bun publish --access=public || true
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun publish --access=public
 
       - name: Publish @s0nderlabs/anima-plugin-system
         working-directory: packages/plugin-system
-        run: bun publish --access=public || true
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun publish --access=public
 
       - name: Publish @s0nderlabs/anima-harness
         working-directory: packages/harness
-        run: bun publish --access=public || true
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun publish --access=public
 
       - name: Publish @s0nderlabs/anima
         working-directory: packages/cli
-        run: bun publish --access=public || true
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun publish --access=public
 
       - name: Create GitHub release
         env:
