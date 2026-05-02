@@ -4,6 +4,16 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.3] - 2026-05-02
+
+### Fixed
+
+- **Critical**: published `@s0nderlabs/anima-plugin-onchain` was missing the `abis/` and `data/` directories. The package's `files` array was set to `["src", "README.md"]`, but `src/abis.ts` does `import factoryJson from '../abis/factory.json' with { type: 'json' }` (and similar for `quoter`, `swap-router`, plus `src/tokens.ts` imports `'../data/tokens.json'`). Both directories sit at the package root, so they were stripped from the published tarball. Effect: any chain tool that loaded an ABI (transfer, swap, stake, balance, analysis, generic) crashed at module-load time with `Cannot find module '../abis/factory.json'`. The `--version` command tripped this on every fresh `bun add @s0nderlabs/anima` install. Fixed by setting `files: ["src", "abis", "data", "README.md"]`. All 6 packages republished at 0.16.3 because changesets `fixed` group keeps versions linked.
+
+### Added
+
+- **Audit rule**: `feedback-publish-files-must-include-non-src-assets.md` documents the class of bug to prevent future regressions. Pre-publish audit must check every `'../<dir>/'` import in `src/` against the package's `files` field, in addition to the existing dep audit.
+
 ## [0.16.0] - 2026-05-02
 
 ### Added
