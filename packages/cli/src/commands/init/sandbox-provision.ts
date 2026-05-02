@@ -203,25 +203,20 @@ export async function runSandboxProvision(
   // image cache; surface progress every 30s so the operator sees movement.
   progress('waiting for bootstrap completion (apt + bun + git clone + harness ready)')
   const bootstrapDeadline = Date.now() + 600_000 // 10 min max
-  let lastProgressEcho = 0
-  // Single coalesced poll: read FAIL + DONE + 1-line PROGRESS in one exec
-  // round-trip per tick. Saves ~2/3 of HTTP+EIP-191-sign overhead vs three
-  // separate execs. Sentinels split the response.
+  // Lean poll: cheap `cat` of FAIL + DONE markers every 5s; the
+  // progress-log `tail` only attaches every 6th tick (~30s) since the
+  // operator UX echo throttles at 30s anyway. Saves ~5/6 of the
+  // signed-exec response payload through Daytona's HTTP channel.
   const execRead = makeExecRead(provider, sandboxId)
-  const COALESCED_POLL = [
-    'echo --F--',
-    `cat ${BOOTSTRAP_FAIL_MARKER} 2>/dev/null`,
-    'echo --D--',
-    `cat ${BOOTSTRAP_DONE_MARKER} 2>/dev/null`,
-    'echo --P--',
-    `tail -n 1 ${BOOTSTRAP_PROGRESS_LOG} 2>/dev/null`,
-  ].join('; ')
+  const FAST_POLL = `echo --F--; cat ${BOOTSTRAP_FAIL_MARKER} 2>/dev/null; echo --D--; cat ${BOOTSTRAP_DONE_MARKER} 2>/dev/null`
+  const SLOW_POLL = `${FAST_POLL}; echo --P--; tail -n 1 ${BOOTSTRAP_PROGRESS_LOG} 2>/dev/null`
+  let tick = 0
   let lastDone = ''
   while (Date.now() < bootstrapDeadline) {
-    const out = await execRead(COALESCED_POLL)
+    const surfaceProgress = ++tick % 6 === 0
+    const out = await execRead(surfaceProgress ? SLOW_POLL : FAST_POLL)
     const fail = sliceBetween(out, '--F--', '--D--')
-    const done = sliceBetween(out, '--D--', '--P--')
-    const tailLog = sliceAfter(out, '--P--').trim()
+    const done = surfaceProgress ? sliceBetween(out, '--D--', '--P--') : sliceAfter(out, '--D--')
     const failKeyword = BOOTSTRAP_FAIL_KEYWORDS.find(k => fail.includes(k))
     if (failKeyword) {
       const log = await execRead(`tail -n 80 ${BOOTSTRAP_PROGRESS_LOG} 2>/dev/null`)
@@ -237,9 +232,9 @@ export async function runSandboxProvision(
       progress(`bootstrap complete (${pidLine})`)
       break
     }
-    if (Date.now() - lastProgressEcho > 30_000) {
-      lastProgressEcho = Date.now()
-      const real = tailLog
+    if (surfaceProgress) {
+      const real = sliceAfter(out, '--P--')
+        .trim()
         .split('\n')
         .filter(l => !l.includes('setlocale'))
         .pop()
@@ -252,24 +247,82 @@ export async function runSandboxProvision(
     throw new Error(`bootstrap timeout (10 min): no done marker. log-tail=${log.slice(-400)}`)
   }
 
-  // Step 4: poll /bootstrap/pubkey
+  // Steps 4-7: poll /bootstrap/pubkey → ECIES envelope → /bootstrap/provision
+  // → /healthz Ready. Shared with `runInPlaceUpgrade` (which skips the
+  // sandbox-provisioning steps above and only re-runs this handoff against
+  // the same endpoint after harness restart).
   const endpoint = buildSandboxEndpoint({ sandboxId })
   const sandboxClient = new SandboxClient({
     endpoint,
     sandboxId,
     operator: operatorAccount,
   })
-  progress(`polling ${endpoint}/bootstrap/pubkey`)
-  const pubkeyRes = await pollPubkey(sandboxClient, 60_000)
+  const { bootstrapPubkey } = await handoffAgentToHarness({
+    sandboxClient,
+    agentPrivkey: opts.agentPrivkey,
+    agentAddress: opts.agentAddress,
+    iNFTRef: opts.iNFTRef,
+    iNFTNetwork: opts.iNFTNetwork,
+    brain: opts.brain,
+    plugins: opts.plugins,
+    promptAppend: opts.promptAppend,
+    onProgress: progress,
+  })
 
-  // Step 5: build envelope
+  return {
+    sandboxId,
+    endpoint,
+    providerAddress: SANDBOX_PROVIDER_GALILEO,
+    snapshotName,
+    agentAddress: opts.agentAddress,
+    bootstrapPubkey,
+    depositTx,
+    acknowledgeTx,
+  }
+}
+
+/**
+ * Post-restart handoff: poll the harness's bootstrap pubkey, encrypt the
+ * agent privkey to it via ECIES, EIP-191-sign the provision envelope, then
+ * wait until /healthz reports Ready. Used by:
+ *
+ *  - `runSandboxProvision` after first-cold bootstrap (fresh container path)
+ *  - `runInPlaceUpgrade` after harness restart inside an existing container
+ *
+ * Both paths talk to a `Bootstrapping` harness that has just generated a
+ * fresh ephemeral keypair, so the wire-level sequence is identical.
+ */
+export interface HandoffAgentToHarnessOpts {
+  sandboxClient: SandboxClient
+  agentPrivkey: Hex
+  agentAddress: Address
+  iNFTRef: { contract: Address; tokenId: bigint }
+  iNFTNetwork: AnimaNetwork
+  brain: { provider: Address; model: string }
+  plugins?: AnimaPlugin[]
+  promptAppend?: string
+  /** Default 60_000. */
+  pubkeyTimeoutMs?: number
+  /** Default 180_000. */
+  readyTimeoutMs?: number
+  onProgress?: (msg: string) => void
+}
+
+export async function handoffAgentToHarness(
+  opts: HandoffAgentToHarnessOpts,
+): Promise<{ bootstrapPubkey: Hex }> {
+  const progress = opts.onProgress ?? (() => {})
+  const endpoint = opts.sandboxClient.endpoint
+
+  progress(`polling ${endpoint}/bootstrap/pubkey`)
+  const pubkeyRes = await pollPubkey(opts.sandboxClient, opts.pubkeyTimeoutMs ?? 60_000)
+
   const agentPrivkeyBytes = hexToBytes(opts.agentPrivkey)
   const envelope = encryptToPubkey({
     recipientPubkey: pubkeyRes.pubkeyHex,
     plaintext: agentPrivkeyBytes,
   })
 
-  // Step 6: provision
   progress('sending provision envelope to harness')
   const runtimeConfig = {
     network: opts.iNFTNetwork,
@@ -285,7 +338,7 @@ export async function runSandboxProvision(
     permissions: pickPermissionMode(),
     promptAppend: opts.promptAppend,
   }
-  await sandboxClient.provision(
+  await opts.sandboxClient.provision(
     {
       envelope,
       iNFTRef: { contract: opts.iNFTRef.contract, tokenId: opts.iNFTRef.tokenId.toString() },
@@ -294,20 +347,10 @@ export async function runSandboxProvision(
     pubkeyRes.pubkeyHex,
   )
 
-  // Step 7: wait until runtime ready
   progress(`polling ${endpoint}/healthz for Ready`)
-  await sandboxClient.waitReady({ timeoutMs: 180_000 })
+  await opts.sandboxClient.waitReady({ timeoutMs: opts.readyTimeoutMs ?? 180_000 })
 
-  return {
-    sandboxId,
-    endpoint,
-    providerAddress: SANDBOX_PROVIDER_GALILEO,
-    snapshotName,
-    agentAddress: opts.agentAddress,
-    bootstrapPubkey: pubkeyRes.pubkeyHex,
-    depositTx,
-    acknowledgeTx,
-  }
+  return { bootstrapPubkey: pubkeyRes.pubkeyHex }
 }
 
 /**
@@ -320,7 +363,7 @@ export async function runSandboxProvision(
  * Used by the bootstrap poll loop, deploy/upgrade flows, and `anima logs`
  * sandbox-mode tail.
  */
-function makeExecRead(
+export function makeExecRead(
   provider: SandboxProviderClient,
   sandboxId: string,
 ): (cmd: string) => Promise<string> {

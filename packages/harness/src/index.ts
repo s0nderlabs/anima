@@ -69,3 +69,14 @@ export {
   BOOTSTRAP_FAIL_KEYWORDS,
   buildBootstrapScript,
 } from './bootstrap'
+
+export {
+  type BuildUpgradeScriptOpts,
+  type BuildUpgradeScriptResult,
+  UPGRADE_SUCCESS_MARKER_PREFIX,
+  UPGRADE_DONE_MARKER,
+  UPGRADE_FAIL_MARKER,
+  UPGRADE_PROGRESS_LOG,
+  UPGRADE_FAIL_KEYWORDS,
+  buildUpgradeScript,
+} from './upgrade-script'

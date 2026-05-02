@@ -4,6 +4,23 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-05-03
+
+### Changed
+
+- **`anima upgrade` defaults to in-place**: rolling the sandbox harness to a new ref now does `git fetch + checkout + bun install + harness restart` inside the existing Daytona container instead of swapping to a fresh one. ~30-60s downtime, $0 testnet cost, same sandbox UUID + endpoint. The container-swap path moves behind a new `--reprovision` flag, reserved for the future when sealed mode + image-hash attestation are wired up.
+- **Why**: per `feedback-anima-is-unsealed-currently.md`, anima's Phase 11 deployment is unsealed (generic `daytonaio/sandbox:0.5.0-slim` image, software-generated harness keypair, no SANDBOX_SEAL_KEY). Heavy reprovision was buying no real attestation freshness, only ~0.9 0G testnet burn + 60-90s downtime per release. Over the remaining hackathon × ~5 expected upgrades that's ~4.5 0G testnet wasted on theatrical rotation. Locked design decision in `decision-upgrade-in-place-default.md`.
+
+### Added
+
+- `packages/harness/src/upgrade-script.ts`: new `buildUpgradeScript()` mirrors the bootstrap-script API. Detaches the slow work (git fetch + bun install + harness restart) into a `nohup` background subshell so the toolbox `process/execute` 60s ceiling never bites. All slow network steps wrapped in the same `retry()` shell function bootstrap uses (3-attempt linear backoff). 20 unit tests including byte-budget regression (`script.length < 5000`).
+- `--reprovision` flag on `anima upgrade` for the heavy container-swap path.
+- `handoffAgentToHarness()` exported helper in `sandbox-provision.ts`: extracted from `runSandboxProvision` Steps 4-7 (poll `/bootstrap/pubkey` → ECIES envelope → `/bootstrap/provision` → `/healthz` Ready). Shared between fresh-cold bootstrap and in-place-restart paths since the wire-level handshake is identical.
+
+### Migration
+
+- No action needed. End-users on `bun add -g @s0nderlabs/anima@0.17.0` get the in-place default automatically. Old behavior is `anima upgrade --reprovision`.
+
 ## [0.16.8] - 2026-05-02
 
 ### Fixed

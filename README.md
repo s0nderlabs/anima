@@ -73,7 +73,7 @@ Parent domain `anima.0g` is registered on SPACE ID on mainnet; `anima init` issu
 - `anima model` — re-pick brain provider/model
 - `anima migrate-keystore` — one-time v0.5 (passphrase) → v0.6 (operator-wallet) keystore upgrade
 - `anima deploy` — Local→Sandbox migration. Decrypts existing keystore via operator wallet, runs Galileo deposit + acknowledge → createSandbox → bootstrap → Option 3 ECIES handoff → publish `agent:endpoint` text record on subname. Operator never plaintexts the privkey on the laptop after handoff.
-- `anima upgrade [--ref vX.Y.Z] [--yes]` — swap the sandbox harness container while preserving identity + memory. Operator unlocks keystore once; old container is deleted, fresh one is provisioned with the same agent privkey. ~60-90s downtime. `agent:endpoint` text record auto-updated.
+- `anima upgrade [--ref vX.Y.Z] [--yes] [--reprovision]` — roll the sandbox harness to a new git ref while preserving identity + memory. Default = in-place: `git fetch + checkout + bun install + harness restart` inside the existing Daytona container (~30-60s downtime, $0). `--reprovision` opts into a fresh-container swap (~2-5 min, ~0.9 0G testnet) for the future when sealed mode is real.
 - `anima init --resume` — pick up a partial init from the last incomplete step
 
 ## Tools the agent can call

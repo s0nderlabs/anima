@@ -91,8 +91,9 @@ async function main(): Promise<void> {
       const refIdx = argv.indexOf('--ref')
       const ref = refIdx >= 0 ? argv[refIdx + 1] : undefined
       const yes = argv.includes('--yes') || argv.includes('-y')
+      const reprovision = argv.includes('--reprovision')
       const { runUpgrade } = await import('./commands/upgrade')
-      await runUpgrade({ ref, yes })
+      await runUpgrade({ ref, yes, reprovision })
       return
     }
     case 'ledger': {
@@ -210,7 +211,7 @@ function printHelp(): void {
       '  anima sync                force flush memory + activity-log to 0G + anchor on chain',
       '  anima migrate-keystore    upgrade v0.5.0 passphrase keystore to v0.6 operator-wallet',
       '  anima deploy              migrate Local agent to 0G Sandbox via Option 3 handoff',
-      '  anima upgrade [--ref vX]  swap sandbox container while preserving identity + memory',
+      '  anima upgrade [--ref vX]  roll harness to new ref in place (flags: --reprovision for fresh container)',
       '  anima inspect [ref]       audit on-chain memory slots (flags: --slot, --tx, --raw, --diff, --json, --full, --out <dir>)',
       '  anima help                show this message',
       '',

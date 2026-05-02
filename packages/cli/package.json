@@ -1,6 +1,6 @@
 {
   "name": "@s0nderlabs/anima",
-  "version": "0.16.8",
+  "version": "0.17.0",
   "type": "module",
   "description": "anima CLI: sovereign agent harness on 0G. Runs `anima init` to mint an iNFT and bring up your agent",
   "license": "MIT",
