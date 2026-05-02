@@ -18,9 +18,14 @@ export { OGComputeBrain, type OGComputeBrainOpts } from './og-compute'
 export {
   openComputeLedger,
   getLedgerBalance,
+  getLedgerDetail,
   depositToLedger,
+  refundFromLedger,
+  retrieveLedgerFunds,
+  closeLedger,
   type OpenLedgerOpts,
   type LedgerStatus,
+  type ProviderSubAccount,
 } from './ledger'
 export {
   BrokerPool,

@@ -95,6 +95,33 @@ async function main(): Promise<void> {
       await runUpgrade({ ref, yes })
       return
     }
+    case 'ledger': {
+      const sub = argv[1]
+      const validSubs = ['balance', 'refund', 'retrieve', 'close'] as const
+      type Sub = (typeof validSubs)[number]
+      if (sub && !validSubs.includes(sub as Sub)) {
+        console.error(
+          `anima ledger: unknown subcommand '${sub}' (expected: ${validSubs.join(' | ')})`,
+        )
+        process.exit(1)
+      }
+      const chosen = (sub ?? 'balance') as Sub
+      const amountIdx = argv.indexOf('--amount')
+      const amount = amountIdx >= 0 ? Number(argv[amountIdx + 1]) : undefined
+      const all = argv.includes('--all')
+      const yes = argv.includes('--yes') || argv.includes('-y')
+      const { runLedger } = await import('./commands/ledger')
+      await runLedger({ sub: chosen, amount, all, yes })
+      return
+    }
+    case 'drain': {
+      const toIdx = argv.indexOf('--to')
+      const to = toIdx >= 0 ? argv[toIdx + 1] : undefined
+      const yes = argv.includes('--yes') || argv.includes('-y')
+      const { runDrain } = await import('./commands/drain')
+      await runDrain({ to, yes })
+      return
+    }
     case 'inspect': {
       const { runInspect, isValidSlot } = await import('./commands/inspect')
       const remaining = argv.slice(1)
@@ -176,6 +203,9 @@ function printHelp(): void {
       '  anima logs                tail the activity log  (flags: --tail N, --agent <id>)',
       '  anima restore <ref>       recover an agent from an iNFT (ref: eip155:16661:0x..:N)',
       '  anima topup               add funds  (flags: --agent N  --compute N)',
+      '  anima ledger [sub]        compute ledger ops  (subs: balance | refund | retrieve | close)',
+      '                            flags: --amount N  --all  --yes',
+      '  anima drain --to <addr>   sweep agent EOA balance to address (default: operator)',
       '  anima model               re-pick the brain model',
       '  anima sync                force flush memory + activity-log to 0G + anchor on chain',
       '  anima migrate-keystore    upgrade v0.5.0 passphrase keystore to v0.6 operator-wallet',

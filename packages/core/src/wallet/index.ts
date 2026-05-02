@@ -14,3 +14,4 @@ export {
   sniffKeystoreVersion,
   type OperatorEncryptedKeystore,
 } from './operator-keystore-crypto'
+export { drainAgentEOA, type DrainAgentResult } from './drain'

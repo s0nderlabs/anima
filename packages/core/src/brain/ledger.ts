@@ -44,16 +44,36 @@ type Broker = Awaited<ReturnType<typeof createZGComputeNetworkBroker>>
  */
 const brokerCache = new Map<string, Broker>()
 
+/**
+ * Test hook. Pass a broker factory to bypass the real SDK + RPC. Each helper
+ * still goes through `makeBroker` with the same cache key shape, so multiple
+ * helper calls in a test share the injected broker.
+ */
+export function setBrokerFactoryForTests(
+  factory: ((network: AnimaNetwork, privkeyHex: Hex) => Promise<Broker>) | null,
+): void {
+  brokerFactory = factory
+  brokerCache.clear()
+}
+
+let brokerFactory: ((network: AnimaNetwork, privkeyHex: Hex) => Promise<Broker>) | null = null
+
 async function makeBroker(network: AnimaNetwork, privkeyHex: Hex): Promise<Broker> {
   const cacheKey = `${network}:${privkeyHex}`
   const hit = brokerCache.get(cacheKey)
   if (hit) return hit
+  const broker = brokerFactory
+    ? await brokerFactory(network, privkeyHex)
+    : await defaultBrokerFactory(network, privkeyHex)
+  brokerCache.set(cacheKey, broker)
+  return broker
+}
+
+async function defaultBrokerFactory(network: AnimaNetwork, privkeyHex: Hex): Promise<Broker> {
   const provider = new JsonRpcProvider(NETWORK_RPC[network])
   const wallet = new Wallet(privkeyHex, provider)
   // biome-ignore lint/suspicious/noExplicitAny: SDK ethers Signer typing mismatch
-  const broker = (await createZGComputeNetworkBroker(wallet as any)) as Broker
-  brokerCache.set(cacheKey, broker)
-  return broker
+  return createZGComputeNetworkBroker(wallet as any)
 }
 
 /**
@@ -131,4 +151,84 @@ export async function depositToLedger(opts: {
 }): Promise<void> {
   const broker = await makeBroker(opts.network, opts.privkeyHex)
   await broker.ledger.depositFund(opts.amount)
+}
+
+export interface ProviderSubAccount {
+  provider: string
+  balance: bigint
+  pendingRefund: bigint
+}
+
+/**
+ * Read the ledger plus per-provider sub-account detail. Each tuple from the
+ * SDK is `[providerAddress, balance, pendingRefund]` in neuron units. `balance`
+ * minus `pendingRefund` is what's still pulling from the main ledger; the rest
+ * is queued to return on the next successful retrieveFund call.
+ */
+export async function getLedgerDetail(opts: {
+  network: AnimaNetwork
+  privkeyHex: Hex
+}): Promise<{
+  availableBalance: bigint
+  totalBalance: bigint
+  inferenceProviders: ProviderSubAccount[]
+} | null> {
+  const broker = await makeBroker(opts.network, opts.privkeyHex)
+  // Independent reads — ledger row + provider sub-accounts. Run in parallel and
+  // tolerate the providers call failing (no providers acked yet on a fresh ledger).
+  const [ledgerRes, providersRes] = await Promise.allSettled([
+    broker.ledger.getLedger(),
+    broker.ledger.getProvidersWithBalance('inference'),
+  ])
+  if (ledgerRes.status === 'rejected') return null
+  const availableBalance = ledgerRes.value.availableBalance ?? 0n
+  const totalBalance = ledgerRes.value.totalBalance ?? 0n
+  const providers = providersRes.status === 'fulfilled' ? providersRes.value : []
+  const inferenceProviders = providers.map(([provider, balance, pendingRefund]) => ({
+    provider,
+    balance,
+    pendingRefund,
+  }))
+  return { availableBalance, totalBalance, inferenceProviders }
+}
+
+/**
+ * Withdraw `amount` 0G from the main ledger account back to the agent EOA.
+ * Caller is responsible for ensuring the funds aren't locked inside provider
+ * sub-accounts (see retrieveLedgerFunds).
+ */
+export async function refundFromLedger(opts: {
+  network: AnimaNetwork
+  privkeyHex: Hex
+  amount: number
+}): Promise<void> {
+  const broker = await makeBroker(opts.network, opts.privkeyHex)
+  await broker.ledger.refund(opts.amount)
+}
+
+/**
+ * Pull funds from inference provider sub-accounts back into the main ledger.
+ * Subject to the contract's lock period; calling once initiates the refund
+ * window, calling a second time after the window expires actually moves the
+ * funds. The SDK returns no value on success.
+ */
+export async function retrieveLedgerFunds(opts: {
+  network: AnimaNetwork
+  privkeyHex: Hex
+}): Promise<void> {
+  const broker = await makeBroker(opts.network, opts.privkeyHex)
+  await broker.ledger.retrieveFund('inference')
+}
+
+/**
+ * Close the ledger entirely. Refunds the remaining main-account balance to
+ * the agent EOA and removes the ledger record. Funds locked inside provider
+ * sub-accounts must be retrieved via retrieveLedgerFunds before deletion.
+ */
+export async function closeLedger(opts: {
+  network: AnimaNetwork
+  privkeyHex: Hex
+}): Promise<void> {
+  const broker = await makeBroker(opts.network, opts.privkeyHex)
+  await broker.ledger.deleteLedger()
 }

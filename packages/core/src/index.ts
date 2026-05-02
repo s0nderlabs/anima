@@ -34,9 +34,14 @@ export {
   DEFAULT_SYSTEM_PROMPT,
   openComputeLedger,
   getLedgerBalance,
+  getLedgerDetail,
   depositToLedger,
+  refundFromLedger,
+  retrieveLedgerFunds,
+  closeLedger,
   type OpenLedgerOpts,
   type LedgerStatus,
+  type ProviderSubAccount,
   BrokerPool,
   VISION_PROVIDER_DEFAULTS,
   type BrokerPoolOpts,
@@ -125,6 +130,8 @@ export {
   decodeKeystoreBytes,
   sniffKeystoreVersion,
   type OperatorEncryptedKeystore,
+  drainAgentEOA,
+  type DrainAgentResult,
 } from './wallet'
 
 export type { AgentIdentity, IdentityProvider } from './identity'

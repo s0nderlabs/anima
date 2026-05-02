@@ -4,6 +4,21 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.6] - 2026-05-02
+
+### Added
+
+- **Fund-recovery CLI for retiring agents.** Two new commands close the gap where a decommissioned agent's compute ledger and EOA balance had no operator-friendly drain path; previously required a custom Bun script.
+  - `anima ledger [balance | refund | retrieve | close]` operates on the agent's 0G Compute ledger. `balance` prints main + per-provider sub-account state including pendingRefund. `retrieve` calls `retrieveFund('inference')` to start the per-provider lock window. `refund [--amount N | --all]` calls `LedgerProcessor.refund` to withdraw from the main account back to the agent EOA (`--all` reads `availableBalance` and refunds the lot). `close --yes` calls `deleteLedger` to fully decommission. Validates that the requested amount fits the available balance before submitting, and points operators at `ledger retrieve` when funds are still locked in provider sub-accounts.
+  - `anima drain --to <addr>` sweeps the agent EOA's native balance to a target address, default operator. Reads live `eth_gasPrice` (with the standard 4 gwei floor), reserves `21000 * gasPrice` for the sweep tx itself, sends `balance - reserve`, and prints the explorer URL. New core helper `drainAgentEOA` plus an extracted pure helper `computeSweepAmount` for unit-testable balance/reserve math.
+- New core exports: `getLedgerDetail`, `refundFromLedger`, `retrieveLedgerFunds`, `closeLedger`, `drainAgentEOA`, plus types `ProviderSubAccount`, `DrainAgentResult`. Test hook `setBrokerFactoryForTests` allows injection of a stub broker to unit-test ledger helpers without RPC.
+- 10 new unit tests: 4 for `computeSweepAmount` (default reserve, below-reserve error, override, error wording) and 6 for the ledger helpers (missing ledger, balance + provider list, getProvidersWithBalance throw tolerance, refund/retrieve/close call shape).
+
+### Verification
+
+- 508 unit tests pass (+10 new); typecheck + lint clean; CLI help lists the new commands; `anima ledger badsub` rejects unknown subcommands cleanly; `anima drain` smoke-prints balance + target before the destructive confirm.
+- End-to-end fund recovery on phantom (mainnet iNFT #7) deferred to live drive after this commit lands.
+
 ## [0.15.5] - 2026-05-02
 
 ### Fixed
@@ -726,6 +741,9 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.15.6]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.6
+[0.15.5]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.5
+[0.15.4]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.4
 [0.15.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.3
 [0.15.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.2
 [0.15.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.1
