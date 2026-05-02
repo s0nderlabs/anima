@@ -14,6 +14,14 @@ describe('buildBootstrapScript', () => {
     ref: 'v0.15.0',
   }
 
+  // Decodes the base64-baked inner subshell out of the outer `bash -c '...'`
+  // wrapper. Most tests assert on the inner script's bash semantics.
+  const decodeInner = (opts: Parameters<typeof buildBootstrapScript>[0] = baseOpts) => {
+    const { script } = buildBootstrapScript(opts)
+    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
+    return Buffer.from(m![1]!, 'base64').toString('utf8')
+  }
+
   test('outer wrapper is `bash -c` with base64 inner; no shell metachars in payload', () => {
     const { script, doneMarkerPath, progressLogPath } = buildBootstrapScript(baseOpts)
     expect(script.startsWith("bash -c '")).toBe(true)
@@ -32,24 +40,18 @@ describe('buildBootstrapScript', () => {
   })
 
   test('inner subshell (base64-decoded) carries apt + bun + git + harness launch', () => {
-    const { script } = buildBootstrapScript(baseOpts)
-    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
-    expect(m).not.toBeNull()
-    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    const inner = decodeInner()
     expect(inner).toContain('sudo -n apt-get update -qq')
     expect(inner).toMatch(/sudo -n apt-get install -y -qq .*chromium/)
     expect(inner).toContain('curl -fsSL https://bun.sh/install')
     expect(inner).toContain('git clone --depth 1 --branch')
     expect(inner).toContain('bun install --frozen-lockfile')
-    // Harness clones to $HOME/anima (daytona user has no /opt write perm).
     expect(inner).toContain('nohup bun "$ANIMA_DIR/packages/harness/bin/anima-harness"')
     expect(inner).toContain(`echo "anima-harness-pid=$HARNESS_PID" > ${BOOTSTRAP_DONE_MARKER}`)
   })
 
   test('frees port 8080 via fuser before harness launch (Daytona snapshot guard)', () => {
-    const { script } = buildBootstrapScript(baseOpts)
-    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
-    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    const inner = decodeInner()
     // Pre-launch + per-attempt port kill (defensive against pre-existing service or zombie bun)
     expect(
       inner.match(/fuser -k 8080\/tcp 2>\/dev\/null \|\| true/g)?.length,
@@ -59,17 +61,13 @@ describe('buildBootstrapScript', () => {
   })
 
   test('honors custom port — port-kill uses the same port', () => {
-    const { script } = buildBootstrapScript({ ...baseOpts, port: 9090 })
-    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
-    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    const inner = decodeInner({ ...baseOpts, port: 9090 })
     expect(inner).toContain('fuser -k 9090/tcp 2>/dev/null || true')
     expect(inner).not.toContain('fuser -k 8080/tcp')
   })
 
   test('harness launch has 3-attempt retry with 10s startup wait (bun cold-start jitter)', () => {
-    const { script } = buildBootstrapScript(baseOpts)
-    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
-    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    const inner = decodeInner()
     expect(inner).toContain('for h_attempt in 1 2 3; do')
     expect(inner).toContain('HARNESS_OK=0')
     expect(inner).toContain('HARNESS_OK=1')
@@ -83,26 +81,55 @@ describe('buildBootstrapScript', () => {
     expect(inner).toContain('echo "harness-died-early" >')
   })
 
-  test('git clone has 3-attempt retry-with-backoff (transient github 429/DNS resilience)', () => {
-    const { script } = buildBootstrapScript(baseOpts)
-    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
-    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
-    expect(inner).toContain('for attempt in 1 2 3; do')
-    expect(inner).toContain('GIT_CLONE_OK=0')
-    expect(inner).toContain('GIT_CLONE_OK=1')
-    expect(inner).toContain('BACKOFF=$((attempt * 5))')
-    expect(inner).toContain('retrying in ${BACKOFF}s')
-    // Workspace dir is wiped between retries so partial clone state can't poison
-    // the next attempt.
-    expect(inner).toMatch(/sleep \$BACKOFF/)
-    // Failure marker still written if all 3 fail.
-    expect(inner).toContain('if [ "$GIT_CLONE_OK" -ne 1 ]; then echo "git-clone-failed" >')
+  test('exposes a generic retry() shell function with 3-attempt linear backoff', () => {
+    const inner = decodeInner()
+    expect(inner).toContain('retry() {')
+    expect(inner).toContain('for n in 1 2 3; do')
+    expect(inner).toContain('"$@" && return 0')
+    expect(inner).toContain('sleep $((n*5))')
+  })
+
+  test('apt update is wrapped in retry() (mirror 5xx / dpkg-lock resilience)', () => {
+    const inner = decodeInner()
+    expect(inner).toMatch(
+      /retry 'apt update' sudo -n apt-get update -qq \|\| \{ echo "apt-update-failed"/,
+    )
+  })
+
+  test('apt install is wrapped in retry() (mirror 5xx / dpkg-lock resilience)', () => {
+    const inner = decodeInner()
+    expect(inner).toMatch(
+      /retry 'apt install' sudo -n apt-get install -y -qq .*\|\| \{ echo "apt-install-failed"/,
+    )
+  })
+
+  test('bun binary install is wrapped in retry() (bun.sh redirect blip resilience)', () => {
+    const inner = decodeInner()
+    expect(inner).toContain('install_bun() { curl -fsSL https://bun.sh/install | bash; }')
+    expect(inner).toMatch(/retry 'bun binary' install_bun \|\| \{ echo "bun-install-failed"/)
+  })
+
+  test('bun deps install is wrapped in retry() (npm registry hiccup resilience)', () => {
+    const inner = decodeInner()
+    expect(inner).toMatch(
+      /retry 'bun deps' bun install --frozen-lockfile \|\| \{ echo "bun-install-failed"/,
+    )
+  })
+
+  test('git clone is wrapped in retry() with workspace cleanup between attempts', () => {
+    const inner = decodeInner()
+    // Helper wraps both rm + git clone so retry runs cleanup on every attempt.
+    // Ref interpolated from baseOpts so a future bump doesn't silently desync.
+    const refRegex = baseOpts.ref.replace(/[.\\/]/g, '\\$&')
+    const helperRegex = new RegExp(
+      `git_clone_one\\(\\) \\{ rm -rf "\\$ANIMA_DIR"; git clone --depth 1 --branch '${refRegex}' .* "\\$ANIMA_DIR"; \\}`,
+    )
+    expect(inner).toMatch(helperRegex)
+    expect(inner).toMatch(/retry 'git clone' git_clone_one \|\| \{ echo "git-clone-failed"/)
   })
 
   test('inner subshell writes fail marker on each step failure', () => {
-    const { script } = buildBootstrapScript(baseOpts)
-    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
-    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    const inner = decodeInner()
     expect(inner).toContain('apt-update-failed')
     expect(inner).toContain('apt-install-failed')
     expect(inner).toContain('bun-install-failed')
@@ -112,40 +139,27 @@ describe('buildBootstrapScript', () => {
   })
 
   test('embeds the requested ref + repo url + sandbox id + operator', () => {
-    const { script } = buildBootstrapScript({ ...baseOpts, repoUrl: 'https://x.test/foo.git' })
-    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
-    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    const inner = decodeInner({ ...baseOpts, repoUrl: 'https://x.test/foo.git' })
     expect(inner).toContain("'https://x.test/foo.git'")
-    expect(inner).toContain("'v0.15.0'")
-    expect(inner).toContain("export SANDBOX_ID='sbx-abc-123'")
-    expect(inner).toContain(
-      "export ANIMA_OPERATOR_ADDRESS='0xC635e6Eb223aE14143E23cEEa9440bC773dc87Ec'",
-    )
+    expect(inner).toContain(`'${baseOpts.ref}'`)
+    expect(inner).toContain(`export SANDBOX_ID='${baseOpts.sandboxId}'`)
+    expect(inner).toContain(`export ANIMA_OPERATOR_ADDRESS='${baseOpts.operatorAddress}'`)
   })
 
   test('honors custom port', () => {
-    const { script } = buildBootstrapScript({ ...baseOpts, port: 9090 })
-    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
-    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    const inner = decodeInner({ ...baseOpts, port: 9090 })
     expect(inner).toContain("export HARNESS_PORT='9090'")
   })
 
   test('apt list defaults include chromium + xvfb + git', () => {
-    const { script } = buildBootstrapScript(baseOpts)
-    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
-    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    const inner = decodeInner()
     expect(inner).toMatch(/sudo -n apt-get install .* chromium/)
     expect(inner).toMatch(/sudo -n apt-get install .* xvfb/)
     expect(inner).toMatch(/sudo -n apt-get install .* git/)
   })
 
   test('extra apt packages are appended and deduped', () => {
-    const { script } = buildBootstrapScript({
-      ...baseOpts,
-      extraAptPackages: ['ffmpeg', 'chromium'],
-    })
-    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
-    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    const inner = decodeInner({ ...baseOpts, extraAptPackages: ['ffmpeg', 'chromium'] })
     const aptLine = inner.split('\n').find(l => l.includes('apt-get install -y -qq'))!
     expect(aptLine).toContain('ffmpeg')
     const chromiumCount = (aptLine.match(/chromium/g) ?? []).length
@@ -153,12 +167,7 @@ describe('buildBootstrapScript', () => {
   })
 
   test('shell-quotes injection-prone fields safely', () => {
-    const { script } = buildBootstrapScript({
-      ...baseOpts,
-      sandboxId: "abc'; rm -rf /; echo '",
-    })
-    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
-    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    const inner = decodeInner({ ...baseOpts, sandboxId: "abc'; rm -rf /; echo '" })
     expect(inner).toContain("export SANDBOX_ID='abc'\\''; rm -rf /; echo '\\'''")
   })
 
@@ -166,10 +175,17 @@ describe('buildBootstrapScript', () => {
     expect(BOOTSTRAP_SUCCESS_MARKER_PREFIX).toBe('anima-harness-pid=')
   })
 
-  test('clones to $HOME/anima (not /opt/anima — daytona user has no sudo for /opt)', () => {
+  test('outer script stays under Daytona request-size ceiling (v0.16.5 was 5340 OK, v0.16.6 was 6136 BROKEN)', () => {
+    // Daytona's toolbox `process/execute` endpoint nginx config returned 400
+    // "Request Header Or Cookie Too Large" once the bash payload crossed
+    // ~6000 bytes. v0.16.5 at 5340 was the last known-good size; we cap
+    // generously below that to absorb future field/extraApt growth.
     const { script } = buildBootstrapScript(baseOpts)
-    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
-    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    expect(script.length).toBeLessThan(5000)
+  })
+
+  test('clones to $HOME/anima (not /opt/anima — daytona user has no sudo for /opt)', () => {
+    const inner = decodeInner()
     expect(inner).toContain('ANIMA_DIR="$HOME/anima"')
     expect(inner).not.toContain('/opt/anima')
     expect(inner).toContain('rm -rf "$ANIMA_DIR"')

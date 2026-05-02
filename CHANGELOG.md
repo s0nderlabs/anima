@@ -4,6 +4,17 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.8] - 2026-05-02
+
+### Fixed
+
+- **Bootstrap retry coverage closes last 2 transient classes**: `apt-get update`, `apt-get install`, `curl bun.sh/install`, and `bun install --frozen-lockfile` are now wrapped in a generic `retry()` shell function with 3-attempt linear backoff (5s, 10s). The existing `git clone` inline retry (v0.16.4) was refactored to use the same function via a `git_clone_one()` helper that bundles the workspace-wipe with the clone so cleanup runs every attempt. Closes the `apt-install-failed` + `bun-install-failed` transient classes seen during enigma upgrade attempts on May 2 2026, the 2 remaining uncovered Daytona transients after v0.16.4-v0.16.6 shipped retries for git-clone, harness cold-start, and port-8080.
+- **Byte-budget regression test**: outer script size now asserted `< 5000` bytes in unit tests so any future field/comment/extraApt growth that risks Daytona's request-size ceiling fails CI before it ships (the v0.16.5 → v0.16.6 → v0.16.7 saga lesson: 5340 worked, 6136 broke). v0.16.8 outer script measures 3880 bytes (1460-byte headroom).
+
+### Changed
+
+- Stripped the harness-launch comment block (rationale lives in memory files now per the v0.16.7 lesson). Net script size dropped 4308 → 3880 bytes despite adding 4 retry wrappers; the generic `retry()` function is shorter than the inline retry loop it replaced.
+
 ## [0.16.7] - 2026-05-02
 
 ### Fixed
@@ -802,6 +813,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.16.8]: https://github.com/s0nderlabs/anima/releases/tag/v0.16.8
 [0.16.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.16.0
 [0.15.6]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.6
 [0.15.5]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.5

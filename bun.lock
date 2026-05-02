@@ -24,7 +24,7 @@
     },
     "packages/cli": {
       "name": "@s0nderlabs/anima",
-      "version": "0.16.7",
+      "version": "0.16.8",
       "bin": {
         "anima": "./bin/anima",
       },
@@ -48,7 +48,7 @@
     },
     "packages/core": {
       "name": "@s0nderlabs/anima-core",
-      "version": "0.16.7",
+      "version": "0.16.8",
       "dependencies": {
         "@0gfoundation/0g-ts-sdk": "1.2.6",
         "@0glabs/0g-serving-broker": "^0.7.5",
@@ -67,7 +67,7 @@
     },
     "packages/harness": {
       "name": "@s0nderlabs/anima-harness",
-      "version": "0.16.7",
+      "version": "0.16.8",
       "bin": {
         "anima-harness": "./bin/anima-harness",
       },
@@ -82,7 +82,7 @@
     },
     "packages/plugin-comms": {
       "name": "@s0nderlabs/anima-plugin-comms",
-      "version": "0.16.7",
+      "version": "0.16.8",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "eth-crypto": "^4.0.0",
@@ -92,7 +92,7 @@
     },
     "packages/plugin-onchain": {
       "name": "@s0nderlabs/anima-plugin-onchain",
-      "version": "0.16.7",
+      "version": "0.16.8",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "viem": "^2.21.55",
@@ -101,7 +101,7 @@
     },
     "packages/plugin-system": {
       "name": "@s0nderlabs/anima-plugin-system",
-      "version": "0.16.7",
+      "version": "0.16.8",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "zod": "^3.24.1",
