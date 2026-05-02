@@ -4,6 +4,22 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.4] - 2026-05-02
+
+### Added
+
+- **Phase 11.5 boot-time memory restore from 0G Storage.** New `packages/harness/src/memory-restore.ts` runs in `buildAnimaRuntime` between memory-dir creation and `brain.init`: pulls all anchored `IntelligentData` slots (`memory-index`, `identity`, `persona`, `activity-log`) from the iNFT contract, downloads each blob via `downloadBlobByRoot`, decrypts with `deriveMemoryKey(agentPrivkey)`, and writes back to disk. Closes the v0.15.0-era gap where every fresh container boot saw an empty memory dir even though prior sessions had anchored content via `MemorySyncManager.flushTurn` and `iNFT.updateSlots`. Per-slot best-effort: missing blobs / decrypt errors / RPC failures log a warning but never block boot. Local non-empty files always win, protecting writes that haven't flushed to chain yet (e.g. supervisord-restart between flush and tx-confirm). Slots run in parallel — saves 9-15s on the indexer-degraded path with 4 restore targets.
+
+### Fixed
+
+- **`downloadBlobByRoot` / `downloadBlobViaDiscoveredNodes` had no per-fetch timeouts** — a single hung TCP connection in the SDK indexer call, the `indexer_getShardedNodes` RPC, the parallel `zgs_getFileInfo` probes, or the serial `zgs_downloadSegmentByTxSeq` candidate-walk could pin harness boot indefinitely. Added wall-clock deadlines (SDK 30s, node-list 10s, per-node probe 5s, segment download 30s) via `AbortSignal.timeout` on every `fetch`, plus `Promise.race` + `clearTimeout` around the SDK call (no AbortSignal support upstream). Without this, v0.15.4's restore path would amplify any indexer issue into "harness never reports Ready". Surfaced by /simplify efficiency-review agent during v0.15.4 ship.
+
+### Verification
+
+- 493 unit tests pass (+7 new for `memory-restore`); 124 forge tests pass; typecheck + lint clean; 6/6 CLI smoke probes pass.
+- Live verification deferred to post-tag drive on enigma via `anima upgrade --version v0.15.4`. The restore path activates on the new container's first boot, so the deploy itself exercises both the v0.15.4 restore feature AND the v0.15.3 stableStringify-on-upgrade fix end-to-end (the upgrade flow itself was the unfixed bug last time).
+- Pre-existing `as any` lint flags in `packages/plugin-comms/src/pubkey-resolver.test.ts` (7 sites) cleaned up to `as unknown as PublicClient` so the lint gate is fully green.
+
 ## [0.15.3] - 2026-05-02
 
 ### Fixed

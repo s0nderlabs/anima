@@ -22,16 +22,40 @@ export const INDEXER_URL: Record<AnimaNetwork, string> = {
  * directly. Anyone holding the root hash can fetch their data even when the
  * indexer is degraded.
  */
+/**
+ * Per-fetch timeouts protect anima boot (harness restoreMemoryFromChain)
+ * from a hung 0G Storage indexer or wedged storage node. Without these, a
+ * single stuck TCP connection blocks `Ready` indefinitely. Tuned for the
+ * indexer-degraded path where probes parallelize but segments serial-walk.
+ */
+const SDK_INDEXER_TIMEOUT_MS = 30_000
+const NODE_LIST_TIMEOUT_MS = 10_000
+const NODE_PROBE_TIMEOUT_MS = 5_000
+const SEGMENT_DOWNLOAD_TIMEOUT_MS = 30_000
+
 export async function downloadBlobByRoot(
   network: AnimaNetwork,
   rootHash: string,
 ): Promise<Uint8Array | null> {
   const indexer = new Indexer(INDEXER_URL[network])
+  let timer: ReturnType<typeof setTimeout> | undefined
   try {
-    const [blob, err] = await indexer.downloadToBlob(rootHash, { proof: false })
+    // Race the SDK call (which has opaque internal timeouts) against a
+    // wall-clock deadline so a wedged indexer can't pin boot. The finally
+    // clears the timer on the success path so we don't leak a 30s pending
+    // timeout per successful download.
+    const sdkRes = await Promise.race([
+      indexer.downloadToBlob(rootHash, { proof: false }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('indexer-sdk-timeout')), SDK_INDEXER_TIMEOUT_MS)
+      }),
+    ])
+    const [blob, err] = sdkRes as Awaited<ReturnType<typeof indexer.downloadToBlob>>
     if (!err && blob) return new Uint8Array(await blob.arrayBuffer())
   } catch {
     // Fall through to discovered-nodes path.
+  } finally {
+    if (timer) clearTimeout(timer)
   }
   return await downloadBlobViaDiscoveredNodes(INDEXER_URL[network], rootHash)
 }
@@ -59,6 +83,7 @@ export async function downloadBlobViaDiscoveredNodes(
       params: [],
       id: 1,
     }),
+    signal: AbortSignal.timeout(NODE_LIST_TIMEOUT_MS),
   }).catch(() => null)
   if (!nodesResp || !nodesResp.ok) return null
   const idx = (await nodesResp.json().catch(() => null)) as {
@@ -80,6 +105,7 @@ export async function downloadBlobViaDiscoveredNodes(
           params: [rootHash, false],
           id: 1,
         }),
+        signal: AbortSignal.timeout(NODE_PROBE_TIMEOUT_MS),
       })
       const j = (await r.json()) as { result?: FileInfo }
       const info = j.result
@@ -107,6 +133,7 @@ export async function downloadBlobViaDiscoveredNodes(
           params: [cand.txSeq, 0, chunkCount],
           id: 1,
         }),
+        signal: AbortSignal.timeout(SEGMENT_DOWNLOAD_TIMEOUT_MS),
       })
       const dl = (await r.json()) as { result?: string }
       if (!dl.result) continue

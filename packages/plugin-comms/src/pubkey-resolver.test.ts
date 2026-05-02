@@ -30,7 +30,7 @@ describe('PubkeyResolver: input format', () => {
   it('rejects empty input', async () => {
     const dir = tempDir()
     const r = new PubkeyResolver({
-      publicClient: {} as any,
+      publicClient: {} as unknown as PublicClient,
       agentDir: dir,
       sann: fakeSann({}),
     })
@@ -41,7 +41,7 @@ describe('PubkeyResolver: input format', () => {
   it('rejects raw 0x EOA with directive', async () => {
     const dir = tempDir()
     const r = new PubkeyResolver({
-      publicClient: {} as any,
+      publicClient: {} as unknown as PublicClient,
       agentDir: dir,
       sann: fakeSann({}),
     })
@@ -52,7 +52,7 @@ describe('PubkeyResolver: input format', () => {
   it('rejects unknown formats', async () => {
     const dir = tempDir()
     const r = new PubkeyResolver({
-      publicClient: {} as any,
+      publicClient: {} as unknown as PublicClient,
       agentDir: dir,
       sann: fakeSann({}),
     })
@@ -63,7 +63,7 @@ describe('PubkeyResolver: input format', () => {
   it('rejects non-anima .0g names', async () => {
     const dir = tempDir()
     const r = new PubkeyResolver({
-      publicClient: {} as any,
+      publicClient: {} as unknown as PublicClient,
       agentDir: dir,
       sann: fakeSann({}),
     })
@@ -79,7 +79,7 @@ describe('PubkeyResolver: subname text records', () => {
     const node = subnameNode('alice')
     const pubkey = derivePubkeyHex(ALICE_PRIV)
     const r = new PubkeyResolver({
-      publicClient: {} as any,
+      publicClient: {} as unknown as PublicClient,
       agentDir: dir,
       sann: fakeSann({ [node.toLowerCase()]: { address: ALICE_ADDR, pubkey } }),
     })
@@ -97,7 +97,7 @@ describe('PubkeyResolver: subname text records', () => {
     const node = subnameNode('lonely')
     const pubkey = derivePubkeyHex(ALICE_PRIV)
     const r = new PubkeyResolver({
-      publicClient: {} as any,
+      publicClient: {} as unknown as PublicClient,
       agentDir: dir,
       sann: fakeSann({ [node.toLowerCase()]: { pubkey } }),
     })
@@ -110,7 +110,7 @@ describe('PubkeyResolver: subname text records', () => {
     const { subnameNode } = require('@s0nderlabs/anima-core')
     const node = subnameNode('legacy')
     const r = new PubkeyResolver({
-      publicClient: {} as any,
+      publicClient: {} as unknown as PublicClient,
       agentDir: dir,
       sann: fakeSann({ [node.toLowerCase()]: { address: ALICE_ADDR } }),
     })

@@ -45,6 +45,7 @@ import { ONCHAIN_GUIDANCE, type OnchainRuntimeContext } from '@s0nderlabs/anima-
 import type { Address, Hex } from 'viem'
 import type { ApprovalRelay } from './approval-relay'
 import type { EventHub } from './events'
+import { restoreMemoryFromChain } from './memory-restore'
 import type { RuntimeConfig } from './runtime'
 
 export interface BuildRuntimeOpts {
@@ -209,6 +210,31 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
   await mkdir(memoryDir, { recursive: true })
   await mkdir(`${memoryDir}/agent`, { recursive: true })
   await mkdir(`${memoryDir}/user`, { recursive: true })
+
+  // Phase 11.5: rehydrate anchored memory + activity-log from 0G Storage
+  // before the brain reads its frozen prefix. Per-slot best-effort; missing
+  // or failed slots log a warning but never block boot. Local non-empty
+  // files always win, protecting writes that haven't flushed to chain yet.
+  const restoreOutcomes = await restoreMemoryFromChain({
+    network,
+    contractAddress,
+    tokenId,
+    agentPrivkey,
+    agentDir,
+  })
+  for (const o of restoreOutcomes) {
+    if (o.status === 'restored') {
+      events.publish('log', {
+        level: 'info',
+        message: `memory-restored: ${o.slot} → ${o.path} (${o.bytes} bytes)`,
+      })
+    } else if (o.status === 'failed') {
+      events.publish('log', {
+        level: 'warn',
+        message: `memory-restore-failed: ${o.slot} (${o.reason})`,
+      })
+    }
+  }
 
   // 1. ToolRegistry + memory tools
   const tools = new ToolRegistry(config.tools as Record<string, boolean> | undefined)
