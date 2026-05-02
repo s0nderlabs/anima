@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.4] - 2026-05-02
+
+### Fixed
+
+- **Sandbox bootstrap resilience**: `git clone` inside the harness bootstrap script now retries up to 3 times with 5s/10s exponential backoff before declaring `git-clone-failed`. Earlier versions failed-fast on the first transient (github.com rate-limit on shared Daytona IPs, or container DNS not yet warm). Discovered May 2 2026 during wraith iNFT #8 npm-distributed full-flow validation: first `anima init` sandbox attempt failed at git-clone, `anima deploy` retry succeeded ~2 min later. With this fix, the same transient is invisibly absorbed by the inner retry loop. Workspace dir is wiped between attempts so partial-clone state can't poison the next try.
+
 ## [0.16.3] - 2026-05-02
 
 ### Fixed

@@ -1,6 +1,6 @@
 {
   "name": "@s0nderlabs/anima-harness",
-  "version": "0.16.3",
+  "version": "0.16.4",
   "type": "module",
   "description": "Sandbox-resident harness daemon: bootstrap keypair, Option 3 ECIES handoff, HTTP control plane, embeds full anima runtime",
   "license": "MIT",

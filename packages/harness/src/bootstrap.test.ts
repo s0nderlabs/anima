@@ -46,6 +46,22 @@ describe('buildBootstrapScript', () => {
     expect(inner).toContain(`echo "anima-harness-pid=$HARNESS_PID" > ${BOOTSTRAP_DONE_MARKER}`)
   })
 
+  test('git clone has 3-attempt retry-with-backoff (transient github 429/DNS resilience)', () => {
+    const { script } = buildBootstrapScript(baseOpts)
+    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
+    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    expect(inner).toContain('for attempt in 1 2 3; do')
+    expect(inner).toContain('GIT_CLONE_OK=0')
+    expect(inner).toContain('GIT_CLONE_OK=1')
+    expect(inner).toContain('BACKOFF=$((attempt * 5))')
+    expect(inner).toContain('retrying in ${BACKOFF}s')
+    // Workspace dir is wiped between retries so partial clone state can't poison
+    // the next attempt.
+    expect(inner).toMatch(/sleep \$BACKOFF/)
+    // Failure marker still written if all 3 fail.
+    expect(inner).toContain('if [ "$GIT_CLONE_OK" -ne 1 ]; then echo "git-clone-failed" >')
+  })
+
   test('inner subshell writes fail marker on each step failure', () => {
     const { script } = buildBootstrapScript(baseOpts)
     const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
