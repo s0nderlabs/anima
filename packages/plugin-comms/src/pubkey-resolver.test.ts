@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { derivePubkeyHex } from '@s0nderlabs/anima-core'
-import type { Address, Hex } from 'viem'
+import type { Address, Hex, PublicClient } from 'viem'
 import { PubkeyResolver } from './pubkey-resolver'
 
 const ALICE_PRIV = '0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d'
@@ -130,7 +130,11 @@ describe('PubkeyResolver: subname text records', () => {
         return _key === 'address' ? ALICE_ADDR : pubkey
       },
     }
-    const r = new PubkeyResolver({ publicClient: {} as any, agentDir: dir, sann })
+    const r = new PubkeyResolver({
+      publicClient: {} as unknown as PublicClient,
+      agentDir: dir,
+      sann,
+    })
     const a = await r.resolve('cached.anima.0g')
     const b = await r.resolve('cached.anima.0g')
     expect(a.source).toBe('subname-text-record')
@@ -152,7 +156,11 @@ describe('PubkeyResolver: subname text records', () => {
         return _key === 'address' ? ALICE_ADDR : pubkey
       },
     }
-    const r = new PubkeyResolver({ publicClient: {} as any, agentDir: dir, sann })
+    const r = new PubkeyResolver({
+      publicClient: {} as unknown as PublicClient,
+      agentDir: dir,
+      sann,
+    })
     await r.resolve('drop.anima.0g')
     r.invalidate('drop.anima.0g')
     await r.resolve('drop.anima.0g')

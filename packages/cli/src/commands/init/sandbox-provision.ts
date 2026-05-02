@@ -3,6 +3,7 @@ import {
   type AnimaPlugin,
   NETWORK_CHAIN_ID,
   type OperatorSigner,
+  type PermissionMode,
   SANDBOX_PROVIDER_GALILEO,
   SANDBOX_PROVIDER_URL_GALILEO,
   SANDBOX_TEE_SIGNER_GALILEO,
@@ -280,7 +281,7 @@ export async function runSandboxProvision(
       agent: opts.agentAddress,
     },
     plugins: opts.plugins ?? ['system', 'comms', 'onchain'],
-    permissions: 'off' as const,
+    permissions: pickPermissionMode(),
     promptAppend: opts.promptAppend,
   }
   await sandboxClient.provision(
@@ -375,6 +376,13 @@ function sleep(ms: number): Promise<void> {
 function formatOg(wei: bigint): string {
   const og = Number(wei) / 1e18
   return og.toFixed(4)
+}
+
+/** ANIMA_PERMISSIONS env override; unknown / unset → `off` (autonomous default). */
+export function pickPermissionMode(): PermissionMode {
+  const raw = process.env.ANIMA_PERMISSIONS?.trim().toLowerCase()
+  if (raw === 'prompt' || raw === 'strict' || raw === 'off') return raw
+  return 'off'
 }
 
 /**

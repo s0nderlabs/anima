@@ -112,4 +112,13 @@ describe('buildBootstrapScript', () => {
   test('exposes BOOTSTRAP_SUCCESS_MARKER_PREFIX for callers that grep done file', () => {
     expect(BOOTSTRAP_SUCCESS_MARKER_PREFIX).toBe('anima-harness-pid=')
   })
+
+  test('clones to $HOME/anima (not /opt/anima — daytona user has no sudo for /opt)', () => {
+    const { script } = buildBootstrapScript(baseOpts)
+    const m = script.match(/echo ([A-Za-z0-9+/=]+) \| base64 -d/)
+    const inner = Buffer.from(m![1]!, 'base64').toString('utf8')
+    expect(inner).toContain('ANIMA_DIR="$HOME/anima"')
+    expect(inner).not.toContain('/opt/anima')
+    expect(inner).toContain('rm -rf "$ANIMA_DIR"')
+  })
 })

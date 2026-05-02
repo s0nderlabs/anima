@@ -4,6 +4,62 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.2] - 2026-05-02
+
+### Fixed
+
+- **Shell-class tools (`shell.run`, `code.execute`, `shell.process_*`) failed in 0G Sandbox containers with `posix_spawn '/bin/sh': ENOENT`-style errors.** Root cause traced via live diagnostic against enigma's container (Galileo, sandbox `86e3f5f3-...`): bun + node spawn worked fine against `/bin/sh`, `date`, `/usr/bin/date`, plus PATH lookups. Real cause was `packages/harness/src/build-runtime.ts:204` defaulting `workspaceRoot` (the cwd passed to `child_process.spawn`) to `/opt/anima` — a path that doesn't exist because the bootstrap script clones to `$HOME/anima` (= `/home/daytona/anima`), since the Daytona container runs as the unprivileged `daytona` user with no sudo for `/opt/`. When `options.cwd` doesn't exist, posix_spawn fails with ENOENT and the kernel attributes the error to argv0, not the missing cwd. Fix: default `workspaceRoot` to `process.cwd()`, matching local-mode `chat.tsx`. The bootstrap script does `cd "$ANIMA_DIR"` before launching the harness, so `process.cwd()` already points at the cloned repo.
+
+### Added
+
+- **`ANIMA_PERMISSIONS` env override.** New `pickPermissionMode()` helper in `packages/cli/src/commands/init/sandbox-provision.ts` reads the env var (case-insensitive, trimmed) and returns one of `'off' | 'prompt' | 'strict'` (canonical `PermissionMode` from `@s0nderlabs/anima-core`). Unknown / unset values fall back to `'off'` (autonomous default). Operators can now drive the y/s/n approval-modal SSE bridge against a sandbox-deployed agent without editing source. Used by both `anima init` and `anima upgrade` since both call `runSandboxProvision`.
+
+### Verification
+
+- 485 unit tests + 124 forge tests + 3 new `pickPermissionMode` tests pass; typecheck + lint clean.
+- `bootstrap.test.ts` adds an assertion pinning `ANIMA_DIR="$HOME/anima"` (not `/opt/anima`) plus `rm -rf "$ANIMA_DIR"` (always-clone semantic).
+- Stale `/opt/anima` doc-comments in `bootstrap.ts:22` removed.
+- Live tmux drive on enigma deferred to post-tag (bootstrap clones from a github ref); will be appended in v0.15.2 ship-doc memory after `anima upgrade --version v0.15.2` deploys to the running enigma container.
+
+## [0.15.1] - 2026-05-02
+
+### Fixed
+
+- **Eleven bootstrap + retry + auth fixes from the live `enigma` deploy on 0G Sandbox (Galileo).**
+  - Daytona's `process/execute` returns `{exitCode, result}`, not `{stdout, stderr}`. `ToolboxExecResponse` now types both shapes, `extractExecOutput()` helper normalizes, all callers in `sandbox-provision.ts` + `logs.ts` use it.
+  - 60s exec cap blew up cold-start bootstrap (apt + bun + chromium ≈ 3-5 min). Outer script now `bash -c '<base64-decoded inner | nohup &>'` returns in <2s; caller polls `/tmp/anima-bootstrap-{done,failed}` markers.
+  - Daytona splits commands argv-style (no shell). All multi-step ops wrapped in `bash -c`; inner subshell base64-encoded to avoid quote-escape soup.
+  - Bash `&` followed by `&&` was a syntax error; restructured to `... & echo bootstrap-launched`.
+  - Container runs as unprivileged `daytona` user. Bootstrap now `sudo -n apt-get`, clones to `$HOME/anima` (not `/opt/anima`), logs to `$HOME/anima-logs/`.
+  - 504 Gateway Timeout from Daytona upstream: `SandboxProviderClient.#fetchWithRetry` retries 502/503/504 × 3 with linear backoff; non-idempotent `createSandbox` retries safely because 504 means upstream never received it.
+  - `401 nonce already used` on retry: retry helper now mints FRESH signed-request envelope (fresh nonce + expiry) per attempt via `buildInit()` closure.
+  - `401 request expired` after slow retries: bumped default expiry 60s → 300s in `og-sandbox/auth.ts`.
+  - `Transaction receipt not found` on Galileo deposit + ack: wrapped in `waitForReceiptResilient(60×2s)`.
+  - Bootstrap marker false-positive triggered by `bash setlocale` warning prefix: parser now matches `BOOTSTRAP_FAIL_KEYWORDS` substrings (single source of truth, exported from `@s0nderlabs/anima-harness`).
+  - Coalesced bootstrap poll: 3 separate exec calls per tick → 1 with sentinels (`echo --F--; cat fail; echo --D--; cat done; echo --P--; tail`). Cuts ~280 HTTP+sign roundtrips → ~120 on a 10-min bootstrap.
+- Repository made public (was previously private; bootstrap clones anonymously now, no PAT support needed).
+
+### Verification
+
+`enigma` mainnet iNFT #6 deployed live to Galileo Sandbox `86e3f5f3-...`. Three tools verified end-to-end via tmux: `chain.balance`, `memory.save` (+ per-turn 0G Storage flush + iNFT updateSlots anchor), `agent.message` A2A to specter (tx `0xddc7b...37aac8bf`). Endpoint published as `agent:endpoint` text record on `enigma.anima.0g`.
+
+## [0.15.0] - 2026-05-01
+
+### Added
+
+- **Phase 11: 0G Sandbox deployment.** New `@s0nderlabs/anima-harness` package implements the harness daemon that runs inside an attested TDX TEE container on 0G Sandbox (Galileo testnet). State machine `Bootstrapping → Provisioned → Ready → ShuttingDown`; EIP-191 signed `/chat`, `/sync`, `/approval/:id/respond` endpoints; SSE `/events` with last-event-id reconnect; `ApprovalRelay` bridges harness PermissionService to operator's TUI modal.
+- **Laptop CLI sandbox client** (`packages/cli/src/sandbox/client.ts`): wraps the harness HTTP API with operator-signed envelopes; consumed by `chat-sandbox.tsx` (sandbox-mode chat loop), `status`, `logs`, `sync`, `deploy`, `upgrade`.
+- **0G Sandbox provider HTTP client** (`packages/core/src/og-sandbox/`): EIP-191 signed-header auth + retry; `SandboxProviderClient.createSandbox/getSandbox/listSandboxes/deleteSandbox/execInToolbox`. `SandboxSettlementClient` for the Galileo settlement contract `0xd7e0CD227e602FedBb93c36B1F5bf415398508a4`.
+- **`anima init --target sandbox`** wizard branch: deposits 1 0G to provider, acknowledges TEE signer, creates sandbox via `daytonaio/sandbox:0.5.0-slim`, runs bootstrap, mints iNFT on mainnet, funds agent EOA, runs Option 3 ECIES handoff to harness, claims subname, publishes endpoint URL as `agent:endpoint` text record.
+- **`anima deploy`** command rewritten from stub to live Local→Sandbox migration via Option 3 (operator decrypts existing keystore, agent privkey re-handed to fresh harness).
+- **`anima upgrade`** new command: deletes old sandbox + creates fresh container at the latest version, preserves agent identity + memory via Option 3 re-handoff. Updates `agent:endpoint` text record. ~60-90s downtime per upgrade.
+- **Sandbox-mode `status` / `logs` / `sync` proxies**: status hits `/healthz` + provider's `getSandbox`; logs tail `~/anima-logs/anima-harness.log` via toolbox exec; sync POSTs `/sync` to the harness which calls `MemorySyncManager.flushAll`.
+- **`RealRuntime`** in harness: builds full anima stack inside the container (OGComputeBrain + ToolRegistry + plugins + listeners + MemorySyncManager). Mirrors local-mode chat.tsx setup minus TUI; tool indicators stream via EventHub `tool-call-start/end` SSE events.
+
+### Verification
+
+`enigma` agent: mainnet iNFT #6 (mint tx `0x92233329...`), agent EOA `0xd56b...9683`, subname `enigma.anima.0g`, harness running in 0G Sandbox TDX TEE on Galileo, operator a thin client. Architecture verified end-to-end via tmux drive: laptop TUI → POST /chat (signed) → harness in TEE → brain.infer (0G Compute mainnet) → tools → SSE back to TUI.
+
 ## [0.14.1] - 2026-05-01
 
 ### Fixed
@@ -626,6 +682,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.15.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.2
 [0.15.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.1
 [0.15.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.0
 [0.14.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.14.1

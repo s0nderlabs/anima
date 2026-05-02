@@ -61,8 +61,12 @@ export interface BuildRuntimeOpts {
    */
   configPath?: string
   /**
-   * Optional: harness root for source-relative skills/MCP scans. Default
-   * `/opt/anima` (where bootstrap.ts unpacks the repo).
+   * Optional: workspace cwd for shell.run / code.execute / shell.process_*
+   * plus the cwd field exposed to the brain via envInfo. Default
+   * `process.cwd()`, matching local-mode chat.tsx. The bootstrap script does
+   * `cd "$ANIMA_DIR"` (= `$HOME/anima` on Daytona) before launching the
+   * harness, so process.cwd() already points at the cloned repo. Override
+   * only for tests or a non-standard layout.
    */
   workspaceRoot?: string
 }
@@ -200,7 +204,7 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
   const memoryIndexPath = `${agentDir}/memory/MEMORY.md`
   const activityLogPath = `${agentDir}/activity.jsonl`
   const configPath = opts.configPath ?? `${agentDir}/.config-handle.ts`
-  const workspaceRoot = opts.workspaceRoot ?? '/opt/anima'
+  const workspaceRoot = opts.workspaceRoot ?? process.cwd()
 
   await mkdir(memoryDir, { recursive: true })
   await mkdir(`${memoryDir}/agent`, { recursive: true })

@@ -19,8 +19,10 @@
  * Robustness rules:
  *  - All variables shell-quote-escaped to defeat injection from operator
  *    address or sandbox id (validated upstream, defense-in-depth).
- *  - Idempotent: re-running the script over an existing /opt/anima checkout
- *    just fetches + checkouts the new ref without re-cloning from scratch.
+ *  - Always-clone: the inner script `rm -rf "$ANIMA_DIR"` then `git clone`
+ *    fresh. Daytona occasionally re-uses post-delete volumes whose stale
+ *    git credential helpers break re-fetch, so we never trust an existing
+ *    checkout. Cost is one extra clone per bootstrap (~5s).
  */
 
 export interface BuildBootstrapScriptOpts {
