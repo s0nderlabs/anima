@@ -4,6 +4,33 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-05-02
+
+### Added
+
+- **First npm publish.** All 6 workspace packages are now published to npm under the `@s0nderlabs` scope. End user install path is now:
+  ```bash
+  bun add -g @s0nderlabs/anima
+  anima init
+  ```
+  Packages: [`@s0nderlabs/anima`](https://www.npmjs.com/package/@s0nderlabs/anima) (CLI binary, was `@s0nderlabs/anima-cli`), [`@s0nderlabs/anima-core`](https://www.npmjs.com/package/@s0nderlabs/anima-core), [`@s0nderlabs/anima-harness`](https://www.npmjs.com/package/@s0nderlabs/anima-harness), [`@s0nderlabs/anima-plugin-comms`](https://www.npmjs.com/package/@s0nderlabs/anima-plugin-comms), [`@s0nderlabs/anima-plugin-onchain`](https://www.npmjs.com/package/@s0nderlabs/anima-plugin-onchain), [`@s0nderlabs/anima-plugin-system`](https://www.npmjs.com/package/@s0nderlabs/anima-plugin-system).
+- **Per-package metadata polish**: each package gets `description`, `license: "MIT"`, `repository`, `homepage`, `bugs.url`, `keywords`, `publishConfig: { access: "public" }`, `engines: { bun: ">=1.1" }`, `files: ["src", "bin", "README.md"]`, and a per-package `README.md`.
+- **`.npmignore` per package** excluding `*.test.ts`, `*.test.tsx`, `__tests__/`, `*.tsbuildinfo`, `node_modules` to keep tarballs small.
+- **`@s0nderlabs/anima-harness` added to `tsconfig.json` references** (was missing; latent bug).
+- **`changesets` `fixed` group**: all 6 packages are version-locked. Single `bun changeset version` bumps them all together.
+- **`.github/workflows/release.yml`**: tag-triggered (`v*`) workflow that runs typecheck + lint + tests + forge then publishes each package to npm via `bun publish --access=public` in topological order, then creates a GitHub release with auto-generated notes.
+
+### Changed
+
+- **CLI package renamed** from `@s0nderlabs/anima-cli` → `@s0nderlabs/anima` (shorter install string while staying scoped). The bin name `anima` is unchanged.
+- **Runtime requirement documented**: anima requires `bun >= 1.1`. Node-only consumers are out of scope until a Node-compatible build pipeline is added.
+
+### Verification
+
+- `bun typecheck`, `bun lint`, `bun test --timeout 30000 packages/*/src` — all green.
+- `npm view @s0nderlabs/anima version` returns `0.16.0` (and same for the 5 other packages).
+- Clean tempdir: `bun add @s0nderlabs/anima` followed by `node_modules/.bin/anima help` prints the help screen without error.
+
 ## [0.15.6] - 2026-05-02
 
 ### Added
@@ -741,6 +768,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.16.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.16.0
 [0.15.6]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.6
 [0.15.5]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.5
 [0.15.4]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.4

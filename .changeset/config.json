@@ -2,7 +2,16 @@
   "$schema": "https://unpkg.com/@changesets/config@3.0.0/schema.json",
   "changelog": "@changesets/cli/changelog",
   "commit": false,
-  "fixed": [],
+  "fixed": [
+    [
+      "@s0nderlabs/anima",
+      "@s0nderlabs/anima-core",
+      "@s0nderlabs/anima-harness",
+      "@s0nderlabs/anima-plugin-comms",
+      "@s0nderlabs/anima-plugin-onchain",
+      "@s0nderlabs/anima-plugin-system"
+    ]
+  ],
   "linked": [],
   "access": "public",
   "baseBranch": "main",

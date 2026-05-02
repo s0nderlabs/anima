@@ -2,6 +2,17 @@
 
 First fully on-chain sovereign agent harness on 0G.
 
+## Install
+
+```bash
+bun add -g @s0nderlabs/anima
+anima init
+```
+
+Requires [bun](https://bun.sh) ≥ 1.1. The wizard mints your iNFT, opens a 0G Compute ledger, and brings up the agent. After that, just type `anima` to chat. See [Commands](#commands) below for the full surface.
+
+For development from source, see [Development](#development).
+
 ## What it is
 
 Anima is a CLI-hosted agent harness where the agent's identity, memory, reasoning, and economic life all live on 0G's decentralized infrastructure. Operator runs `anima init` once. After that, the agent persists on chain: close the laptop, walk away, the agent survives. Any operator machine can re-attach via the iNFT.
@@ -24,7 +35,7 @@ Six-layer stack, each layer anchored to a 0G primitive:
 ```
 packages/
 ├── core                       @s0nderlabs/anima-core            always-on infra
-├── cli                        @s0nderlabs/anima-cli             TUI binary
+├── cli                        @s0nderlabs/anima                 TUI binary
 ├── plugin-onchain             @s0nderlabs/anima-plugin-onchain  wallet + chain ops
 ├── plugin-comms               @s0nderlabs/anima-plugin-comms    A2A + marketplace
 └── plugin-system              @s0nderlabs/anima-plugin-system   fs + shell + web

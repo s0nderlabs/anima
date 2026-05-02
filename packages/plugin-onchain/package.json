@@ -1,9 +1,26 @@
 {
   "name": "@s0nderlabs/anima-plugin-onchain",
-  "version": "0.0.0",
+  "version": "0.16.2",
   "type": "module",
   "description": "On-chain wallet + chain ops plugin for anima (JAINE swap, Gimo LST, Multicall3 discovery)",
   "license": "MIT",
+  "homepage": "https://github.com/s0nderlabs/anima",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/s0nderlabs/anima.git",
+    "directory": "packages/plugin-onchain"
+  },
+  "bugs": {
+    "url": "https://github.com/s0nderlabs/anima/issues"
+  },
+  "keywords": ["0g", "anima", "agent", "wallet", "defi", "swap", "jaine", "gimo", "plugin"],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "bun": ">=1.1"
+  },
+  "files": ["src", "README.md"],
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {

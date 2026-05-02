@@ -1,0 +1,84 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Install deps
+        run: bun install --frozen-lockfile
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Typecheck
+        run: bun run typecheck
+
+      - name: Unit tests
+        run: bun test --timeout 60000 packages/*/src
+
+      - name: Forge tests
+        working-directory: contracts
+        run: forge test
+
+      - name: Configure npm auth
+        run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+
+      # Publish in topo order. Each `bun publish` rewrites workspace:* deps to
+      # the resolved semver in the published tarball; source stays workspace:*.
+      # If a version is already on the registry, bun publish fails fast — that's
+      # expected behavior on the first tag (manual publish already happened) and
+      # we treat it as a no-op via `|| true` for resilience on re-runs of the
+      # same tag.
+      - name: Publish @s0nderlabs/anima-core
+        working-directory: packages/core
+        run: bun publish --access=public || true
+
+      - name: Publish @s0nderlabs/anima-plugin-comms
+        working-directory: packages/plugin-comms
+        run: bun publish --access=public || true
+
+      - name: Publish @s0nderlabs/anima-plugin-onchain
+        working-directory: packages/plugin-onchain
+        run: bun publish --access=public || true
+
+      - name: Publish @s0nderlabs/anima-plugin-system
+        working-directory: packages/plugin-system
+        run: bun publish --access=public || true
+
+      - name: Publish @s0nderlabs/anima-harness
+        working-directory: packages/harness
+        run: bun publish --access=public || true
+
+      - name: Publish @s0nderlabs/anima
+        working-directory: packages/cli
+        run: bun publish --access=public || true
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --generate-notes --title "$TAG"

@@ -23,8 +23,8 @@
       },
     },
     "packages/cli": {
-      "name": "@s0nderlabs/anima-cli",
-      "version": "0.0.0",
+      "name": "@s0nderlabs/anima",
+      "version": "0.16.2",
       "bin": {
         "anima": "./bin/anima",
       },
@@ -48,8 +48,9 @@
     },
     "packages/core": {
       "name": "@s0nderlabs/anima-core",
-      "version": "0.0.0",
+      "version": "0.16.2",
       "dependencies": {
+        "@0gfoundation/0g-ts-sdk": "1.2.6",
         "@0glabs/0g-serving-broker": "^0.7.5",
         "@noble/curves": "^2.2.0",
         "@noble/hashes": "^2.2.0",
@@ -66,7 +67,7 @@
     },
     "packages/harness": {
       "name": "@s0nderlabs/anima-harness",
-      "version": "0.0.0",
+      "version": "0.16.2",
       "bin": {
         "anima-harness": "./bin/anima-harness",
       },
@@ -81,7 +82,7 @@
     },
     "packages/plugin-comms": {
       "name": "@s0nderlabs/anima-plugin-comms",
-      "version": "0.0.0",
+      "version": "0.16.2",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "eth-crypto": "^4.0.0",
@@ -91,7 +92,7 @@
     },
     "packages/plugin-onchain": {
       "name": "@s0nderlabs/anima-plugin-onchain",
-      "version": "0.0.0",
+      "version": "0.16.2",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "viem": "^2.21.55",
@@ -100,7 +101,7 @@
     },
     "packages/plugin-system": {
       "name": "@s0nderlabs/anima-plugin-system",
-      "version": "0.0.0",
+      "version": "0.16.2",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "zod": "^3.24.1",
@@ -440,7 +441,7 @@
 
     "@reown/appkit-wallet": ["@reown/appkit-wallet@1.8.17-wc-circular-dependencies-fix.0", "", { "dependencies": { "@reown/appkit-common": "1.8.17-wc-circular-dependencies-fix.0", "@reown/appkit-polyfills": "1.8.17-wc-circular-dependencies-fix.0", "@walletconnect/logger": "3.0.2", "zod": "3.22.4" } }, "sha512-s0RTVNtgPtXGs+eZELVvTu1FRLuN15MyhVS//3/4XafVQkBBJarciXk9pFP71xeSHRzjYR1lXHnVw28687cUvQ=="],
 
-    "@s0nderlabs/anima-cli": ["@s0nderlabs/anima-cli@workspace:packages/cli"],
+    "@s0nderlabs/anima": ["@s0nderlabs/anima@workspace:packages/cli"],
 
     "@s0nderlabs/anima-core": ["@s0nderlabs/anima-core@workspace:packages/core"],
 
