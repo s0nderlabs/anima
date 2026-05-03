@@ -109,6 +109,12 @@ jobs:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: bun publish --access=public
 
+      - name: Publish @s0nderlabs/anima-plugin-telegram
+        working-directory: packages/plugin-telegram
+        env:
+          NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: bun publish --access=public
+
       - name: Publish @s0nderlabs/anima-gateway
         working-directory: packages/gateway
         env:

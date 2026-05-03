@@ -4,6 +4,23 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.1] - 2026-05-03
+
+### Fixed
+
+- **CI release pipeline: `@s0nderlabs/anima-plugin-telegram` was never added to `.github/workflows/release.yml`** (regression introduced in v0.18.0 when the plugin landed). Added the missing publish step between gateway and cli per the dependency order. v0.19.0 partially published 4 of 7 packages because (a) the lint check passed locally but failed on CI for biome multi-line array format, then (b) the publish step for gateway used the now-stale `packages/harness/` path. v0.19.1 ships all 7 packages cleanly.
+- **`/seal` skill hardened**: new Step 4d re-runs lint + typecheck after the version bump (catches the JSON.stringify multi-line-array trap that hit v0.17.6, v0.18.2, v0.18.3, v0.19.0). New Step 7a verifies HEAD's package.json version matches the tag name before pushing. New Step 7c watches CI for early failures via `gh run list`. Step 4c now recommends surgical sed-based version bumps (preserves formatting) over `JSON.stringify(p, null, 2)` (reformats).
+
+### Added (B1 partial — not yet user-facing)
+
+- **NEW `packages/gateway/src/local-entrypoint.ts`** (~230 LOC): Local-mode gateway entrypoint that boots without the Daytona ECIES handshake. Reads operator-session for cached AES keys, decrypts agent keystore from `~/.anima/agents/<id>/keystore.json`, builds session + RealRuntime + provisions inline (no HTTP /bootstrap/provision wait), binds unix socket at `~/.anima/agents/<id>/gateway.sock` with perm 0600, acquires host-wide gateway lock with 60s refresh, sets `trustLocal: true` on the server (file-perm-based auth replaces EIP-191 sigs). Required env: `ANIMA_AGENT_ID` + `ANIMA_CONFIG`. Skips heartbeat (Daytona-only). Graceful shutdown unlinks socket + releases lock. Not yet wired to a CLI command — `anima gateway run`/`start`/etc land in v0.19.2 alongside lifecycle plumbing.
+
+### Internal
+
+- 802 unit tests pass. Typecheck + lint clean. 124 forge tests pass.
+- npm registry post-v0.19.0 partial-publish state: anima-core, anima-plugin-comms, anima-plugin-onchain, anima-plugin-system at 0.19.0 (orphans). v0.19.1 republishes all 7 at 0.19.1 so consumers get a coherent set.
+- Wake from /loop on CI completion verified the publish-pipeline hardening; failure ledger across 5 distinct modes captured for next /seal post-mortem.
+
 ## [0.19.0] - 2026-05-03
 
 ### Changed
@@ -1033,6 +1050,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.1
 [0.19.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.0
 [0.18.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.3
 [0.18.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.2
