@@ -10,6 +10,8 @@ export type TurnRole =
   | 'tool-result'
   | 'inbox'
   | 'market'
+  | 'inbox-tg'
+  | 'telegram-assistant'
 
 export interface TurnRow {
   id: string

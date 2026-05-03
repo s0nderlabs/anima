@@ -24,6 +24,7 @@ export interface AgentPaths {
     activityLog: string
     runtimeState: string
     inboxDir: string
+    pairingDir: string
   }
 }
 
@@ -57,6 +58,7 @@ export const agentPaths: AgentPaths = {
       activityLog: join(dir, 'activity.jsonl'),
       runtimeState: join(dir, 'runtime', 'state.json'),
       inboxDir: join(dir, 'inbox'),
+      pairingDir: join(dir, 'pairing'),
     }
   },
 }

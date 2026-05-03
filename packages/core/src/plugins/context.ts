@@ -109,6 +109,12 @@ export interface PluginContext {
    * pattern as `comms`.
    */
   onchain?: unknown
+  /**
+   * Phase 12 side-band runtime context for plugin-telegram. Same opaque
+   * pattern: chat.tsx (local) or build-runtime.ts (sandbox) builds the typed
+   * `TelegramRuntimeContext` and passes it; the plugin casts on read.
+   */
+  telegram?: unknown
 }
 
 export interface NativePlugin {
@@ -144,6 +150,8 @@ export interface PluginLoaderDeps {
   comms?: unknown
   /** Phase 10 side-band runtime context for plugin-onchain. Opaque to core. */
   onchain?: unknown
+  /** Phase 12 side-band runtime context for plugin-telegram. Opaque to core. */
+  telegram?: unknown
   /**
    * Resolver for `name` → ESM module path. Defaults to dynamic import of
    * `@s0nderlabs/anima-plugin-<name>`. Tests pass a stub.
@@ -177,6 +185,7 @@ export async function loadPlugins(
     sandbox: deps.sandbox,
     comms: deps.comms,
     onchain: deps.onchain,
+    telegram: deps.telegram,
   }
   for (const name of names) {
     try {

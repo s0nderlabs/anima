@@ -1,0 +1,79 @@
+import type { PairingStore } from '@s0nderlabs/anima-core'
+
+/**
+ * Side-band runtime context for plugin-telegram. The CLI (chat.tsx, local
+ * mode) or harness (build-runtime.ts, sandbox mode) builds this and attaches
+ * it to the plugin context as `(ctx as any).telegram` before loadPlugins.
+ *
+ * Without this side-band, the plugin registers nothing (soft-init for unit
+ * tests / non-telegram contexts). Mirrors the comms / onchain pattern.
+ */
+export interface TelegramRuntimeContext {
+  /** Bot token from @BotFather, post-decryption. NEVER goes to activity log. */
+  botToken: string
+  /**
+   * Telegram user IDs allowed to DM this bot. Anyone else's messages are
+   * dropped silently (no reply, no reaction, no log entry beyond a debug line).
+   */
+  allowedUserIds: number[]
+  /**
+   * Agent's display name (e.g. "specter", "enigma"). Used in session-key
+   * formatting so each agent's TG context is distinct in the brain prompt.
+   */
+  agentName: string
+  /**
+   * Brain dispatch callback. The listener invokes this when a debounced inbound
+   * is ready. The CLI or harness implementation:
+   *   1. wraps `text` in a `<channel source="telegram" ...>` prompt fragment
+   *   2. fires brain.infer with `source: 'telegram'`
+   *   3. flushes per-turn sync
+   *   4. returns the assistant string for the listener to send back via TG
+   */
+  dispatchUserMessage: (input: TelegramDispatchInput) => Promise<TelegramDispatchResult>
+  /** Optional hook fired before reaction transitions to 👀. CLI may push a TUI row. */
+  onProcessingStart?: (chatId: number, messageId: number) => Promise<void> | void
+  /** Optional hook fired after reaction transitions to 👍/👎. */
+  onProcessingEnd?: (chatId: number, messageId: number, ok: boolean) => Promise<void> | void
+  /** Verbose grammy logs. Default false. */
+  debug?: boolean
+  /**
+   * Optional pairing store. When present, unknown senders get a pairing code
+   * via DM and the operator approves via `anima pairing approve telegram <code>`.
+   * When absent, the listener uses static allowlist only (default-deny on empty).
+   */
+  pairingStore?: PairingStore
+}
+
+export interface TelegramDispatchInput {
+  /** Composed text after debounce flush; safe to feed into brain prompt. */
+  text: string
+  /** TG numeric chat id (== user id for 1-on-1 DMs). */
+  chatId: number
+  /** TG numeric user id of the sender (always in `allowedUserIds`). */
+  userId: number
+  /** Display username of the sender (no `@` prefix), or null if unset. */
+  username: string | null
+  /** Display first/last name of the sender, or null. */
+  displayName: string | null
+  /** TG message id of the LATEST fragment in the debounced burst. Used for reactions. */
+  latestMessageId: number
+  /** Stable session key for this chat: `agent:<name>:telegram:dm:<chatId>`. */
+  sessionKey: string
+}
+
+export interface TelegramDispatchResult {
+  /** Assistant text to echo back to the user. Empty string skips the reply. */
+  response: string
+  /** Optional 0G mainnet sync tx hash, surfaced as a footer if non-empty. */
+  syncTx?: string
+}
+
+export interface TelegramInboundEvent {
+  chatId: number
+  userId: number
+  username: string | null
+  displayName: string | null
+  text: string
+  messageId: number
+  ts: number
+}

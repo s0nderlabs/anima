@@ -66,10 +66,21 @@ import {
   type OnchainRuntimeContext,
   discoverMintBlock,
 } from '@s0nderlabs/anima-plugin-onchain'
+import {
+  TELEGRAM_GUIDANCE,
+  type TelegramRuntimeContext,
+  formatInboundPreview as formatTelegramInboundPreview,
+} from '@s0nderlabs/anima-plugin-telegram'
 import { type Address, type Hex, formatEther } from 'viem'
 import { findAndLoadConfig } from '../config/load'
 import { writeConfigTs } from '../config/render'
 import { shortAddr } from '../util/format'
+import { loadTelegramSecrets, telegramSecretsExist } from '../util/telegram-secrets'
+import {
+  type TelegramDispatchSlot,
+  buildTelegramDispatch,
+  buildTelegramRuntimeContext,
+} from './chat-telegram'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 
 export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<void> {
@@ -126,6 +137,25 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     await operator.close?.()
     process.exit(1)
   }
+
+  // Phase 12: decrypt telegram-secrets blob (if any) using the SAME operator
+  // signer we already have unlocked. Avoids a second keychain prompt later.
+  // We only attempt this if the operator opted in via `anima telegram setup`
+  // (presence of the encrypted blob); the plugin opt-in is independent and
+  // checked again below at plugin filter time.
+  let telegramSecrets: Awaited<ReturnType<typeof loadTelegramSecrets>> = null
+  if (telegramSecretsExist(agentId) && (config.plugins ?? []).includes('telegram')) {
+    const sTg = spinner()
+    sTg.start('Decrypting telegram secrets')
+    try {
+      telegramSecrets = await loadTelegramSecrets({ signer: operator, agentAddress, agentId })
+      sTg.stop(`telegram unlocked (bot @${telegramSecrets?.botUsername ?? '?'})`)
+    } catch (e) {
+      sTg.stop(`telegram decrypt failed: ${(e as Error).message.slice(0, 160)}`)
+      // Soft-fail: telegram is opt-in. Boot continues without it.
+    }
+  }
+
   await operator.close?.()
 
   if (!config.brain.provider) {
@@ -268,9 +298,11 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     ? brokerPool.visionInferFor(visionProvider)
     : null
 
-  // Plugin filter: system + comms + onchain all ship.
+  // Plugin filter: system + comms + onchain all ship; telegram is opt-in via
+  // `anima telegram setup` which writes ~/.anima/agents/<id>/telegram-secrets.encrypted
+  // and adds 'telegram' to config.plugins.
   const pluginNames = (config.plugins ?? []).filter(
-    p => p === 'system' || p === 'comms' || p === 'onchain',
+    p => p === 'system' || p === 'comms' || p === 'onchain' || p === 'telegram',
   )
   // viem clients live above the comms gate so the agent-EOA balance refresher
   // works regardless of whether the comms plugin is loaded.
@@ -369,6 +401,26 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
         : {}),
     }
   }
+
+  // Phase 12: telegram side-band ctx. We build the runtime context now (before
+  // brain.init) so the plugin can register its listener via ctx.registerListener,
+  // but the dispatch callback is deferred — the slot's `.current` is null until
+  // brain.init resolves and we wire it below. Same for the system-row sink:
+  // populated once state exists.
+  const telegramSlot: TelegramDispatchSlot = { current: null }
+  const telegramSystemRowSink: { current: ((text: string) => void) | null } = { current: null }
+  const telegramInboundRowSink: { current: ((text: string) => void) | null } = { current: null }
+  const telegramAssistantRowSink: { current: ((text: string) => void) | null } = { current: null }
+  let telegram: TelegramRuntimeContext | undefined
+  if (telegramSecrets && pluginNames.includes('telegram')) {
+    telegram = buildTelegramRuntimeContext({
+      botToken: telegramSecrets.botToken,
+      allowedUserIds: telegramSecrets.allowedUserIds,
+      agentName: config.subname ?? `agent-${agentId.slice(0, 8)}`,
+      slot: telegramSlot,
+      systemRowSink: telegramSystemRowSink,
+    })
+  }
   // Local listener registry: plugin-comms registers a single 'a2a-inbox'
   // listener via ctx.registerListener; we collect them here so chat can
   // start them once brain init is done. Other plugins may register listeners
@@ -399,6 +451,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     sandbox,
     comms,
     onchain,
+    telegram,
     resolve: async name => {
       switch (name) {
         case 'system':
@@ -407,6 +460,8 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
           return await import('@s0nderlabs/anima-plugin-comms')
         case 'onchain':
           return await import('@s0nderlabs/anima-plugin-onchain')
+        case 'telegram':
+          return await import('@s0nderlabs/anima-plugin-telegram')
         default:
           throw new Error(`unknown first-party plugin: ${name}`)
       }
@@ -511,6 +566,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   const extraGuidance: string[] = []
   if (comms?.marketAddress) extraGuidance.push(MARKETPLACE_GUIDANCE)
   if (onchain) extraGuidance.push(ONCHAIN_GUIDANCE)
+  if (telegram) extraGuidance.push(TELEGRAM_GUIDANCE)
 
   const buildPrefix = async () => {
     const idx = await readIndexFile(paths.memoryIndex).catch(() => null)
@@ -557,6 +613,15 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     brainLabel: shortAddr(config.brain.provider!),
     approvalsMode: initialMode,
   })
+
+  // Phase 12: now that state exists, point the telegram row sinks at it. The
+  // dispatch slot stays null until brain.init resolves below.
+  if (telegram) {
+    telegramSystemRowSink.current = (text: string) => state.pushRow({ role: 'system', text })
+    telegramInboundRowSink.current = (text: string) => state.pushRow({ role: 'inbox-tg', text })
+    telegramAssistantRowSink.current = (text: string) =>
+      state.pushRow({ role: 'telegram-assistant', text })
+  }
 
   // Statusline balance refreshers; fired at boot, post-turn, and post-/sync.
   const refreshEoaBalance = () => {
@@ -675,6 +740,32 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   } catch (e) {
     bootSpinner.stop(`Connection failed: ${(e as Error).message.slice(0, 120)}`)
     process.exit(1)
+  }
+
+  // Phase 12: brain is up. Wire the deferred TG dispatch slot so any inbound
+  // TG message that lands once collectedListeners[i].start() fires below
+  // routes through brain.infer with source=telegram.
+  if (telegram) {
+    telegramSlot.current = buildTelegramDispatch({
+      activity,
+      sync,
+      permission,
+      pushAssistantRow: text => telegramAssistantRowSink.current?.(text),
+      pushInboundRow: text => telegramInboundRowSink.current?.(text),
+      isBusy: () => state.status() === 'thinking',
+      buildPrefix,
+      brain,
+      setThinking: on => state.setStatus(on ? 'thinking' : 'idle'),
+      setActiveAbort: ctrl => state.setActiveAbort(ctrl),
+      refreshBalances,
+      formatInboundPreview: input =>
+        formatTelegramInboundPreview({
+          chatId: input.chatId,
+          username: input.username,
+          displayName: input.displayName,
+          text: input.text.replace(/^<channel[^>]*>([\s\S]*)<\/channel>$/, '$1'),
+        }),
+    })
   }
 
   // Initial balances for the status bar (best-effort, never blocks boot).

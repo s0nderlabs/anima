@@ -127,6 +127,32 @@ function MarketRow(props: { text: string }) {
   )
 }
 
+function TelegramInboxRow(props: { text: string }) {
+  return (
+    <box flexDirection="row" marginBottom={1}>
+      <text fg="#60a5fa" flexShrink={0}>
+        {renderPrefix('tg-in')}
+      </text>
+      <text wrapMode="word" flexGrow={1} fg="#bfdbfe">
+        {props.text}
+      </text>
+    </box>
+  )
+}
+
+function TelegramAssistantRow(props: { text: string }) {
+  return (
+    <box flexDirection="row" marginBottom={1}>
+      <text fg="#60a5fa" flexShrink={0}>
+        {renderPrefix('tg-out')}
+      </text>
+      <text wrapMode="word" flexGrow={1} fg="#dbeafe">
+        <MarkdownSegments text={props.text} />
+      </text>
+    </box>
+  )
+}
+
 function AssistantTextRow(props: { text: string; firstOfBlock: boolean }) {
   return (
     <box flexDirection="row" marginTop={props.firstOfBlock ? 0 : 1} marginBottom={1}>
@@ -195,6 +221,8 @@ function ChatRowDispatch(props: { row: TurnRow }) {
   if (r.role === 'tool-result') return <ToolResultRow text={r.text} failed={r.failed === true} />
   if (r.role === 'inbox') return <InboxRow text={r.text} />
   if (r.role === 'market') return <MarketRow text={r.text} />
+  if (r.role === 'inbox-tg') return <TelegramInboxRow text={r.text} />
+  if (r.role === 'telegram-assistant') return <TelegramAssistantRow text={r.text} />
   return null
 }
 

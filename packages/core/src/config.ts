@@ -18,7 +18,7 @@
 
 export type AnimaNetwork = '0g-mainnet' | '0g-testnet'
 
-export type AnimaPlugin = 'onchain' | 'comms' | 'system'
+export type AnimaPlugin = 'onchain' | 'comms' | 'system' | 'telegram'
 
 export interface INFTRef {
   /** ERC-7857 contract address. */

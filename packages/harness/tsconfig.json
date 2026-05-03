@@ -12,7 +12,8 @@
     { "path": "../core" },
     { "path": "../plugin-system" },
     { "path": "../plugin-comms" },
-    { "path": "../plugin-onchain" }
+    { "path": "../plugin-onchain" },
+    { "path": "../plugin-telegram" }
   ],
   "include": ["src/**/*.ts"]
 }

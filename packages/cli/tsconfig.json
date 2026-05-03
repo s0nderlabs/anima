@@ -10,6 +10,11 @@
     "jsx": "preserve",
     "jsxImportSource": "@opentui/solid"
   },
-  "references": [{ "path": "../core" }, { "path": "../harness" }, { "path": "../plugin-system" }],
+  "references": [
+    { "path": "../core" },
+    { "path": "../harness" },
+    { "path": "../plugin-system" },
+    { "path": "../plugin-telegram" }
+  ],
   "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

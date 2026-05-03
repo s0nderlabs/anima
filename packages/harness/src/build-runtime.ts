@@ -290,9 +290,9 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
     : null
   const viemClients = makeViemClients({ network, privkeyHex: agentPrivkey })
 
-  // 4. Plugin filter + side-band ctxs (comms + onchain)
+  // 4. Plugin filter + side-band ctxs (comms + onchain + telegram)
   const pluginNames = (config.plugins ?? ['system', 'comms', 'onchain']).filter(
-    p => p === 'system' || p === 'comms' || p === 'onchain',
+    p => p === 'system' || p === 'comms' || p === 'onchain' || p === 'telegram',
   )
 
   const inboundQueue: DeliveredMessage[] = []
@@ -388,6 +388,8 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
           return await import('@s0nderlabs/anima-plugin-comms')
         case 'onchain':
           return await import('@s0nderlabs/anima-plugin-onchain')
+        case 'telegram':
+          return await import('@s0nderlabs/anima-plugin-telegram')
         default:
           throw new Error(`unknown first-party plugin: ${name}`)
       }

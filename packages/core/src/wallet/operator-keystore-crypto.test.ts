@@ -7,11 +7,16 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { KeystoreFileOperatorSigner } from '../operator/keystore-file'
 import { RawPrivkeyOperatorSigner } from '../operator/raw-privkey'
 import {
+  OPERATOR_BLOB_SCOPES,
   OPERATOR_KEYSTORE_VERSION,
   decodeKeystoreBytes,
+  decodeOperatorBlobBytes,
   decryptAgentKey,
+  decryptOperatorBlob,
   encodeKeystoreBytes,
+  encodeOperatorBlobBytes,
   encryptAgentKey,
+  encryptOperatorBlob,
   sniffKeystoreVersion,
 } from './operator-keystore-crypto'
 
@@ -120,5 +125,88 @@ describe('operator-keystore-crypto', () => {
     const keystore = await encryptAgentKey({ signer: signerA, agentAddress, agentPrivkey })
     const decrypted = await decryptAgentKey({ signer: signerB, agentAddress, keystore })
     expect(decrypted).toBe(agentPrivkey)
+  })
+
+  // -- encryptOperatorBlob / decryptOperatorBlob (Phase 12 generalized helpers)
+
+  test('operator blob: encrypt + decrypt round-trip with telegram scope', async () => {
+    const signer = new RawPrivkeyOperatorSigner({ privkey: generatePrivateKey() })
+    const agent = privateKeyToAccount(generatePrivateKey()).address
+    const plaintext = new TextEncoder().encode(
+      JSON.stringify({ telegram: { botToken: 'abc:xyz', allowedUserIds: [123] } }),
+    )
+    const blob = await encryptOperatorBlob({
+      signer,
+      scope: OPERATOR_BLOB_SCOPES.TELEGRAM,
+      agentAddress: agent,
+      plaintext,
+    })
+    expect(blob.version).toBe(OPERATOR_KEYSTORE_VERSION)
+    expect(blob.scope).toBe(OPERATOR_BLOB_SCOPES.TELEGRAM)
+    const decrypted = await decryptOperatorBlob({
+      signer,
+      scope: OPERATOR_BLOB_SCOPES.TELEGRAM,
+      agentAddress: agent,
+      blob,
+    })
+    expect(new TextDecoder().decode(decrypted)).toBe(new TextDecoder().decode(plaintext))
+  })
+
+  test('operator blob: scope mismatch refuses decrypt', async () => {
+    const signer = new RawPrivkeyOperatorSigner({ privkey: generatePrivateKey() })
+    const agent = privateKeyToAccount(generatePrivateKey()).address
+    const blob = await encryptOperatorBlob({
+      signer,
+      scope: OPERATOR_BLOB_SCOPES.TELEGRAM,
+      agentAddress: agent,
+      plaintext: new TextEncoder().encode('payload'),
+    })
+    await expect(
+      decryptOperatorBlob({
+        signer,
+        scope: OPERATOR_BLOB_SCOPES.KEYSTORE, // intentionally wrong
+        agentAddress: agent,
+        blob,
+      }),
+    ).rejects.toThrow(/scope mismatch/)
+  })
+
+  test('operator blob: cross-scope keys are different (sig replay across scopes is impossible)', async () => {
+    const signer = new RawPrivkeyOperatorSigner({ privkey: generatePrivateKey() })
+    const agent = privateKeyToAccount(generatePrivateKey()).address
+    const tgBlob = await encryptOperatorBlob({
+      signer,
+      scope: OPERATOR_BLOB_SCOPES.TELEGRAM,
+      agentAddress: agent,
+      plaintext: new TextEncoder().encode('tg-payload'),
+    })
+    // Force a "fake" keystore-scoped blob by hand-mutating tgBlob.scope and
+    // re-trying decrypt under KEYSTORE scope. Should fail with auth/scope
+    // error, never silently leak.
+    const tampered = { ...tgBlob, scope: OPERATOR_BLOB_SCOPES.KEYSTORE }
+    await expect(
+      decryptOperatorBlob({
+        signer,
+        scope: OPERATOR_BLOB_SCOPES.KEYSTORE,
+        agentAddress: agent,
+        blob: tampered,
+      }),
+    ).rejects.toThrow()
+  })
+
+  test('operator blob: encode/decode bytes round-trip', async () => {
+    const signer = new RawPrivkeyOperatorSigner({ privkey: generatePrivateKey() })
+    const agent = privateKeyToAccount(generatePrivateKey()).address
+    const blob = await encryptOperatorBlob({
+      signer,
+      scope: OPERATOR_BLOB_SCOPES.TELEGRAM,
+      agentAddress: agent,
+      plaintext: new TextEncoder().encode('hello'),
+    })
+    const bytes = encodeOperatorBlobBytes(blob)
+    const decoded = decodeOperatorBlobBytes(bytes)
+    expect(decoded.version).toBe(blob.version)
+    expect(decoded.scope).toBe(blob.scope)
+    expect(decoded.blob).toBe(blob.blob)
   })
 })

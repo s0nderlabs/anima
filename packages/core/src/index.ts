@@ -124,12 +124,19 @@ export {
   type EncryptedKeystore,
   type AgentWalletMaterial,
   OPERATOR_KEYSTORE_VERSION,
+  OPERATOR_BLOB_SCOPES,
+  type OperatorBlobScope,
   encryptAgentKey,
   decryptAgentKey,
+  encryptOperatorBlob,
+  decryptOperatorBlob,
   encodeKeystoreBytes,
   decodeKeystoreBytes,
+  encodeOperatorBlobBytes,
+  decodeOperatorBlobBytes,
   sniffKeystoreVersion,
   type OperatorEncryptedKeystore,
+  type OperatorEncryptedBlob,
   drainAgentEOA,
   type DrainAgentResult,
 } from './wallet'
@@ -221,6 +228,31 @@ export {
 } from './chain'
 
 export { Runtime, type RuntimeDeps, ActivityLog, type ActivityEntry } from './runtime'
+
+export {
+  acquireScopedLock,
+  DEFAULT_LOCK_TTL_SECONDS,
+  type AcquireScopedLockOpts,
+  type AcquireScopedLockResult,
+  type ScopedLockHandle,
+} from './locks'
+
+export {
+  PairingStore,
+  PAIRING_ALPHABET,
+  PAIRING_CODE_LENGTH,
+  PAIRING_CODE_TTL_SECONDS,
+  PAIRING_RATE_LIMIT_SECONDS,
+  PAIRING_LOCKOUT_SECONDS,
+  PAIRING_MAX_PENDING_PER_PLATFORM,
+  PAIRING_MAX_FAILED_ATTEMPTS,
+  type PairingStoreOpts,
+  type PendingEntry,
+  type ApprovedEntry,
+  type PendingListing,
+  type ApprovedListing,
+  type ApproveResult,
+} from './pairing'
 
 export {
   encryptToPubkey,

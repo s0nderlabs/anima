@@ -4,6 +4,37 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-05-04
+
+### Added
+
+- **Hermes-aligned Telegram gateway foundation**. Phase 12 redesign per `hermes-telegram-deep-research.md`. Closes hermes drifts G1 (no token lock) and G2 (no pairing). Bundles B0+B1+B2+B3 of the v0.18.x series.
+- **`acquireScopedLock`** in `@s0nderlabs/anima-core` (`locks.ts`). Host-wide PID-file lock at `~/.anima/locks/<scope>-<sha256(identity).slice(0,16)>.lock`. O_CREAT|O_EXCL atomic create; stale-detection via `process.kill(pid, 0)`; TTL eviction (default 300s) as belt + suspenders. Refresh + release handles. Used by `plugin-telegram` to prevent two anima processes on the same machine from polling the same bot token (a common 409 Conflict source). 12 unit tests.
+- **`PairingStore`** in `@s0nderlabs/anima-core` (`pairing.ts`). 1:1 port from hermes `gateway/pairing.py` (288L → ~250 LOC TS). 8-char codes from 32-char unambiguous alphabet (no 0/O, 1/I), 1-hour TTL, max 3 pending per platform, 1 request / user / 10 min rate limit, 5 failed approvals → 1-hour platform lockout. Atomic temp+rename writes with chmod 0600. 18 unit tests including code gen randomness, TTL expiry, rate limit, lockout, approve flow, revoke, multi-platform aggregation, file permissions.
+- **`anima pairing` CLI** with subcommands `list`, `approve <platform> <code>`, `revoke <platform> <userId>`, `clear-pending [platform]`. Validates code format (8 chars from alphabet) before invoking the store. Confirmation prompts via clack with `--yes/-y` skip flag. 10 unit tests on argv parsing.
+- **Listener resilience layer** in `@s0nderlabs/anima-plugin-telegram` (`recovery.ts`):
+  - `acquireTelegramTokenLock(botToken, opts)` — wraps `acquireScopedLock` with the `'telegram-bot-token'` scope; throws `BotTokenLockedError` when another process holds it.
+  - `clearWebhookBeforePolling(bot)` — explicit `bot.api.deleteWebhook({drop_pending_updates: false})` before `bot.start`. Belt + suspenders even though grammy does this internally.
+  - `classifyStartFailure(err)` — partitions errors into `conflict | network | auth | fatal | cancelled` with `retryable: bool`. Used by listener to log structured start failures.
+  - 10 unit tests.
+- **DM pairing flow**. When an unknown user DMs the bot AND the plugin has `pairingStore`, sanitize returns `{ok: false, action: 'send-pairing-code', code}`. The listener replies with a 1-hour TTL pairing code via `formatPairingMessage(code, agentName)`. Operator runs `anima pairing approve telegram <code>` to approve. The user's next message reaches the brain.
+- **Adaptive text-batch debounce** in `DebounceBuffer`. Default 600ms quiet period; bumps to 2000ms when the last fragment is ≥4000 chars (TG client splitting a long paste into adjacent updates). Mirrors hermes `HERMES_TELEGRAM_TEXT_BATCH_DELAY_SECONDS` + `_SPLIT_DELAY_SECONDS` constants.
+- **Retry classifier exports** in `retry.ts`: `RETRYABLE_PATTERNS`, `TIMEOUT_PATTERNS`, `isRetryable`, `isTimeout`, `isReplyNotFound`, `isThreadNotFound`, `DELIVERY_FAILURE_NOTICE`. Patterns ported verbatim from hermes `base.py:709`. Timeouts are explicitly NOT retryable (delivery may have completed; retry = double-send).
+
+### Changed
+
+- **Sanitize default-deny semantics**. `sanitizeInbound` now treats empty `allowedUserIds` as deny-all (matching hermes default-deny model) instead of open-access. The listener emits a loud startup warning when `allowedUserIds` is empty AND no `pairingStore` is provided (`All inbound messages will be DROPPED`). Senders not in the allowlist but with `pairingStore` available go through the pairing flow.
+- **Sender metadata carried through debounce**. `BufferedFragment` and `FlushedBatch` now include `userId`, `username`, `displayName`. Closes G6 from the Phase 12 audit (sender metadata was previously dropped at the buffer boundary; `dispatchOne` had `username: null, displayName: null` hardcoded).
+- **Wizard copy** in `anima telegram setup` updated to reflect default-deny semantics. Empty allowlist now reads "pairing-only mode" with explicit `anima pairing approve telegram <CODE>` instructions instead of the old "open access — anyone who finds the bot can DM" warning.
+- **`agentPaths.agent(id).pairingDir`** added to `@s0nderlabs/anima-core` for per-agent pairing storage at `~/.anima/agents/<id>/pairing/`.
+
+### Internal
+
+- 43 new unit tests bring the project total to 733 (+9.6% on prior 690 baseline).
+- 11 new files (`locks.ts`, `pairing.ts`, `recovery.ts`, `pairing-flow.ts`, 4× `pairing-*.ts` CLI handlers, plus argv test) and 2 file rewrites (`sanitize.ts`, `debounce.ts`).
+- `bun run lint` clean (biome auto-organized imports, normalized formatting); typecheck clean.
+- B4 (active-session interrupt + bypass commands), B5 (phone-side UX: MarkdownV2 + chunking + inline-keyboard approval + permission prompter swap), B6 (sandbox handoff close G3), B7 (G5 metadata polish), B8 (mock e2e + tmux drives + browser-driven live tests) ship in v0.18.1, v0.18.2, v0.18.3 across 3 more /seal cycles.
+
 ## [0.17.9] - 2026-05-03
 
 ### Fixed
@@ -917,6 +948,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.18.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.0
 [0.16.8]: https://github.com/s0nderlabs/anima/releases/tag/v0.16.8
 [0.16.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.16.0
 [0.15.6]: https://github.com/s0nderlabs/anima/releases/tag/v0.15.6

@@ -133,6 +133,26 @@ async function main(): Promise<void> {
       await runDrain({ to, yes })
       return
     }
+    case 'telegram': {
+      const { parseTelegramArgs, runTelegram } = await import('./commands/telegram')
+      const parsed = parseTelegramArgs(argv.slice(1))
+      if ('error' in parsed) {
+        console.error(`anima telegram: ${parsed.error}`)
+        process.exit(1)
+      }
+      await runTelegram(parsed)
+      return
+    }
+    case 'pairing': {
+      const { parsePairingArgs, runPairing } = await import('./commands/pairing')
+      const parsed = parsePairingArgs(argv.slice(1))
+      if ('error' in parsed) {
+        console.error(`anima pairing: ${parsed.error}`)
+        process.exit(1)
+      }
+      await runPairing(parsed)
+      return
+    }
     case 'inspect': {
       const { runInspect, isValidSlot } = await import('./commands/inspect')
       const remaining = argv.slice(1)
@@ -225,6 +245,10 @@ function printHelp(): void {
       '                            flags: --ref vX.Y.Z, --reprovision for fresh container',
       '  anima resume              wake an archived/stopped sandbox (re-handoff agent privkey)',
       '  anima pause               archive sandbox to stop runtime burn (resume with: anima resume)',
+      '  anima telegram <sub>      configure phone-DM gateway  (subs: setup | status | remove)',
+      '                            flags: --yes (skip remove confirmation)',
+      '  anima pairing <sub>       manage DM pairing approvals (subs: list | approve | revoke | clear-pending)',
+      '                            usage: anima pairing approve telegram <code>',
       '  anima inspect [ref]       audit on-chain memory slots (flags: --slot, --tx, --raw, --diff, --json, --full, --out <dir>)',
       '  anima help                show this message',
       '',

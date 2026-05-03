@@ -1,0 +1,85 @@
+/**
+ * @s0nderlabs/anima-plugin-telegram
+ *
+ * Long-poll Telegram bot listener. Operator DMs `@anima_<name>_bot` from any
+ * phone; the agent (running in 0G Sandbox or local) replies via the same
+ * brain that handles stdin TUI turns.
+ *
+ * Required side-band ctx (`(ctx as any).telegram` field set by chat.tsx in
+ * local mode or build-runtime.ts in sandbox mode):
+ *
+ *   - botToken, allowedUserIds, agentName
+ *   - dispatchUserMessage: invoked per debounced inbound; runs brain.infer
+ *   - onProcessingStart, onProcessingEnd: optional hooks for TUI surfacing
+ *
+ * Without `ctx.telegram`, the plugin registers nothing (graceful no-op for
+ * unit-test loaders).
+ */
+import type { NativePlugin } from '@s0nderlabs/anima-core'
+import { TelegramListener } from './listener'
+import type { TelegramRuntimeContext } from './types'
+
+export type {
+  TelegramRuntimeContext,
+  TelegramDispatchInput,
+  TelegramDispatchResult,
+  TelegramInboundEvent,
+} from './types'
+export { TelegramListener, capForTelegram } from './listener'
+export { buildSessionKey, sanitizeAgentName } from './session-key'
+export { formatTelegramChannel, formatInboundPreview } from './format'
+export { RateLimiter } from './limits'
+export { sanitizeInbound, type SanitizeReason, type SanitizeResult } from './sanitize'
+export { formatPairingMessage } from './pairing-flow'
+export { DebounceBuffer } from './debounce'
+export {
+  sendWithRetry,
+  classifyError,
+  isRetryable,
+  isTimeout,
+  isReplyNotFound,
+  isThreadNotFound,
+  RETRYABLE_PATTERNS,
+  TIMEOUT_PATTERNS,
+  DELIVERY_FAILURE_NOTICE,
+} from './retry'
+export {
+  acquireTelegramTokenLock,
+  BotTokenLockedError,
+  clearWebhookBeforePolling,
+  classifyStartFailure,
+  TELEGRAM_TOKEN_LOCK_SCOPE,
+  type StartFailure,
+  type StartFailureKind,
+  type TokenLock,
+  type AcquireTokenLockOpts,
+} from './recovery'
+export {
+  reactProcessing,
+  reactSuccess,
+  reactError,
+  REACTION_PROCESSING,
+  REACTION_OK,
+  REACTION_ERR,
+} from './reactions'
+export { TELEGRAM_GUIDANCE } from './guidance'
+
+const plugin: NativePlugin = {
+  name: 'telegram',
+  register: ctx => {
+    const tg = (ctx as unknown as { telegram?: TelegramRuntimeContext }).telegram
+    if (!tg) return
+    const listener = new TelegramListener(tg)
+    ctx.registerListener({
+      name: 'telegram-bot',
+      start: async () => {
+        await listener.start()
+      },
+      stop: async () => {
+        await listener.stop()
+      },
+    } as never)
+  },
+}
+
+export default plugin

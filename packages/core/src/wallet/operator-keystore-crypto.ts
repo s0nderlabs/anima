@@ -39,7 +39,21 @@ const KS_TYPES = {
 } as const
 const KS_PRIMARY = 'AgentKeystore' as const
 const KS_PURPOSE = 'anima-keystore-v1'
-const HKDF_INFO = Buffer.from('anima-keystore-aead-v1', 'utf8')
+const HKDF_INFO_KEYSTORE = Buffer.from('anima-keystore-aead-v1', 'utf8')
+
+/**
+ * Scope strings used as the EIP-712 `purpose` field. New scopes get their own
+ * derived key (different signature, different HKDF output) so a phishing site
+ * cannot replay one scope's signature against another. Add new scopes here as
+ * Phase 12 / Phase 13 needs them.
+ */
+export const OPERATOR_BLOB_SCOPES = {
+  KEYSTORE: 'anima-keystore-v1',
+  TELEGRAM: 'anima-telegram-v1',
+} as const
+export type OperatorBlobScope =
+  | (typeof OPERATOR_BLOB_SCOPES)[keyof typeof OPERATOR_BLOB_SCOPES]
+  | string
 
 export interface OperatorEncryptedKeystore {
   version: typeof OPERATOR_KEYSTORE_VERSION
@@ -47,7 +61,50 @@ export interface OperatorEncryptedKeystore {
   blob: string
 }
 
+/**
+ * Versioned, scoped operator-encrypted blob. Used for non-keystore secrets
+ * (e.g. telegram bot token + allowlisted user ids).
+ *
+ * `scope` is the EIP-712 `purpose` field used to derive the AEAD key, and is
+ * persisted on disk so the loader can route to the correct decrypt scope
+ * without prompting twice.
+ */
+export interface OperatorEncryptedBlob {
+  version: typeof OPERATOR_KEYSTORE_VERSION
+  scope: OperatorBlobScope
+  /** Base64 of `iv(12) || tag(16) || ciphertext`. */
+  blob: string
+}
+
+async function deriveScopedKey(
+  signer: OperatorSigner,
+  scope: OperatorBlobScope,
+  agent: Address,
+): Promise<Buffer> {
+  const account = await signer.account()
+  const sigHex = await account.signTypedData({
+    domain: KS_DOMAIN,
+    types: KS_TYPES,
+    primaryType: KS_PRIMARY,
+    message: { agent, purpose: scope },
+  })
+  const rs = sigHex.slice(2, 130)
+  const ikm = Buffer.from(rs, 'hex')
+  if (ikm.length !== 64) {
+    throw new Error(
+      `Operator signature has unexpected length: ${ikm.length} bytes (expected 64). This source may not produce a 65-byte ECDSA signature; switch operator wallets.`,
+    )
+  }
+  // Scope's HKDF info string keeps key separation across scopes even if the
+  // EIP-712 sig were ever leaked for one scope.
+  const info = Buffer.from(`anima-aead-${scope}`, 'utf8')
+  return Buffer.from(hkdfSync('sha256', ikm, Buffer.alloc(0), info, 32))
+}
+
 async function deriveKey(signer: OperatorSigner, agent: Address): Promise<Buffer> {
+  // Legacy pathway kept for backward-compat with the original keystore HKDF
+  // info string. New keystore writes also reach this fn (scope = KS_PURPOSE)
+  // so the on-disk format is unchanged.
   const account = await signer.account()
   const sigHex = await account.signTypedData({
     domain: KS_DOMAIN,
@@ -62,7 +119,7 @@ async function deriveKey(signer: OperatorSigner, agent: Address): Promise<Buffer
       `Operator signature has unexpected length: ${ikm.length} bytes (expected 64). This source may not produce a 65-byte ECDSA signature; switch operator wallets.`,
     )
   }
-  return Buffer.from(hkdfSync('sha256', ikm, Buffer.alloc(0), HKDF_INFO, 32))
+  return Buffer.from(hkdfSync('sha256', ikm, Buffer.alloc(0), HKDF_INFO_KEYSTORE, 32))
 }
 
 export async function encryptAgentKey(opts: {
@@ -122,6 +179,79 @@ export function decodeKeystoreBytes(bytes: Uint8Array): OperatorEncryptedKeystor
     throw new Error('Keystore bytes have invalid blob field')
   }
   return parsed as OperatorEncryptedKeystore
+}
+
+/**
+ * Encrypt an arbitrary operator-owned secret blob with a scope-derived key.
+ * Phase 12 uses this to persist `{telegram: {botToken, allowedUserIds}}` to
+ * `~/.anima/agents/<id>/telegram-secrets.encrypted`.
+ *
+ * Each scope (`OPERATOR_BLOB_SCOPES.*`) gets its own EIP-712 sig + HKDF
+ * output. A phishing site that obtains one scope's sig cannot decrypt another.
+ */
+export async function encryptOperatorBlob(opts: {
+  signer: OperatorSigner
+  scope: OperatorBlobScope
+  agentAddress: Address
+  plaintext: Uint8Array
+}): Promise<OperatorEncryptedBlob> {
+  const key = await deriveScopedKey(opts.signer, opts.scope, opts.agentAddress)
+  const iv = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', key, iv)
+  const ct = Buffer.concat([cipher.update(Buffer.from(opts.plaintext)), cipher.final()])
+  const tag = cipher.getAuthTag()
+  const blob = Buffer.concat([iv, tag, ct]).toString('base64')
+  return { version: OPERATOR_KEYSTORE_VERSION, scope: opts.scope, blob }
+}
+
+export async function decryptOperatorBlob(opts: {
+  signer: OperatorSigner
+  scope: OperatorBlobScope
+  agentAddress: Address
+  blob: OperatorEncryptedBlob
+}): Promise<Uint8Array> {
+  if (opts.blob.version !== OPERATOR_KEYSTORE_VERSION) {
+    throw new Error(
+      `Unsupported operator blob version: ${opts.blob.version} (expected ${OPERATOR_KEYSTORE_VERSION}).`,
+    )
+  }
+  if (opts.blob.scope !== opts.scope) {
+    throw new Error(
+      `Operator blob scope mismatch: blob has '${opts.blob.scope}', expected '${opts.scope}'. Refusing to decrypt across scopes.`,
+    )
+  }
+  const buf = Buffer.from(opts.blob.blob, 'base64')
+  if (buf.length < 12 + 16 + 1) {
+    throw new Error(`Operator blob too short: ${buf.length} bytes`)
+  }
+  const iv = buf.subarray(0, 12)
+  const tag = buf.subarray(12, 28)
+  const ct = buf.subarray(28)
+  const key = await deriveScopedKey(opts.signer, opts.scope, opts.agentAddress)
+  const decipher = createDecipheriv('aes-256-gcm', key, iv)
+  decipher.setAuthTag(tag)
+  const pt = Buffer.concat([decipher.update(ct), decipher.final()])
+  return new Uint8Array(pt)
+}
+
+export function encodeOperatorBlobBytes(blob: OperatorEncryptedBlob): Uint8Array {
+  return new TextEncoder().encode(JSON.stringify(blob))
+}
+
+export function decodeOperatorBlobBytes(bytes: Uint8Array): OperatorEncryptedBlob {
+  const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>
+  if (parsed === null || typeof parsed !== 'object') {
+    throw new Error('Operator blob bytes do not parse to an object')
+  }
+  if (parsed.version !== OPERATOR_KEYSTORE_VERSION) {
+    throw new Error(
+      `Operator blob version mismatch: got ${parsed.version}, expected ${OPERATOR_KEYSTORE_VERSION}`,
+    )
+  }
+  if (typeof parsed.scope !== 'string' || typeof parsed.blob !== 'string') {
+    throw new Error('Operator blob bytes have invalid scope/blob fields')
+  }
+  return parsed as unknown as OperatorEncryptedBlob
 }
 
 /**
