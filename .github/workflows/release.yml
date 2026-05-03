@@ -109,8 +109,8 @@ jobs:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: bun publish --access=public
 
-      - name: Publish @s0nderlabs/anima-harness
-        working-directory: packages/harness
+      - name: Publish @s0nderlabs/anima-gateway
+        working-directory: packages/gateway
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: bun publish --access=public
