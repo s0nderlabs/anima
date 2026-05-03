@@ -4,6 +4,14 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.4] - 2026-05-03
+
+### Fixed
+
+- **`anima resume` now relaunches the harness daemon after Daytona restore**. When Daytona archives a sandbox, the filesystem is preserved but every process inside the container is terminated. Daytona's `/start` brings the container back online but does NOT auto-restart any user daemons. v0.17.1's `resumeArchivedSandbox` only worked on never-archived (already-started) sandboxes; on a real archive→restore path the harness daemon was dead and `/bootstrap/pubkey` timed out at 60s. Caught live during the v0.17.3 canary on enigma.
+- New `buildHarnessRelaunchScript` helper in `@s0nderlabs/anima-harness` mirrors the launch portion of `buildBootstrapScript` (env exports + `fuser -k` + 3-attempt `nohup bun anima-harness` retry) without the apt/clone/install steps. Container snapshot is intact, so we just need to relaunch the daemon.
+- `resumeArchivedSandbox` now probes `/bootstrap/pubkey` for 8s after `ensureSandboxStarted`. If unresponsive, fires the relaunch script via `provider.execInToolbox` and polls `/bootstrap/pubkey` for up to 60s with `RELAUNCH_FAIL_MARKER` short-circuit on failure. Idempotent: if the harness IS responding (e.g. fast-restart), the relaunch is skipped.
+
 ## [0.17.3] - 2026-05-03
 
 ### Fixed

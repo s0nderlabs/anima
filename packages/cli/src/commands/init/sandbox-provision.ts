@@ -27,7 +27,11 @@ import {
   BOOTSTRAP_FAIL_MARKER,
   BOOTSTRAP_PROGRESS_LOG,
   BOOTSTRAP_SUCCESS_MARKER_PREFIX,
+  RELAUNCH_DONE_MARKER,
+  RELAUNCH_FAIL_MARKER,
+  RELAUNCH_PROGRESS_LOG,
   buildBootstrapScript,
+  buildHarnessRelaunchScript,
 } from '@s0nderlabs/anima-harness'
 import { type Address, type Hex, formatEther, hexToBytes, parseEther } from 'viem'
 import type { LocalAccount } from 'viem/accounts'
@@ -632,6 +636,25 @@ export async function resumeArchivedSandbox(
     }
   }
 
+  // After Daytona restores an archived sandbox, the filesystem comes back but
+  // every process inside the container is gone. The bootstrap-launched harness
+  // daemon is dead. Probe /bootstrap/pubkey briefly; if it doesn't answer,
+  // re-execute the harness daemon via `provider.execInToolbox` before handoff.
+  if (ensureResult.initialState !== 'started') {
+    progress('checking if harness daemon is still alive after restore')
+    const harnessUp = await probeHarnessAlive(opts.sandboxEndpoint, 8_000)
+    if (!harnessUp) {
+      progress('harness daemon missing post-restore; relaunching via toolbox exec')
+      await relaunchHarnessDaemon({
+        provider: opts.provider,
+        sandboxId: opts.sandboxId,
+        sandboxEndpoint: opts.sandboxEndpoint,
+        operatorAddress: opts.operatorAccount.address,
+        onProgress: progress,
+      })
+    }
+  }
+
   // Re-handoff: pubkey + envelope + provision + waitReady.
   progress('re-handing off agent privkey to harness')
   const { bootstrapPubkey } = await handoffAgentToHarness({
@@ -647,6 +670,70 @@ export async function resumeArchivedSandbox(
   })
 
   return { initialState: ensureResult.initialState, alreadyReady: false, bootstrapPubkey }
+}
+
+async function probeHarnessAlive(endpoint: string, timeoutMs: number): Promise<boolean> {
+  try {
+    const r = await fetch(`${endpoint}/bootstrap/pubkey`, {
+      method: 'GET',
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    return r.ok
+  } catch {
+    return false
+  }
+}
+
+interface RelaunchHarnessOpts {
+  provider: SandboxProviderClient
+  sandboxId: string
+  sandboxEndpoint: string
+  operatorAddress: Address
+  onProgress?: (msg: string) => void
+}
+
+async function relaunchHarnessDaemon(opts: RelaunchHarnessOpts): Promise<void> {
+  const progress = opts.onProgress ?? (() => {})
+  const { script } = buildHarnessRelaunchScript({
+    sandboxId: opts.sandboxId,
+    operatorAddress: opts.operatorAddress,
+  })
+
+  // Fire the relaunch script via the toolbox. The script forks the inner
+  // launcher into the background and returns immediately, so this exec
+  // completes in ~1s; the actual harness daemon comes up over the next
+  // ~10-15 seconds. Caller polls /bootstrap/pubkey to confirm.
+  const fired = await opts.provider
+    .execInToolbox(opts.sandboxId, { command: script, timeout: 30 })
+    .catch(e => ({
+      exitCode: -1,
+      result: (e as Error).message,
+      stdout: undefined as string | undefined,
+    }))
+  if (fired.exitCode !== 0) {
+    throw new Error(
+      `relaunch exec failed: exitCode=${fired.exitCode} ${(fired.result ?? fired.stdout ?? '').slice(0, 160)}`,
+    )
+  }
+
+  const exec = makeExecRead(opts.provider, opts.sandboxId)
+  const deadline = Date.now() + 60_000
+  while (Date.now() < deadline) {
+    if (await probeHarnessAlive(opts.sandboxEndpoint, 4_000)) {
+      progress('harness daemon back online')
+      return
+    }
+    const failBody = (await exec(`cat ${RELAUNCH_FAIL_MARKER} 2>/dev/null || true`)).trim()
+    if (failBody) {
+      const tail = (await exec(`tail -n 60 ${RELAUNCH_PROGRESS_LOG} 2>/dev/null || true`)).trim()
+      throw new Error(`relaunch failed: ${failBody}\n${tail.slice(0, 600)}`)
+    }
+    const doneBody = (await exec(`cat ${RELAUNCH_DONE_MARKER} 2>/dev/null || true`)).trim()
+    if (doneBody) progress(`relaunch marker: ${doneBody}`)
+    progress('waiting for harness daemon to come up')
+    await sleep(3_000)
+  }
+  throw new Error('harness daemon did not come back online within 60s after relaunch')
 }
 
 /**

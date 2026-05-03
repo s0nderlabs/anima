@@ -82,3 +82,13 @@ export {
 } from './upgrade-script'
 
 export { type Heartbeat, type StartHeartbeatOpts, startHeartbeat } from './heartbeat'
+
+export {
+  type BuildRelaunchScriptOpts,
+  type BuildRelaunchScriptResult,
+  RELAUNCH_DONE_MARKER,
+  RELAUNCH_FAIL_MARKER,
+  RELAUNCH_PROGRESS_LOG,
+  RELAUNCH_SUCCESS_MARKER_PREFIX,
+  buildHarnessRelaunchScript,
+} from './relaunch-script'
