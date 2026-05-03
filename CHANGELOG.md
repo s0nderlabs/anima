@@ -4,6 +4,27 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.2] - 2026-05-04
+
+### Added
+
+- **Sandbox-mode telegram listener** (closes G3 from the Phase 12 audit). The harness `build-runtime.ts` now constructs a full `TelegramRuntimeContext` when `secrets.telegram` is present after provision: dispatches inbound DMs through `brain.infer({source: 'telegram'})`, publishes `telegram-inbound` / `telegram-outbound` / `telegram-processing-start` / `telegram-processing-end` events to the EventHub so chat-sandbox.tsx renders rows, swaps the permission prompter to the TG-aware bridge for inline-keyboard approval, fires per-turn `sync.flushTurn()`, and threads `TELEGRAM_GUIDANCE` into `extraGuidance`. Before this, the harness's `pluginNames` filter accepted `'telegram'` but the side-band ctx was hollow → the plugin loaded but did nothing.
+- **`secretsEnvelope` in provision flow**. New `packages/harness/src/secrets.ts` defines `HarnessSecretsSchema` (zod) covering optional `telegram: { botToken, allowedUserIds, pairingApproved? }`. `ProvisionRequest` extends with optional `secretsEnvelope: ProvisionEnvelope`; `provisionMessageHash` includes a new `bytes32 secretsEnvelopeHash` (zero-hash sentinel when absent) so the operator's signature covers both envelopes — a stolen secrets envelope can't be replayed against another harness. Server `/bootstrap/provision` decrypts both envelopes with the bootstrap privkey and parses the secrets JSON against the zod schema; failures abort provision with a clear error.
+- **`anima upgrade` re-handoff with telegram secrets**. When the local `~/.anima/agents/<id>/telegram-secrets.encrypted` blob exists, `runInPlaceUpgrade` decrypts it via the operator wallet's sign-derived key, ECIES-encrypts the plaintext to the bootstrap pubkey, and ships it alongside the agent privkey envelope. v0.18.2+ harnesses pick it up automatically; v0.17.x harnesses ignore the field (legacy hash compat preserved).
+- **`chat-sandbox.tsx` telegram event rendering**. New row roles for `telegram-inbound` (TG-blue with `@username` + chat preview), `telegram-outbound` (system row showing chatId + length), and `telegram-processing-{start,end}` (status rows mirroring local-mode TUI hooks).
+
+### Changed
+
+- **`runtime.RuntimeAdapter.start` signature** extends with optional `secrets?: HarnessSecrets`. Both `RealRuntime` and `StubRuntime` accept the new field; the value threads to `buildAnimaRuntime` via the same `opts.secrets` path.
+- **`HandoffAgentToHarnessOpts`** in `sandbox-provision.ts` accepts optional `telegramSecrets: { botToken, allowedUserIds, pairingApproved? }`. When present, the helper ECIES-encrypts a JSON blob to the bootstrap pubkey and includes the resulting envelope in the provision request.
+
+### Internal
+
+- New `packages/harness/src/secrets.ts` — `HarnessSecrets` + `parseHarnessSecrets`.
+- 8 file modifications: `auth.ts` (extended ProvisionRequest + provisionMessageHash), `server.ts` (decrypt secrets envelope), `runtime.ts` + `real-runtime.ts` (start opts), `build-runtime.ts` (telegram side-band ctx + dispatch + approval bridge wiring), `client.ts` (provision payload), `sandbox-provision.ts` (handoff with telegram secrets), `upgrade.ts` (re-handoff path), `chat-sandbox.tsx` (event rendering).
+- Test count unchanged (783); existing harness tests still pass with the additive ProvisionRequest field.
+- B7's listener.getStatus polish deferred to v0.19+ (cosmetic only). G5 metadata fix already landed in B1 alongside debounce.ts.
+
 ## [0.18.1] - 2026-05-04
 
 ### Added
@@ -973,6 +994,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.18.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.2
 [0.18.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.1
 [0.18.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.0
 [0.16.8]: https://github.com/s0nderlabs/anima/releases/tag/v0.16.8

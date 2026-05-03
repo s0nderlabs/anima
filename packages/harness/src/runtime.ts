@@ -49,7 +49,12 @@ export interface ChatTurnResult {
  * `stub-runtime.ts` is for HTTP-bridge testing without burning compute.
  */
 export interface RuntimeAdapter {
-  start(opts: { agentPrivkey: Hex; config: RuntimeConfig; events: EventHub }): Promise<void>
+  start(opts: {
+    agentPrivkey: Hex
+    config: RuntimeConfig
+    events: EventHub
+    secrets?: import('./secrets').HarnessSecrets
+  }): Promise<void>
   runChatTurn(input: ChatTurnInput): Promise<ChatTurnResult>
   flushSync(): Promise<{ tx?: string; slots: string[] }>
   ready(): boolean

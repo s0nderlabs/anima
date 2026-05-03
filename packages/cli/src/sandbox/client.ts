@@ -52,6 +52,8 @@ export interface HealthzResponse {
 
 export interface ProvisionPayload {
   envelope: ProvisionEnvelope
+  /** Optional second envelope for harness secrets (telegram bot token etc). */
+  secretsEnvelope?: ProvisionEnvelope
   iNFTRef: { contract: Address; tokenId: string }
   config: RuntimeConfig
 }
@@ -124,6 +126,7 @@ export class SandboxClient {
     const ts = Date.now()
     const request = {
       envelope: payload.envelope,
+      secretsEnvelope: payload.secretsEnvelope,
       operatorAddress: this.operator.address,
       iNFTRef: payload.iNFTRef,
       config: payload.config,

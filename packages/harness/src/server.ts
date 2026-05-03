@@ -123,6 +123,7 @@ export function createHarnessServer(deps: ServerDeps): http.Server {
 
         const body = (await readJson(req)) as {
           envelope: ProvisionRequest['envelope']
+          secretsEnvelope?: ProvisionRequest['envelope']
           operatorAddress: Address
           iNFTRef: ProvisionRequest['iNFTRef']
           config: RuntimeConfig
@@ -142,6 +143,7 @@ export function createHarnessServer(deps: ServerDeps): http.Server {
 
         const request: ProvisionRequest = {
           envelope: body.envelope,
+          secretsEnvelope: body.secretsEnvelope,
           operatorAddress: getAddress(body.operatorAddress),
           iNFTRef: { contract: getAddress(body.iNFTRef.contract), tokenId: body.iNFTRef.tokenId },
           config: body.config,
@@ -176,6 +178,30 @@ export function createHarnessServer(deps: ServerDeps): http.Server {
         const agentPrivkey = bytesToHex(agentPrivkeyBytes) as Hex
         const agentAddress = privateKeyToAccount(agentPrivkey).address
 
+        // Optional secrets envelope (Phase 12 / B6). Decrypted with the
+        // bootstrap privkey same as the agent privkey envelope. JSON parsed
+        // against the HarnessSecrets zod schema; failures abort provision.
+        let secrets: import('./secrets').HarnessSecrets | undefined
+        if (request.secretsEnvelope) {
+          let secretsBytes: Uint8Array
+          try {
+            secretsBytes = decryptWithPrivkey({
+              recipientPrivkey: session.bootstrap.privkeyHex,
+              envelope: request.secretsEnvelope,
+            })
+          } catch (e) {
+            log(`secrets-decrypt-fail: ${(e as Error).message}`)
+            return send(res, 400, { error: 'secrets-decrypt-failed' })
+          }
+          try {
+            const { parseHarnessSecrets } = await import('./secrets')
+            secrets = parseHarnessSecrets(new TextDecoder().decode(secretsBytes))
+          } catch (e) {
+            log(`secrets-parse-fail: ${(e as Error).message}`)
+            return send(res, 400, { error: 'secrets-parse-failed' })
+          }
+        }
+
         transitionToProvisioned(session, {
           agentPrivkey,
           agentAddress,
@@ -183,7 +209,9 @@ export function createHarnessServer(deps: ServerDeps): http.Server {
           iNFTRef: request.iNFTRef,
           config: request.config,
         })
-        log(`provisioned agent=${agentAddress} state=${session.state}`)
+        log(
+          `provisioned agent=${agentAddress} state=${session.state}${secrets?.telegram ? ' (with telegram secrets)' : ''}`,
+        )
 
         send(res, 200, {
           ok: true,
@@ -198,6 +226,7 @@ export function createHarnessServer(deps: ServerDeps): http.Server {
               agentPrivkey,
               config: request.config,
               events: session.events,
+              secrets,
             })
             transitionToReady(session)
             log(`runtime ready agent=${agentAddress}`)

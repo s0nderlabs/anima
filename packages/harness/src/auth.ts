@@ -18,6 +18,13 @@ export interface ProvisionEnvelope {
 
 export interface ProvisionRequest {
   envelope: ProvisionEnvelope
+  /**
+   * Optional second ECIES envelope sealing the harness secrets JSON
+   * (telegram bot token + allowlist, etc.). Sealed to the same bootstrap
+   * pubkey. The operator's signature covers both envelopes so a stolen
+   * secrets envelope can't be replayed against a different harness.
+   */
+  secretsEnvelope?: ProvisionEnvelope
   operatorAddress: Address
   iNFTRef: INFTRef
   config: RuntimeConfig
@@ -67,9 +74,16 @@ function configHash(config: RuntimeConfig): Hex {
  * against a different harness or a different runtime config.
  */
 export function provisionMessageHash(req: ProvisionRequest, bootstrapPubkey: Hex): Hex {
+  // v0.18+ extends the digest with a secretsEnvelopeHash so a second envelope
+  // can ship telegram secrets etc. alongside the agent privkey. Zero-hash
+  // sentinel preserves the v0.17 digest when no secrets envelope is sent.
+  const secretsHash: Hex = req.secretsEnvelope
+    ? envelopeHash(req.secretsEnvelope)
+    : ('0x0000000000000000000000000000000000000000000000000000000000000000' as Hex)
   const encoded = encodeAbiParameters(
     [
       { type: 'bytes32', name: 'envelopeHash' },
+      { type: 'bytes32', name: 'secretsEnvelopeHash' },
       { type: 'bytes32', name: 'configHash' },
       { type: 'address', name: 'operator' },
       { type: 'address', name: 'inftContract' },
@@ -79,6 +93,7 @@ export function provisionMessageHash(req: ProvisionRequest, bootstrapPubkey: Hex
     ],
     [
       envelopeHash(req.envelope),
+      secretsHash,
       configHash(req.config),
       req.operatorAddress,
       req.iNFTRef.contract,

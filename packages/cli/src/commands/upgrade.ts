@@ -386,6 +386,37 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
     sandboxId: args.sandboxId,
     operator: operatorAccount,
   })
+  // Phase 12 / B6: ship telegram secrets via secondary envelope if present.
+  // Operator decrypts the local blob; ECIES-encrypts to bootstrap pubkey
+  // happens inside handoffAgentToHarness.
+  let telegramSecretsPlain:
+    | { botToken: string; allowedUserIds: number[]; pairingApproved?: number[] }
+    | undefined
+  try {
+    const { iNFTAgentId } = await import('@s0nderlabs/anima-core')
+    const { telegramSecretsExist, loadTelegramSecrets } = await import('../util/telegram-secrets')
+    const agentId = iNFTAgentId({
+      contractAddress: args.contractAddress,
+      tokenId: args.tokenId,
+    })
+    if (telegramSecretsExist(agentId)) {
+      sBox.message('decrypting local telegram secrets for re-handoff')
+      const tg = await loadTelegramSecrets({
+        signer: args.operator,
+        agentAddress: args.agentAddress,
+        agentId,
+      })
+      if (tg) {
+        telegramSecretsPlain = {
+          botToken: tg.botToken,
+          allowedUserIds: tg.allowedUserIds,
+        }
+      }
+    }
+  } catch (err) {
+    sBox.message(`telegram-secrets read failed: ${(err as Error).message.slice(0, 120)}`)
+    // Continue without — non-fatal. The harness will run without telegram.
+  }
   try {
     await handoffAgentToHarness({
       sandboxClient,
@@ -394,6 +425,7 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
       iNFTRef: { contract: args.contractAddress, tokenId: args.tokenId },
       iNFTNetwork: args.iNFTNetwork,
       brain: args.brain,
+      telegramSecrets: telegramSecretsPlain,
       onProgress: msg => sBox.message(msg),
     })
     sBox.stop(`sandbox ${args.sandboxId.slice(0, 8)} ready @ ${args.sandboxEndpoint}`)

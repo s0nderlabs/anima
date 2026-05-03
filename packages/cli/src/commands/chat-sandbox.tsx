@@ -194,6 +194,29 @@ export async function runChatSandbox(config: AnimaConfig): Promise<void> {
             role: 'system',
             text: `inbox notice: ${d.noticeKind ?? '?'} from ${d.from ?? ''}`,
           })
+        } else if (k === 'telegram-inbound') {
+          const who = d.username ? `@${d.username}` : `id=${d.userId ?? '?'}`
+          state.pushRow({
+            role: 'inbox-tg',
+            text: `tg ${who} · ${d.preview ?? ''}`,
+          })
+        } else if (k === 'telegram-outbound') {
+          state.pushRow({
+            role: 'system',
+            text: `tg out → chat ${d.chatId ?? '?'} · ${d.length ?? 0} chars`,
+          })
+        } else if (k === 'telegram-processing-start') {
+          state.pushRow({
+            role: 'system',
+            text: `tg replying to chat ${d.chatId ?? '?'}`,
+          })
+        } else if (k === 'telegram-processing-end') {
+          state.pushRow({
+            role: 'system',
+            text: d.ok
+              ? `tg reply sent to chat ${d.chatId ?? '?'}`
+              : `tg reply FAILED to chat ${d.chatId ?? '?'}`,
+          })
         }
         break
       }

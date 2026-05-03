@@ -31,6 +31,7 @@ import {
   makeToolSearchTool,
   makeViemClients,
   matchSkillTriggers,
+  newEventId,
   readIndexFile,
   scanSkills,
 } from '@s0nderlabs/anima-core'
@@ -42,11 +43,22 @@ import {
   type OperatorNotice,
 } from '@s0nderlabs/anima-plugin-comms'
 import { ONCHAIN_GUIDANCE, type OnchainRuntimeContext } from '@s0nderlabs/anima-plugin-onchain'
+import {
+  type ApprovalChoiceKind,
+  TELEGRAM_GUIDANCE,
+  type TelegramApprovalBridge,
+  type TelegramDispatchInput,
+  type TelegramDispatchResult,
+  type TelegramRuntimeContext,
+  formatInboundPreview as formatTelegramInboundPreview,
+  makeApprovalIdFactory,
+} from '@s0nderlabs/anima-plugin-telegram'
 import type { Address, Hex } from 'viem'
 import type { ApprovalRelay } from './approval-relay'
 import type { EventHub } from './events'
 import { restoreMemoryFromChain } from './memory-restore'
 import type { RuntimeConfig } from './runtime'
+import type { HarnessSecrets } from './secrets'
 
 export interface BuildRuntimeOpts {
   config: RuntimeConfig
@@ -70,6 +82,13 @@ export interface BuildRuntimeOpts {
    * only for tests or a non-standard layout.
    */
   workspaceRoot?: string
+  /**
+   * Optional secrets shipped via the second provision envelope. When
+   * `secrets.telegram` is present, the harness wires a telegram listener +
+   * approval bridge so the operator can DM the bot from their phone and
+   * approve tool calls via inline keyboard.
+   */
+  secrets?: HarnessSecrets
 }
 
 export interface BuiltRuntime {
@@ -358,6 +377,57 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
     }
   }
 
+  // Phase 12 / B6: telegram side-band ctx for sandbox mode.
+  // Closes G3 (the hollow telegram block in this file). The dispatcher mirrors
+  // the chat-telegram local-mode pattern: forward inbound DMs through brain
+  // with source='telegram', publish events to EventHub so chat-sandbox.tsx
+  // renders the row, fire-and-forget per-turn sync. Approval bridge slots
+  // are filled by listener.start() so the operator can approve tool calls
+  // from their phone via inline keyboard.
+  let telegram: TelegramRuntimeContext | undefined
+  let telegramDispatchSlot: {
+    current: ((i: TelegramDispatchInput) => Promise<TelegramDispatchResult>) | null
+  } | null = null
+  let telegramPendingApprovals: Map<string, (choice: ApprovalChoiceKind) => void> | null = null
+  let telegramApprovalIdFactory: (() => string) | null = null
+  let telegramApprovalBridge: TelegramApprovalBridge | null = null
+  if (opts.secrets?.telegram && pluginNames.includes('telegram')) {
+    const tg = opts.secrets.telegram
+    telegramDispatchSlot = { current: null }
+    telegramPendingApprovals = new Map()
+    telegramApprovalIdFactory = makeApprovalIdFactory()
+    telegramApprovalBridge = {
+      sendApproval: { current: null },
+      installCallbackHandler: { current: null },
+    }
+    telegram = {
+      botToken: tg.botToken,
+      allowedUserIds: tg.allowedUserIds,
+      agentName: `agent-${agentId.slice(0, 8)}`,
+      dispatchUserMessage: async input => {
+        const cb = telegramDispatchSlot?.current
+        if (!cb) return { response: 'agent is still booting; try again in a moment.' }
+        return cb(input)
+      },
+      onProcessingStart: async (chatId, msgId) => {
+        events.publish('listener-event', {
+          kind: 'telegram-processing-start',
+          chatId,
+          messageId: msgId,
+        })
+      },
+      onProcessingEnd: async (chatId, msgId, ok) => {
+        events.publish('listener-event', {
+          kind: 'telegram-processing-end',
+          chatId,
+          messageId: msgId,
+          ok,
+        })
+      },
+      approvalBridge: telegramApprovalBridge,
+    }
+  }
+
   const collectedListeners: Listener[] = []
   const skillsDisabled = { current: [] as string[] }
 
@@ -380,6 +450,7 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
     visionInfer,
     comms,
     onchain,
+    telegram,
     resolve: async name => {
       switch (name) {
         case 'system':
@@ -437,6 +508,7 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
   const extraGuidance: string[] = []
   if (comms?.marketAddress) extraGuidance.push(MARKETPLACE_GUIDANCE)
   if (onchain) extraGuidance.push(ONCHAIN_GUIDANCE)
+  if (telegram) extraGuidance.push(TELEGRAM_GUIDANCE)
 
   const buildPrefix = async () => {
     const idx = await readIndexFile(memoryIndexPath).catch(() => null)
@@ -530,6 +602,126 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
   })
 
   await brain.init()
+
+  // 6.5. Phase 12 telegram dispatch + approval bridge wiring. Slot must be
+  // filled BEFORE listeners start so any inbound TG message that races sees
+  // the real dispatcher, not the boot-time stub.
+  if (telegram && telegramDispatchSlot && telegramPendingApprovals && telegramApprovalIdFactory) {
+    const slot = telegramDispatchSlot
+    const pending = telegramPendingApprovals
+    const idFactory = telegramApprovalIdFactory
+    let approvalCallbackInstalled = false
+    const ensureApprovalCallback = (): void => {
+      if (approvalCallbackInstalled) return
+      const install = telegramApprovalBridge?.installCallbackHandler.current
+      if (!install) return
+      install((approvalId, choice, _fromUserId) => {
+        const r = pending.get(approvalId)
+        if (r) {
+          pending.delete(approvalId)
+          r(choice)
+        }
+      })
+      approvalCallbackInstalled = true
+    }
+    slot.current = async input => {
+      ensureApprovalCallback()
+      // Publish inbound event so chat-sandbox.tsx renders a row.
+      events.publish('listener-event', {
+        kind: 'telegram-inbound',
+        chatId: input.chatId,
+        userId: input.userId,
+        username: input.username,
+        displayName: input.displayName,
+        preview: formatTelegramInboundPreview({
+          chatId: input.chatId,
+          username: input.username,
+          displayName: input.displayName,
+          text: input.text.replace(/^<channel[^>]*>([\s\S]*)<\/channel>$/, '$1'),
+        }),
+      })
+      // Build a TG-aware prompter for this turn (closes over input.chatId).
+      const previousMode = permission.getMode()
+      const previousPrompterRef = (
+        permission as unknown as {
+          prompter: (req: PermissionRequest) => Promise<PermissionDecision>
+        }
+      ).prompter
+      const send = telegramApprovalBridge?.sendApproval.current
+      if (send) {
+        permission.setPrompter(async req => {
+          const approvalId = idFactory()
+          const body = `🔐 Approval needed for ${req.kind}\n\n${req.command ?? req.path ?? req.recipient ?? ''}\n\nReason: ${req.reason}`
+          return new Promise<PermissionDecision>(resolve => {
+            const timeoutMs = 5 * 60_000
+            const timer = setTimeout(() => {
+              if (pending.delete(approvalId)) resolve('deny')
+            }, timeoutMs)
+            pending.set(approvalId, choice => {
+              clearTimeout(timer)
+              resolve(
+                choice === 'once'
+                  ? 'allow-once'
+                  : choice === 'session' || choice === 'always'
+                    ? 'allow-session'
+                    : 'deny',
+              )
+            })
+            void send(input.chatId, body, approvalId).catch(() => {
+              clearTimeout(timer)
+              if (pending.delete(approvalId)) resolve('deny')
+            })
+          })
+        })
+        permission.setMode('prompt')
+      } else {
+        permission.setMode('off')
+      }
+      try {
+        await activity.append({
+          ts: Date.now(),
+          kind: 'wake',
+          data: { source: 'telegram', chatId: input.chatId, userId: input.userId },
+        })
+        const turn = await brain.infer({
+          event: {
+            id: newEventId(),
+            source: 'telegram',
+            payload: { label: 'telegram-message', data: input.text },
+            ts: Date.now(),
+          },
+        })
+        await activity.append({
+          ts: Date.now(),
+          kind: 'brain-response',
+          data: {
+            content: turn.content,
+            toolCalls: turn.toolCalls.length,
+            finishReason: turn.finishReason,
+            usage: turn.usage,
+            source: 'telegram',
+          },
+        })
+        const response = (turn.content ?? '').trim()
+        events.publish('listener-event', {
+          kind: 'telegram-outbound',
+          chatId: input.chatId,
+          length: response.length,
+        })
+        let syncTx: string | undefined
+        try {
+          const r = await sync.flushTurn()
+          if (r.txHash) syncTx = r.txHash
+        } catch {
+          /* swallow */
+        }
+        return { response: response.length === 0 ? '(no reply)' : response, syncTx }
+      } finally {
+        permission.setMode(previousMode)
+        if (send && previousPrompterRef) permission.setPrompter(previousPrompterRef)
+      }
+    }
+  }
 
   // 7. Wire forward-declared listener callbacks now that everything's built.
   const knownJobs = new Map<string, { buyer: Address; provider: Address }>()

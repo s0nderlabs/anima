@@ -307,6 +307,13 @@ export interface HandoffAgentToHarnessOpts {
   brain: { provider: Address; model: string }
   plugins?: AnimaPlugin[]
   promptAppend?: string
+  /**
+   * Optional plaintext harness secrets (telegram bot token + allowlist) to
+   * ship via a second ECIES envelope. The handoff helper ECIES-encrypts to
+   * the bootstrap pubkey same as agentPrivkey. v0.18.2+ harness expects this
+   * field; older harnesses ignore it.
+   */
+  telegramSecrets?: { botToken: string; allowedUserIds: number[]; pairingApproved?: number[] }
   /** Default 60_000. */
   pubkeyTimeoutMs?: number
   /** Default 180_000. */
@@ -328,6 +335,16 @@ export async function handoffAgentToHarness(
     recipientPubkey: pubkeyRes.pubkeyHex,
     plaintext: agentPrivkeyBytes,
   })
+  let secretsEnvelope: import('@s0nderlabs/anima-core').Option3Envelope | undefined
+  if (opts.telegramSecrets) {
+    const secretsJson = JSON.stringify({ telegram: opts.telegramSecrets })
+    const secretsBytes = new TextEncoder().encode(secretsJson)
+    secretsEnvelope = encryptToPubkey({
+      recipientPubkey: pubkeyRes.pubkeyHex,
+      plaintext: secretsBytes,
+    })
+    progress('shipping telegram secrets via secondary envelope')
+  }
 
   progress('sending provision envelope to harness')
   const runtimeConfig = {
@@ -347,6 +364,7 @@ export async function handoffAgentToHarness(
   await opts.sandboxClient.provision(
     {
       envelope,
+      secretsEnvelope,
       iNFTRef: { contract: opts.iNFTRef.contract, tokenId: opts.iNFTRef.tokenId.toString() },
       config: runtimeConfig,
     },

@@ -43,7 +43,12 @@ export class RealRuntime implements RuntimeAdapter {
     this.#agentDirRoot = opts.agentDirRoot ?? join(tmpdir(), 'anima-harness')
   }
 
-  async start(opts: { agentPrivkey: Hex; config: RuntimeConfig; events: EventHub }): Promise<void> {
+  async start(opts: {
+    agentPrivkey: Hex
+    config: RuntimeConfig
+    events: EventHub
+    secrets?: import('./secrets').HarnessSecrets
+  }): Promise<void> {
     const agentAddress = privateKeyToAccount(opts.agentPrivkey).address
     this.#network = opts.config.network
     const agentId = await this.#agentIdFromConfig(opts.config)
@@ -57,6 +62,7 @@ export class RealRuntime implements RuntimeAdapter {
       agentDir,
       events: opts.events,
       approvals: this.#approvals,
+      secrets: opts.secrets,
     })
     this.#runtime = runtime
     this.#wireDrains(opts.events)
