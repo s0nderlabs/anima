@@ -1,6 +1,6 @@
 {
   "name": "@s0nderlabs/anima-gateway",
-  "version": "0.19.2",
+  "version": "0.19.3",
   "type": "module",
   "description": "Anima gateway daemon: long-running brain runtime, listeners, tool registry, memory sync. Runs locally (laptop) or remotely (0G Sandbox TDX TEE).",
   "license": "MIT",

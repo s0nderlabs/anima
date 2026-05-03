@@ -18,6 +18,14 @@ export interface SandboxClientOpts {
   operator: LocalAccount
   /** Optional custom fetch implementation (used in tests). */
   fetchImpl?: typeof fetch
+  /**
+   * Optional unix socket path. When set, every fetch call routes via the
+   * socket using Bun's `fetch(url, {unix: '/path'})` option. The endpoint
+   * URL's host doesn't matter (kernel routes via socket); we use
+   * `http://localhost` as the conventional placeholder. Used by the local
+   * gateway path where chat.tsx talks to `~/.anima/agents/<id>/gateway.sock`.
+   */
+  unixSocketPath?: string
 }
 
 export interface ChatResponse {
@@ -82,7 +90,20 @@ export class SandboxClient {
     this.endpoint = opts.endpoint.replace(/\/$/, '')
     this.sandboxId = opts.sandboxId
     this.operator = opts.operator
-    this.#fetch = opts.fetchImpl ?? globalThis.fetch
+    const baseFetch = opts.fetchImpl ?? globalThis.fetch
+    if (opts.unixSocketPath) {
+      const sock = opts.unixSocketPath
+      // Bun's fetch supports `{unix: '/path'}` to route over a unix socket.
+      // The URL's host portion is ignored once unix is set; we still pass
+      // the full URL so Bun can parse the path component.
+      this.#fetch = ((input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input.toString()
+        const merged = { ...(init ?? {}), unix: sock } as RequestInit & { unix: string }
+        return baseFetch(url, merged as RequestInit)
+      }) as typeof fetch
+    } else {
+      this.#fetch = baseFetch
+    }
   }
 
   async pubkey(): Promise<BootstrapPubkeyResponse> {

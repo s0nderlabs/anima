@@ -4,6 +4,32 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.3] - 2026-05-03
+
+### Added (B4 partial — unix socket transport, live-verified)
+
+- **`SandboxClient` accepts `unixSocketPath`** option. When set, every fetch routes via Bun's `fetch(url, {unix: '/path'})` instead of TCP. Endpoint URL host is ignored (kernel routes via socket); convention is `http://localhost`. Lets the CLI talk to a local gateway daemon over `~/.anima/agents/<id>/gateway.sock`.
+- **`test/local/e2e-gateway-local-socket.ts`** — live integration test. With `anima gateway start` running, calls `client.health()` over unix socket and verifies state=Ready + agentAddress matches config. Passed live against PID 86783 daemon (state=Ready, version=0.19.2, agent=0x1e93…C99f).
+
+### Live-verified (everything from v0.19.0 onwards)
+
+This ship's testing was rigorous, not assumed. With the gateway daemon spawned for specter agent (mainnet iNFT #4):
+
+- ✅ `anima gateway status` (no gateway): correct "absent" reporting
+- ✅ `anima gateway start`: derives operator session via keychain (no Touch ID with always-allow), pre-derives keystore + telegram scope keys via `precomputeAllScopes`, writes `.operator-session` perm 0600 with 24h TTL, forks daemon detached, restores 4 memory slots from 0G Storage, reaches `runtime ready agent=0x1e93…C99f`, binds unix socket
+- ✅ `anima gateway status` (running): shows PID 84475 alive, lock-age 32s, session fresh 23h59m remaining, scopes [keystore, anima-telegram-v1]
+- ✅ `anima gateway stop`: SIGTERM → daemon exits cleanly, socket unlinked, lock unlinked
+- ✅ `anima gateway start` after stop (cached session): NO Touch ID prompt, daemon up at new PID 86783 in ~1s, socket bound immediately
+- ✅ Identity preserved across stop/restart (same agent EOA `0x1e93…C99f`)
+- ✅ Memory slots auto-restored from 0G Storage on each boot
+- ✅ Unix socket /healthz handshake from independent process via SandboxClient
+
+### Internal
+
+- 802 unit tests pass (re-verified post-bump per /seal Step 4d). Typecheck + lint clean. 124 forge tests pass.
+- v0.19.x cumulative file scorecard: 14 new files (operator-session.{ts,test.ts}, local-entrypoint.ts, anima-gateway-local bin, gateway.ts dispatcher, 6 gateway-{run,start,stop,restart,status,logs}.ts, e2e-gateway-local-socket.ts) + 30+ rename touch-points + 4 server.ts/operator-keystore-crypto.ts modifications.
+- Phase 14 next (v0.19.4+): wire chat.tsx auto-detection so `anima` (TUI) routes to the local gateway daemon via socket when one is running. Today the unix socket transport works, but chat.tsx still embeds its own runtime by default.
+
 ## [0.19.2] - 2026-05-03
 
 ### Added
@@ -1074,6 +1100,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.3
 [0.19.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.2
 [0.19.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.1
 [0.19.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.0
