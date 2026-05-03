@@ -28,10 +28,13 @@ import { readFile } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { join } from 'node:path'
 import {
+  OPERATOR_BLOB_SCOPES,
   acquireScopedLock,
   agentPaths,
   decodeKeystoreBytes,
+  decodeOperatorBlobBytes,
   decryptAgentKey,
+  decryptOperatorBlob,
   generateBootstrapKeypair,
   getSessionKey,
   iNFTAgentId,
@@ -41,6 +44,7 @@ import { type Address, type Hex, getAddress, isAddress } from 'viem'
 import { ApprovalRelay } from './approval-relay'
 import { EventHub } from './events'
 import { RealRuntime } from './real-runtime'
+import type { GatewaySecrets } from './secrets'
 import { createGatewayServer } from './server'
 import {
   GATEWAY_VERSION,
@@ -75,6 +79,51 @@ async function loadConfig(path: string): Promise<MinimalConfig> {
 function die(msg: string): never {
   process.stderr.write(`gateway: ${msg}\n`)
   process.exit(1)
+}
+
+interface TelegramSecretsPlaintext {
+  botToken: string
+  botUsername?: string
+  botId?: number
+  allowedUserIds: number[]
+}
+
+async function loadLocalTelegramSecrets(opts: {
+  agentId: string
+  agentAddress: Address
+}): Promise<GatewaySecrets | undefined> {
+  const path = join(agentPaths.agent(opts.agentId).dir, 'telegram-secrets.encrypted')
+  if (!existsSync(path)) return undefined
+  const blobKey = getSessionKey(opts.agentId, OPERATOR_BLOB_SCOPES.TELEGRAM)
+  if (!blobKey) {
+    process.stderr.write(
+      'gateway: telegram secrets present but no telegram scope key in operator session, run `anima gateway start` to refresh\n',
+    )
+    return undefined
+  }
+  try {
+    const fileBytes = await readFile(path)
+    const blob = decodeOperatorBlobBytes(new Uint8Array(fileBytes))
+    const ptBytes = await decryptOperatorBlob({
+      scope: OPERATOR_BLOB_SCOPES.TELEGRAM,
+      agentAddress: opts.agentAddress,
+      blob,
+      precomputedKey: blobKey,
+    })
+    const parsed = JSON.parse(new TextDecoder().decode(ptBytes)) as TelegramSecretsPlaintext
+    if (typeof parsed.botToken !== 'string' || !Array.isArray(parsed.allowedUserIds)) {
+      throw new Error('malformed plaintext (missing botToken or allowedUserIds)')
+    }
+    return {
+      telegram: {
+        botToken: parsed.botToken,
+        allowedUserIds: parsed.allowedUserIds,
+      },
+    }
+  } catch (err) {
+    process.stderr.write(`gateway: failed to load telegram secrets: ${(err as Error).message}\n`)
+    return undefined
+  }
 }
 
 async function main(): Promise<void> {
@@ -115,6 +164,14 @@ async function main(): Promise<void> {
     keystore,
     agentAddress,
     precomputedKey: keystoreKey,
+  })
+
+  // Load encrypted telegram secrets (if any) using the cached telegram scope
+  // key. Same shape `loadTelegramSecrets` (CLI util) produces — we inline the
+  // decrypt path to avoid pulling the CLI signer into the daemon.
+  const secrets: GatewaySecrets | undefined = await loadLocalTelegramSecrets({
+    agentId,
+    agentAddress,
   })
 
   // Acquire host-wide gateway lock so two `anima gateway run` calls for the
@@ -172,6 +229,7 @@ async function main(): Promise<void> {
       agentPrivkey,
       config: config as unknown as Parameters<typeof runtime.start>[0]['config'],
       events,
+      secrets,
     })
     .then(() => {
       transitionToReady(sess)

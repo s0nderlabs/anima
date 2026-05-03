@@ -4,6 +4,27 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.6] - 2026-05-03
+
+### Added (B5: telegram listener unified in local gateway)
+
+- **`anima gateway run` now loads telegram secrets in local mode.** Reads `~/.anima/agents/<id>/telegram-secrets.encrypted`, decrypts via the cached telegram scope key from the operator session (no Touch ID), passes the parsed bot token + allowedUserIds to `runtime.start({ secrets })`. The build-runtime path that constructs `TelegramRuntimeContext` now activates in both transports (sandbox and local). Verified live: gateway daemon foreground stdout shows `[telegram] listener active @anima_specter_bot` for the specter agent.
+
+### Walk-away guarantee on the laptop
+
+This was the missing piece for the "close the TUI, agent still replies" story in local mode. Sandbox mode had this since v0.18.2 (B6 of phase 12); local mode only gets it now. After `anima gateway start`, the daemon polls Telegram independently of the TUI lifecycle. Closing the TUI does not stop telegram polling.
+
+### Notes for operators
+
+- A v0.18.0 default-deny policy still applies: `allowedUserIds` must be set via `anima telegram setup` to receive messages. Empty allowlist + no pairing store = listener drops every inbound message (visible as `[telegram] no allowlist configured AND no pairing store. All inbound messages will be DROPPED.` on stdout). Pairing store wiring in the gateway is deferred to a future ship; today the path is to populate `allowedUserIds` directly through the setup command.
+- The TUI thin-client (v0.19.4) and chat HTTP fix (v0.19.5) are unchanged. Sending a TG message that hits the allowlist now correctly wakes the brain through the gateway daemon and the SSE `listener-event:telegram-inbound` row appears in any open TUI.
+
+### Internal
+
+- New `loadLocalTelegramSecrets` helper in `packages/gateway/src/local-entrypoint.ts`. Inlines the AES-256-GCM decrypt path with `precomputedKey` so the daemon never needs to invoke a signer.
+- `decryptOperatorBlob` already had `precomputedKey` (since v0.19.0); reused as-is.
+- 802 unit tests pass. Typecheck + lint clean.
+
 ## [0.19.5] - 2026-05-03
 
 ### Fixed (TUI regression: chat HTTP timeout)
