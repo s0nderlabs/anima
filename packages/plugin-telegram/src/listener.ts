@@ -1,7 +1,10 @@
 import { Bot, type Context, GrammyError, HttpError } from 'grammy'
+import { type ApprovalChoice, parseCallbackData } from './approval-keyboard'
+import { escapeChunkSuffixForMarkdownV2, splitMessage } from './chunking'
 import { DebounceBuffer, type FlushedBatch } from './debounce'
 import { formatTelegramChannel } from './format'
 import { RateLimiter } from './limits'
+import { escapeMarkdownV2, isMarkdownParseError, stripMarkdownV2 } from './markdown'
 import { formatPairingMessage } from './pairing-flow'
 import { reactError, reactProcessing, reactSuccess } from './reactions'
 import {
@@ -11,7 +14,7 @@ import {
   classifyStartFailure,
   clearWebhookBeforePolling,
 } from './recovery'
-import { sendWithRetry } from './retry'
+import { DELIVERY_FAILURE_NOTICE, sendWithRetry } from './retry'
 import { sanitizeInbound } from './sanitize'
 import { buildSessionKey } from './session-key'
 import type { TelegramDispatchInput, TelegramRuntimeContext } from './types'
@@ -87,6 +90,16 @@ export class TelegramListener {
       )
     }
 
+    // Wire approval bridge if the dispatcher provided one. The bridge has two
+    // slots: sendApproval (we fill with a closure over this.bot) and
+    // installCallbackHandler (we fill with a registrar over bot.on('callback_query')).
+    if (this.opts.approvalBridge) {
+      this.opts.approvalBridge.sendApproval.current = (chatId, text, approvalId) =>
+        this.sendApprovalMessage(chatId, text, approvalId)
+      this.opts.approvalBridge.installCallbackHandler.current = handler =>
+        this.installCallbackHandler(handler)
+    }
+
     await clearWebhookBeforePolling(this.bot)
 
     this.refreshTimer = setInterval(() => {
@@ -139,6 +152,61 @@ export class TelegramListener {
       }
       this.tokenLock = null
     }
+  }
+
+  /** Send the inline-keyboard approval message. Used by the approval bridge. */
+  private async sendApprovalMessage(
+    chatId: number,
+    body: string,
+    approvalId: string,
+  ): Promise<void> {
+    const { buildApprovalKeyboard } = await import('./approval-keyboard')
+    await sendWithRetry(() =>
+      this.bot.api.sendMessage(chatId, body, {
+        reply_markup: buildApprovalKeyboard(approvalId),
+      }),
+    )
+  }
+
+  /**
+   * Register a single callback_query dispatcher. Parses + re-validates the
+   * clicker against `allowedUserIds`, then forwards to the caller's resolver
+   * which owns the pending-approval Map. grammy doesn't expose middleware
+   * unregister, so we no-op the returned function and rely on bot.stop()
+   * for teardown.
+   */
+  private installCallbackHandler(
+    onResolve: (approvalId: string, choice: ApprovalChoice, fromUserId: number) => void,
+  ): () => void {
+    const handler = async (ctx: Context): Promise<void> => {
+      const q = ctx.callbackQuery
+      if (!q) return
+      const parsed = parseCallbackData(q.data)
+      if (!parsed) {
+        try {
+          await ctx.answerCallbackQuery({ text: 'malformed approval callback' })
+        } catch {
+          /* ignore */
+        }
+        return
+      }
+      if (this.opts.allowedUserIds.length > 0 && !this.opts.allowedUserIds.includes(q.from.id)) {
+        try {
+          await ctx.answerCallbackQuery({ text: '⛔ You are not authorized to approve commands.' })
+        } catch {
+          /* ignore */
+        }
+        return
+      }
+      onResolve(parsed.approvalId, parsed.choice, q.from.id)
+      try {
+        await ctx.answerCallbackQuery({ text: `✓ ${parsed.choice}` })
+      } catch {
+        /* ignore */
+      }
+    }
+    this.bot.on('callback_query:data', handler)
+    return () => {}
   }
 
   /**
@@ -242,11 +310,7 @@ export class TelegramListener {
       const result = await this.opts.dispatchUserMessage({ ...input, text: channelText })
       const reply = result.response.trim()
       if (reply.length > 0) {
-        await sendWithRetry(() =>
-          this.bot.api.sendMessage(chatId, capForTelegram(reply), {
-            reply_parameters: { message_id: messageId, allow_sending_without_reply: true },
-          }),
-        )
+        await this.sendChunked(chatId, reply, messageId)
       }
       void reactSuccess(this.bot, chatId, messageId)
     } catch (err) {
@@ -270,6 +334,60 @@ export class TelegramListener {
       } catch {
         /* never block */
       }
+    }
+  }
+
+  /**
+   * Send a (possibly long) reply with MarkdownV2 + chunking. Falls back to
+   * plain-text on parse_error. On retry exhaustion, sends the delivery-failure
+   * notice. First chunk is reply-linked; subsequent chunks are not.
+   */
+  private async sendChunked(chatId: number, body: string, replyToMessageId: number): Promise<void> {
+    const chunks = splitMessage(body)
+    let firstSend = true
+    for (const chunk of chunks) {
+      const md = escapeChunkSuffixForMarkdownV2(escapeMarkdownV2(chunk))
+      try {
+        await sendWithRetry(() =>
+          this.bot.api.sendMessage(chatId, md, {
+            parse_mode: 'MarkdownV2',
+            reply_parameters: firstSend
+              ? { message_id: replyToMessageId, allow_sending_without_reply: true }
+              : undefined,
+          }),
+        )
+      } catch (err) {
+        if (isMarkdownParseError(err)) {
+          // Plain-text fallback for this chunk
+          try {
+            await sendWithRetry(() =>
+              this.bot.api.sendMessage(chatId, stripMarkdownV2(chunk), {
+                reply_parameters: firstSend
+                  ? { message_id: replyToMessageId, allow_sending_without_reply: true }
+                  : undefined,
+              }),
+            )
+          } catch (fallbackErr) {
+            // Even plain-text failed; surface delivery-failure notice once.
+            this.log(`send fallback failed: ${(fallbackErr as Error).message?.slice(0, 200)}`)
+            try {
+              await this.bot.api.sendMessage(chatId, DELIVERY_FAILURE_NOTICE)
+            } catch {
+              /* best-effort */
+            }
+            return
+          }
+        } else {
+          this.log(`send failed: ${(err as Error).message?.slice(0, 200)}`)
+          try {
+            await this.bot.api.sendMessage(chatId, DELIVERY_FAILURE_NOTICE)
+          } catch {
+            /* best-effort */
+          }
+          return
+        }
+      }
+      firstSend = false
     }
   }
 

@@ -68,6 +68,7 @@ import {
 } from '@s0nderlabs/anima-plugin-onchain'
 import {
   TELEGRAM_GUIDANCE,
+  type TelegramApprovalBridge,
   type TelegramRuntimeContext,
   formatInboundPreview as formatTelegramInboundPreview,
 } from '@s0nderlabs/anima-plugin-telegram'
@@ -411,6 +412,12 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   const telegramSystemRowSink: { current: ((text: string) => void) | null } = { current: null }
   const telegramInboundRowSink: { current: ((text: string) => void) | null } = { current: null }
   const telegramAssistantRowSink: { current: ((text: string) => void) | null } = { current: null }
+  // Bridge for inline-keyboard approval. Listener fills the inner refs on
+  // start; chat-telegram's runOne reads them at turn time.
+  const telegramApprovalBridge: TelegramApprovalBridge = {
+    sendApproval: { current: null },
+    installCallbackHandler: { current: null },
+  }
   let telegram: TelegramRuntimeContext | undefined
   if (telegramSecrets && pluginNames.includes('telegram')) {
     telegram = buildTelegramRuntimeContext({
@@ -420,6 +427,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       slot: telegramSlot,
       systemRowSink: telegramSystemRowSink,
     })
+    telegram.approvalBridge = telegramApprovalBridge
   }
   // Local listener registry: plugin-comms registers a single 'a2a-inbox'
   // listener via ctx.registerListener; we collect them here so chat can
@@ -746,7 +754,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   // TG message that lands once collectedListeners[i].start() fires below
   // routes through brain.infer with source=telegram.
   if (telegram) {
-    telegramSlot.current = buildTelegramDispatch({
+    const handle = buildTelegramDispatch({
       activity,
       sync,
       permission,
@@ -765,6 +773,14 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
           displayName: input.displayName,
           text: input.text.replace(/^<channel[^>]*>([\s\S]*)<\/channel>$/, '$1'),
         }),
+      approvalBridge: telegramApprovalBridge,
+    })
+    telegramSlot.current = handle.dispatch
+    // Drain queued TG messages whenever the brain returns to idle (closes G4
+    // starvation: a stdin turn ending while a TG message was queued used to
+    // leave it stuck until the next inbound).
+    state.onStatusChange(next => {
+      if (next === 'idle' && handle.getQueueSize() > 0) handle.drainQueue()
     })
   }
 

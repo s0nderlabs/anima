@@ -8,27 +8,39 @@
  *     points at a *deferred* callback ref; chat.tsx populates the ref AFTER
  *     brain init but BEFORE any inbound TG message can race.
  *
- *  2. `buildTelegramDispatch`: factory for the deferred callback itself. It
- *     mirrors the `drainInbound` shape from chat.tsx (refresh prefix, wake
- *     activity, brain.infer with source=telegram, log brain-response, push
- *     'telegram-assistant' row to TUI, fire-and-forget memory sync).
+ *  2. `buildTelegramDispatch`: factory for the deferred callback itself.
+ *     Returns a handle with `{ dispatch, drainQueue, getQueueSize }`. chat.tsx
+ *     wires the dispatch into the slot AND subscribes to status idle so it
+ *     can call drainQueue to wake any messages that arrived during a stdin
+ *     turn (closes G4 starvation).
  *
- *  Splitting these out keeps chat.tsx read-able and lets us unit-test the pure
- *  pieces.
+ * Bypass commands (parseBypassCommand) skip the queue + busy gate. `/stop`
+ * aborts the active brain turn; `/status` reports thinking/idle; the rest
+ * are placeholders for future B5 inline-keyboard approvals.
  */
 import type {
   ActivityLog,
   Brain,
   FrozenPrefix,
   MemorySyncManager,
+  PermissionDecision,
+  PermissionPrompter,
+  PermissionRequest,
   PermissionService,
 } from '@s0nderlabs/anima-core'
 import { newEventId } from '@s0nderlabs/anima-core'
-import type {
-  TelegramDispatchInput,
-  TelegramDispatchResult,
-  TelegramRuntimeContext,
+import {
+  ActiveSessionTracker,
+  type ApprovalChoice,
+  type BypassCommand,
+  type TelegramApprovalBridge,
+  type TelegramDispatchInput,
+  type TelegramDispatchResult,
+  type TelegramRuntimeContext,
+  makeApprovalIdFactory,
+  parseBypassCommand,
 } from '@s0nderlabs/anima-plugin-telegram'
+import { summarizeApprovalSubject } from '../ui/approval-summary'
 
 export type DispatchUserMessage = (input: TelegramDispatchInput) => Promise<TelegramDispatchResult>
 
@@ -91,25 +103,60 @@ export interface BuildDispatchDeps {
   setActiveAbort: (ctrl: AbortController | null) => void
   refreshBalances: () => void
   formatInboundPreview: (input: TelegramDispatchInput) => string
+  /**
+   * Optional approval bridge from the listener. When present, dispatch swaps
+   * permission.setPrompter to a TG-aware prompter for the turn duration so
+   * the operator can approve tool calls from their phone via inline keyboard.
+   */
+  approvalBridge?: TelegramApprovalBridge
+}
+
+export interface TelegramDispatchHandle {
+  dispatch: DispatchUserMessage
+  /** Re-run the queue. Called by chat.tsx when stdin turn ends (closes G4). */
+  drainQueue: () => void
+  getQueueSize: () => number
 }
 
 /**
- * Build the deferred dispatch callback. Caller assigns the returned function
- * into `slot.current` once brain.init resolves.
+ * Build the deferred dispatch callback. Caller assigns `handle.dispatch` into
+ * `slot.current` once brain.init resolves, and wires `handle.drainQueue` into
+ * a status-change effect.
  */
-export function buildTelegramDispatch(deps: BuildDispatchDeps): DispatchUserMessage {
+export function buildTelegramDispatch(deps: BuildDispatchDeps): TelegramDispatchHandle {
   const queue: { input: TelegramDispatchInput; resolve: (r: TelegramDispatchResult) => void }[] = []
   let draining = false
+  const tracker = new ActiveSessionTracker()
+  const pendingApprovals = new Map<string, (choice: ApprovalChoice) => void>()
+  const approvalIdFactory = makeApprovalIdFactory()
+  let callbackInstalled = false
+  const ensureCallbackInstalled = (): void => {
+    if (callbackInstalled) return
+    const install = deps.approvalBridge?.installCallbackHandler.current
+    if (!install) return
+    install((approvalId, choice, _fromUserId) => {
+      const r = pendingApprovals.get(approvalId)
+      if (r) {
+        pendingApprovals.delete(approvalId)
+        r(choice)
+      }
+    })
+    callbackInstalled = true
+  }
 
   const drain = async (): Promise<void> => {
     if (draining) return
     draining = true
     try {
       while (queue.length > 0) {
-        if (deps.isBusy()) return // single-flight gate; chat handler will retry on idle
+        if (deps.isBusy()) return
         const item = queue.shift()!
+        ensureCallbackInstalled()
         try {
-          const r = await runOne(item.input, deps)
+          const r = await runOne(item.input, deps, tracker, {
+            pendingApprovals,
+            approvalIdFactory,
+          })
           item.resolve(r)
         } catch (err) {
           item.resolve({
@@ -122,28 +169,114 @@ export function buildTelegramDispatch(deps: BuildDispatchDeps): DispatchUserMess
     }
   }
 
-  return (input: TelegramDispatchInput) =>
-    new Promise<TelegramDispatchResult>(resolve => {
-      // Inbound preview row goes up immediately so the operator sees the
-      // arrival even if a stdin turn is in flight.
-      deps.pushInboundRow(deps.formatInboundPreview(input))
-      queue.push({ input, resolve })
+  return {
+    dispatch: (input: TelegramDispatchInput) =>
+      new Promise<TelegramDispatchResult>(resolve => {
+        deps.pushInboundRow(deps.formatInboundPreview(input))
+
+        // Bypass commands skip the queue + busy gate entirely.
+        const bypass = parseBypassCommand(input.text)
+        if (bypass) {
+          resolve(handleBypass(bypass, input, deps, tracker))
+          return
+        }
+
+        queue.push({ input, resolve })
+        void drain()
+      }),
+    drainQueue: () => {
       void drain()
-    })
+    },
+    getQueueSize: () => queue.length,
+  }
+}
+
+function handleBypass(
+  cmd: BypassCommand,
+  input: TelegramDispatchInput,
+  deps: BuildDispatchDeps,
+  tracker: ActiveSessionTracker,
+): TelegramDispatchResult {
+  switch (cmd) {
+    case '/stop': {
+      const aborted = tracker.abortActive(input.sessionKey)
+      if (!aborted && deps.isBusy()) {
+        return { response: 'no active turn to stop here, but the agent is busy on stdin.' }
+      }
+      return {
+        response: aborted ? 'stopped the current turn.' : 'no active turn to stop.',
+      }
+    }
+    case '/new':
+    case '/reset': {
+      return { response: 'context is fresh per TG turn already.' }
+    }
+    case '/status': {
+      const busy = deps.isBusy()
+      const qs = '' // queue size could be read via closure; keep terse here
+      return {
+        response: busy ? `currently thinking on another turn${qs}.` : `idle${qs}.`,
+      }
+    }
+    case '/approve':
+    case '/deny': {
+      return {
+        response: 'inline-keyboard approval is not yet wired in this build (B5 ships in v0.18.1).',
+      }
+    }
+    case '/background':
+    case '/restart': {
+      return { response: `${cmd} is reserved for a future bundle.` }
+    }
+  }
+}
+
+interface RunOneOpts {
+  pendingApprovals: Map<string, (c: ApprovalChoice) => void>
+  approvalIdFactory: () => string
 }
 
 async function runOne(
   input: TelegramDispatchInput,
   deps: BuildDispatchDeps,
+  tracker: ActiveSessionTracker,
+  opts: RunOneOpts,
 ): Promise<TelegramDispatchResult> {
-  // Force YOLO for TG turns: the operator cannot reach the laptop modal from
-  // their phone. Sandboxed limbs (Phase 9.5) provide structural enforcement;
-  // the permission floor is bypassed only for this single turn, then restored.
+  // If the listener filled the approval bridge, swap the permission prompter
+  // to the TG-aware one for the turn duration. The brain will issue an
+  // inline-keyboard approval message; the operator clicks from their phone;
+  // the callback resolves the prompter's Promise. Permission resolves go
+  // through the normal PermissionService.resolve path: 'off' bypass, 'strict'
+  // deny, 'prompt' consults the prompter. We use 'prompt' for TG turns so
+  // the bridge is exercised; chat-telegram previously forced 'off' to bypass
+  // the TUI modal entirely.
+  const previousPrompter = (deps.permission as unknown as { prompter: PermissionPrompter }).prompter
+  const bridgeReady =
+    !!deps.approvalBridge?.sendApproval.current &&
+    !!deps.approvalBridge?.installCallbackHandler.current
   const previousMode = deps.permission.getMode()
-  deps.permission.setMode('off')
+  if (bridgeReady) {
+    const tgPrompter = buildTelegramPrompter({
+      chatId: input.chatId,
+      bridge: deps.approvalBridge!,
+      pendingApprovals: opts.pendingApprovals,
+      approvalIdFactory: opts.approvalIdFactory,
+    })
+    deps.permission.setPrompter(tgPrompter)
+    // Use 'prompt' so dangerous patterns + value-moving txs route through the
+    // TG prompter. Tools without prompts (e.g. fs.read) still pass.
+    deps.permission.setMode('prompt')
+  } else {
+    // No bridge: fall back to YOLO so brain doesn't deadlock on a TUI modal
+    // the phone-side operator can't reach.
+    deps.permission.setMode('off')
+  }
   deps.setThinking(true)
   const abortCtrl = new AbortController()
   deps.setActiveAbort(abortCtrl)
+  // Synchronous mark-active BEFORE any await closes the race window per
+  // hermes base.py:1471. Two messages in the same tick now see the lock.
+  tracker.markActive(input.sessionKey, abortCtrl)
   try {
     const refreshed = await deps.buildPrefix()
     deps.brain.refreshUserContext(refreshed)
@@ -186,6 +319,50 @@ async function runOne(
   } finally {
     deps.setThinking(false)
     deps.setActiveAbort(null)
+    tracker.markIdle(input.sessionKey)
     deps.permission.setMode(previousMode)
+    if (bridgeReady && previousPrompter) {
+      deps.permission.setPrompter(previousPrompter)
+    }
   }
+}
+
+const APPROVAL_TIMEOUT_MS = 5 * 60_000
+
+function buildTelegramPrompter(opts: {
+  chatId: number
+  bridge: TelegramApprovalBridge
+  pendingApprovals: Map<string, (c: ApprovalChoice) => void>
+  approvalIdFactory: () => string
+}): PermissionPrompter {
+  return async (req: PermissionRequest) => {
+    const send = opts.bridge.sendApproval.current
+    if (!send) return 'deny'
+    const approvalId = opts.approvalIdFactory()
+    const body = formatApprovalBody(req)
+    return new Promise<PermissionDecision>(resolve => {
+      const timer = setTimeout(() => {
+        if (opts.pendingApprovals.delete(approvalId)) resolve('deny')
+      }, APPROVAL_TIMEOUT_MS)
+      opts.pendingApprovals.set(approvalId, choice => {
+        clearTimeout(timer)
+        resolve(mapChoiceToDecision(choice))
+      })
+      void send(opts.chatId, body, approvalId).catch(() => {
+        clearTimeout(timer)
+        if (opts.pendingApprovals.delete(approvalId)) resolve('deny')
+      })
+    })
+  }
+}
+
+function mapChoiceToDecision(choice: ApprovalChoice): PermissionDecision {
+  if (choice === 'once') return 'allow-once'
+  if (choice === 'session' || choice === 'always') return 'allow-session'
+  return 'deny'
+}
+
+function formatApprovalBody(req: PermissionRequest): string {
+  const subject = summarizeApprovalSubject(req)
+  return `🔐 Approval needed for ${req.kind}\n\n${subject}\n\nReason: ${req.reason}`
 }

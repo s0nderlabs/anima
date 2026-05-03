@@ -42,6 +42,41 @@ export interface TelegramRuntimeContext {
    * When absent, the listener uses static allowlist only (default-deny on empty).
    */
   pairingStore?: PairingStore
+  /**
+   * Optional approval bridge. When present, the listener fills the inner
+   * `sendApproval` + `installCallbackHandler` slots on start so chat-telegram
+   * (or the harness build-runtime in sandbox mode) can swap a TG-side
+   * permission prompter at the start of a turn. When absent, the local TUI
+   * modal handles all approvals as before.
+   */
+  approvalBridge?: TelegramApprovalBridge
+}
+
+export type ApprovalChoiceKind = 'once' | 'session' | 'always' | 'deny'
+
+/**
+ * Mutable bridge object created by the dispatcher (chat-telegram or
+ * harness/build-runtime) and filled by the listener on start. The dispatcher
+ * holds the resolver Map; the listener holds the bot. They cooperate via this
+ * bridge so the inline-keyboard approval can roundtrip TG → brain → TG.
+ */
+export interface TelegramApprovalBridge {
+  /** Filled by listener.start(). Sends the approval inline keyboard. */
+  sendApproval: {
+    current: ((chatId: number, text: string, approvalId: string) => Promise<void>) | null
+  }
+  /**
+   * Filled by listener.start(). Lets the dispatcher install a single
+   * callback_query handler that the listener fans out per click. Returns
+   * an unregister function.
+   */
+  installCallbackHandler: {
+    current:
+      | ((
+          handler: (approvalId: string, choice: ApprovalChoiceKind, fromUserId: number) => void,
+        ) => () => void)
+      | null
+  }
 }
 
 export interface TelegramDispatchInput {

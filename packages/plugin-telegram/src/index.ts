@@ -31,6 +31,26 @@ export { formatTelegramChannel, formatInboundPreview } from './format'
 export { RateLimiter } from './limits'
 export { sanitizeInbound, type SanitizeReason, type SanitizeResult } from './sanitize'
 export { formatPairingMessage } from './pairing-flow'
+export {
+  ActiveSessionTracker,
+  BYPASS_COMMANDS,
+  parseBypassCommand,
+  type ActiveSession,
+  type BypassCommand,
+} from './session-state'
+export {
+  type ApprovalChoice,
+  APPROVAL_CALLBACK_PREFIX,
+  buildApprovalKeyboard,
+  handleApprovalCallback,
+  makeApprovalIdFactory,
+  parseCallbackData,
+  type ParsedCallback,
+  type ResolveOutcome,
+} from './approval-keyboard'
+export { escapeMarkdownV2, isMarkdownParseError, stripMarkdownV2 } from './markdown'
+export { escapeChunkSuffixForMarkdownV2, splitMessage, type SplitOpts } from './chunking'
+export type { TelegramApprovalBridge, ApprovalChoiceKind } from './types'
 export { DebounceBuffer } from './debounce'
 export {
   sendWithRetry,

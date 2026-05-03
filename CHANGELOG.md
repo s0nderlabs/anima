@@ -4,6 +4,31 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-05-04
+
+### Added
+
+- **Active-session interrupt + bypass commands** in plugin-telegram. New `session-state.ts` exports `ActiveSessionTracker` (synchronous mark-active before async dispatch closes the race per hermes `base.py:1471`) and `BYPASS_COMMANDS = ['/stop', '/new', '/reset', '/status', '/approve', '/deny', '/background', '/restart']` with `parseBypassCommand`. Bypass commands skip the queue + busy gate entirely. `/stop` aborts the active brain turn for the matching sessionKey via the tracker's stored AbortController; `/status` reports thinking/idle. 16 unit tests.
+- **Queue drain on stdin idle** in chat.tsx. New `state.onStatusChange(cb)` subscriber fires drain whenever brain returns to idle. Closes G4 starvation: TG messages queued during a stdin turn used to stay stuck until the next inbound; now they drain immediately on stdin completion.
+- **MarkdownV2 escape + plain-text fallback** in plugin-telegram (`markdown.ts`). `escapeMarkdownV2` regex `r'([_*[\]()~`>#+\-=|{}.!\\])'` matches hermes `telegram.py:84` verbatim. `stripMarkdownV2` removes escape backslashes + `*bold*`, `_italic_`, `~strike~`, `||spoiler||` markers for the fallback path. `isMarkdownParseError` detects the canonical `can't parse entities` error. 14 unit tests.
+- **Long-message chunking with (1/N) (2/N) suffix** in plugin-telegram (`chunking.ts`). `splitMessage(text, {maxLen=4000, numbered=true})` avoids splits inside fenced code blocks, prefers word-boundary splits, and appends raw `(1/N)` suffixes. `escapeChunkSuffixForMarkdownV2` escapes parens for MarkdownV2 mode. 8 unit tests.
+- **Inline-keyboard approval** in plugin-telegram (`approval-keyboard.ts`). `buildApprovalKeyboard(approvalId)` returns the 4-button layout (Once / Session / Always / Deny), `parseCallbackData` extracts `{choice, approvalId}` from `ea:<choice>:<approvalId>` strings, `handleApprovalCallback` performs re-validation against `allowedUserIds` (defense-in-depth: anyone can SEE buttons but only allowed users can click) + one-shot pop pattern. `makeApprovalIdFactory` mints monotonic `a-1`, `a-2` ids. 12 unit tests.
+- **Telegram permission prompter** in chat-telegram. `runOne` builds a TG-aware `PermissionPrompter` that closes over `input.chatId` and the listener's approval bridge. Generates approvalId, registers a Promise resolver in a shared Map, sends inline keyboard via the bridge, awaits callback (or 5min timeout). Maps `once → allow-once`, `session/always → allow-session`, `deny → deny`. Tool calls in TG turns now route through the phone-side approval flow; the laptop modal is bypassed.
+- **Listener approval bridge wiring**. `TelegramRuntimeContext.approvalBridge` exposes mutable slots `sendApproval` + `installCallbackHandler`. Listener fills them on `start()` so the dispatcher (chat-telegram for local mode, harness build-runtime for sandbox mode) can roundtrip approval requests through the bot. Single `bot.on('callback_query:data')` handler validates clicker against `allowedUserIds` and forwards to the dispatcher's resolver Map.
+
+### Changed
+
+- **Listener `sendChunked()` replaces `capForTelegram` truncation**. Long replies now split into multiple messages with `(1/N)` numbering instead of truncating at 4000 chars with `[reply truncated]`. MarkdownV2 escape is applied per chunk; on `parse_error` the listener falls back to `stripMarkdownV2` plain text. On retry exhaustion the listener sends `DELIVERY_FAILURE_NOTICE` once.
+- **`runOne` (chat-telegram)** swaps `permission.setMode('off')` (YOLO) only when no approval bridge is wired. With the bridge filled, mode stays `'prompt'` and TG turns route through the phone-side prompter for dangerous patterns / shell-class invocations / value-moving txs.
+- **`debounce.test.ts`** + sanitize.test.ts updated for the new metadata-carrying fragment shape (G6 follow-through).
+
+### Internal
+
+- 50 new unit tests bring the project total to 783 (+6.8% from v0.18.0's 733).
+- 5 new files: `markdown.ts`, `chunking.ts`, `approval-keyboard.ts`, `session-state.ts` + their `.test.ts` peers (technically 4 new test files).
+- 3 file rewrites: `chat-telegram.ts` (prompter swap + bypass routing + queue drain handle), `listener.ts` (chunked sends + bridge wiring + callback-query handler), `state.ts` (`onStatusChange` subscriber).
+- B6 (sandbox handoff close G3), B7 (G5 polish), B8 (e2e + tmux drives) ship in v0.18.2 + v0.18.3.
+
 ## [0.18.0] - 2026-05-04
 
 ### Added
@@ -948,6 +973,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.18.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.1
 [0.18.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.0
 [0.16.8]: https://github.com/s0nderlabs/anima/releases/tag/v0.16.8
 [0.16.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.16.0

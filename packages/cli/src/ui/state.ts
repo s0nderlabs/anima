@@ -85,6 +85,15 @@ export function createChatState(opts: CreateChatStateOpts) {
   // handler reads it to wire Esc → abort.
   const [activeAbort, setActiveAbort] = createSignal<AbortController | null>(null)
 
+  // Status-change subscribers. Phase 12 telegram-dispatch hooks here so it
+  // can drain its queue when the brain returns to idle from a stdin turn.
+  type StatusListener = (next: 'idle' | 'thinking' | 'error') => void
+  const statusListeners = new Set<StatusListener>()
+  const onStatusChange = (cb: StatusListener): (() => void) => {
+    statusListeners.add(cb)
+    return () => statusListeners.delete(cb)
+  }
+
   // Wrap status setter so the turn-start timestamp tracks status changes
   // automatically. Every code path that flips to 'thinking' starts the
   // clock; every flip to idle/error stops it. Removes the burden from
@@ -95,6 +104,15 @@ export function createChatState(opts: CreateChatStateOpts) {
     const after = status()
     if (prev !== 'thinking' && after === 'thinking') setTurnStartedAt(Date.now())
     else if (prev === 'thinking' && after !== 'thinking') setTurnStartedAt(null)
+    if (prev !== after) {
+      for (const cb of statusListeners) {
+        try {
+          cb(after)
+        } catch {
+          // listener errors must not break status updates
+        }
+      }
+    }
     return result
   }
 
@@ -135,6 +153,7 @@ export function createChatState(opts: CreateChatStateOpts) {
     setActiveAbort,
     bumpActiveJobs,
     pushRow,
+    onStatusChange,
     identityLabel: opts.identityLabel,
     brainLabel: opts.brainLabel,
   }
