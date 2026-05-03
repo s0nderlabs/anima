@@ -400,10 +400,13 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
       sendApproval: { current: null },
       installCallbackHandler: { current: null },
     }
+    const { PairingStore } = await import('@s0nderlabs/anima-core')
+    const pairingStore = new PairingStore({ dir: `${agentDir}/pairing` })
     telegram = {
       botToken: tg.botToken,
       allowedUserIds: tg.allowedUserIds,
       agentName: `agent-${agentId.slice(0, 8)}`,
+      pairingStore,
       dispatchUserMessage: async input => {
         const cb = telegramDispatchSlot?.current
         if (!cb) return { response: 'agent is still booting; try again in a moment.' }
