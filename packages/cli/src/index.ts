@@ -90,18 +90,8 @@ async function main(): Promise<void> {
       return
     }
     case 'upgrade': {
-      // --ref <val> takes priority. Otherwise the first non-flag arg becomes
-      // the ref, so `anima upgrade latest` and `anima upgrade v0.17.8` work
-      // without --ref. No positional + no --ref → undefined → command flow
-      // defaults to `latest` (resolved via GitHub API).
-      const refIdx = argv.indexOf('--ref')
-      const flagRef = refIdx >= 0 ? argv[refIdx + 1] : undefined
-      const positionalRef = argv.find(a => !a.startsWith('-') && a !== flagRef)
-      const ref = flagRef ?? positionalRef
-      const yes = argv.includes('--yes') || argv.includes('-y')
-      const reprovision = argv.includes('--reprovision')
-      const { runUpgrade } = await import('./commands/upgrade')
-      await runUpgrade({ ref, yes, reprovision })
+      const { parseUpgradeArgs, runUpgrade } = await import('./commands/upgrade')
+      await runUpgrade(parseUpgradeArgs(argv.slice(1)))
       return
     }
     case 'resume': {

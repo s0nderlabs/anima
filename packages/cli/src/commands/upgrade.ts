@@ -40,6 +40,24 @@ import {
 
 export type UpgradeMode = 'in-place' | 'reprovision'
 
+/**
+ * Parse the argv tail (everything AFTER the `upgrade` subcommand token) into
+ * {@link UpgradeOpts}. `--ref <val>` takes priority. Otherwise the first
+ * non-flag arg becomes the ref, so `anima upgrade latest` and
+ * `anima upgrade v0.17.8` work without `--ref`. Empty tail → undefined ref →
+ * command flow defaults to `latest` via GitHub API.
+ */
+export function parseUpgradeArgs(tail: readonly string[]): UpgradeOpts {
+  const refIdx = tail.indexOf('--ref')
+  const flagRef = refIdx >= 0 ? tail[refIdx + 1] : undefined
+  const positionalRef = tail.find(a => !a.startsWith('-') && a !== flagRef)
+  return {
+    ref: flagRef ?? positionalRef,
+    yes: tail.includes('--yes') || tail.includes('-y'),
+    reprovision: tail.includes('--reprovision'),
+  }
+}
+
 interface UpgradeOpts {
   ref?: string
   yes?: boolean

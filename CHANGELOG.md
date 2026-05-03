@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.9] - 2026-05-03
+
+### Fixed
+
+- **`anima upgrade` argv positional-ref parsing**. v0.17.8's positional-ref scan walked the whole argv array and matched `argv[0]` (the literal `'upgrade'` subcommand token) as the ref. Result: `anima upgrade --yes` (and `anima upgrade latest`, `anima upgrade v0.17.8`) all failed mid-flight with `git checkout 'upgrade': pathspec did not match`. Caught immediately during the v0.17.8 enigma canary. Fix: extract `parseUpgradeArgs(tail)` to `commands/upgrade.ts` (operates on `argv.slice(1)`) with 9 unit tests covering every flag/positional combination.
+
 ## [0.17.8] - 2026-05-03
 
 ### Added
