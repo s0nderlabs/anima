@@ -13,29 +13,14 @@
   "bugs": {
     "url": "https://github.com/s0nderlabs/anima/issues"
   },
-  "keywords": [
-    "0g",
-    "anima",
-    "agent",
-    "wallet",
-    "defi",
-    "swap",
-    "jaine",
-    "gimo",
-    "plugin"
-  ],
+  "keywords": ["0g", "anima", "agent", "wallet", "defi", "swap", "jaine", "gimo", "plugin"],
   "publishConfig": {
     "access": "public"
   },
   "engines": {
     "bun": ">=1.1"
   },
-  "files": [
-    "src",
-    "abis",
-    "data",
-    "README.md"
-  ],
+  "files": ["src", "abis", "data", "README.md"],
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {

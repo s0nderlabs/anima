@@ -13,25 +13,14 @@
   "bugs": {
     "url": "https://github.com/s0nderlabs/anima/issues"
   },
-  "keywords": [
-    "0g",
-    "anima",
-    "agent",
-    "telegram",
-    "grammy",
-    "gateway",
-    "plugin"
-  ],
+  "keywords": ["0g", "anima", "agent", "telegram", "grammy", "gateway", "plugin"],
   "publishConfig": {
     "access": "public"
   },
   "engines": {
     "bun": ">=1.1"
   },
-  "files": [
-    "src",
-    "README.md"
-  ],
+  "files": ["src", "README.md"],
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {

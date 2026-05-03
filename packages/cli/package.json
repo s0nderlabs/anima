@@ -13,28 +13,14 @@
   "bugs": {
     "url": "https://github.com/s0nderlabs/anima/issues"
   },
-  "keywords": [
-    "0g",
-    "anima",
-    "agent",
-    "ai",
-    "cli",
-    "tui",
-    "sovereign",
-    "gateway",
-    "inft"
-  ],
+  "keywords": ["0g", "anima", "agent", "ai", "cli", "tui", "sovereign", "gateway", "inft"],
   "publishConfig": {
     "access": "public"
   },
   "engines": {
     "bun": ">=1.1"
   },
-  "files": [
-    "src",
-    "bin",
-    "README.md"
-  ],
+  "files": ["src", "bin", "README.md"],
   "bin": {
     "anima": "./bin/anima"
   },

@@ -13,28 +13,14 @@
   "bugs": {
     "url": "https://github.com/s0nderlabs/anima/issues"
   },
-  "keywords": [
-    "0g",
-    "anima",
-    "agent",
-    "ai",
-    "gateway",
-    "daemon",
-    "sandbox",
-    "tee",
-    "0g-sandbox"
-  ],
+  "keywords": ["0g", "anima", "agent", "ai", "gateway", "daemon", "sandbox", "tee", "0g-sandbox"],
   "publishConfig": {
     "access": "public"
   },
   "engines": {
     "bun": ">=1.1"
   },
-  "files": [
-    "src",
-    "bin",
-    "README.md"
-  ],
+  "files": ["src", "bin", "README.md"],
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "bin": {
