@@ -4,6 +4,30 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.2] - 2026-05-03
+
+### Added
+
+- **`anima gateway <sub>` CLI surface** (B3). Run/start/stop/restart/status/logs subcommands wired through `packages/cli/src/commands/gateway.ts` argv dispatcher.
+  - `anima gateway run` — foreground daemon (blocks; Ctrl+C to stop). Spawns `anima-gateway-local` from `@s0nderlabs/anima-gateway/bin/` with stdio inherit. Resolves the bin path via `import.meta.resolve` so it works in both workspace dev mode and installed npm node_modules.
+  - `anima gateway start` — interactive flow: loads operator signer (Touch ID), pre-derives keystore + telegram scope keys via `precomputeAllScopes`, writes `~/.anima/agents/<id>/.operator-session` (perm 0600, 24h TTL), forks the gateway daemon detached, waits up to 10s for the unix socket to appear (proves the daemon booted cleanly).
+  - `anima gateway stop` — reads PID from `~/.anima/locks/anima-gateway-<hash>.lock`, sends SIGTERM, falls through to SIGKILL after 5s grace. Cleans up stale lock + socket files.
+  - `anima gateway restart` — stop then start.
+  - `anima gateway status` — reports PID + alive/dead + lock age + socket presence + operator-session freshness + scope keys. Sub-second; no network.
+  - `anima gateway logs [--tail N] [-f]` — tail stub (file logging is v0.19.3; today this prints the daemon stdout location for `anima gateway run`).
+- **NEW `packages/gateway/bin/anima-gateway-local`** — bin entry that imports `local-entrypoint.ts`. Added to `packages/gateway/package.json` `bin` map alongside the existing `anima-gateway` (sandbox entry).
+- **`anima` argv dispatch** wires `case 'gateway':` in `packages/cli/src/index.ts`. `printHelp()` shows the new command in the `anima help` output.
+
+### Changed
+
+- v0.19.0 / v0.19.1 ship retrospective captured in commit + memory: 5 distinct CI failure modes across the rename. The `/seal` skill hardening from v0.19.1 (Step 4d re-verify, Step 7a HEAD-version-vs-tag, Step 7c CI watch) was exercised in this ship — version bump used surgical sed (preserves biome single-line array format) and the post-bump lint+typecheck+test re-run caught zero regressions.
+
+### Internal
+
+- 802 unit tests pass. Typecheck + lint clean (re-verified post-bump per Step 4d). 124 forge tests pass.
+- Local-entrypoint not yet end-to-end tested against a live agent — runtime adapter integration needs the chat.tsx thin-client refactor (B4 / v0.19.3) to give `anima` (TUI) a way to talk to the daemon over the unix socket. Today the gateway boots and binds the socket; the TUI still embeds its own runtime. Nothing user-visible changes in v0.19.2 — but the foundation for the daemon split is fully in tree.
+- npm publish: 7 packages × v0.19.2 (telegram + gateway both included via the v0.19.1 release.yml fix).
+
 ## [0.19.1] - 2026-05-03
 
 ### Fixed
@@ -1050,6 +1074,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.2
 [0.19.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.1
 [0.19.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.0
 [0.18.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.3

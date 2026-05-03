@@ -1,6 +1,6 @@
 {
   "name": "@s0nderlabs/anima-gateway",
-  "version": "0.19.1",
+  "version": "0.19.2",
   "type": "module",
   "description": "Anima gateway daemon: long-running brain runtime, listeners, tool registry, memory sync. Runs locally (laptop) or remotely (0G Sandbox TDX TEE).",
   "license": "MIT",
@@ -24,7 +24,8 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "bin": {
-    "anima-gateway": "./bin/anima-gateway"
+    "anima-gateway": "./bin/anima-gateway",
+    "anima-gateway-local": "./bin/anima-gateway-local"
   },
   "scripts": {
     "build": "tsc -b",

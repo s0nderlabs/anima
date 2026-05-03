@@ -153,6 +153,16 @@ async function main(): Promise<void> {
       await runPairing(parsed)
       return
     }
+    case 'gateway': {
+      const { parseGatewayArgs, runGateway } = await import('./commands/gateway')
+      const parsed = parseGatewayArgs(argv.slice(1))
+      if ('error' in parsed) {
+        console.error(`anima gateway: ${parsed.error}`)
+        process.exit(1)
+      }
+      await runGateway(parsed)
+      return
+    }
     case 'inspect': {
       const { runInspect, isValidSlot } = await import('./commands/inspect')
       const remaining = argv.slice(1)
@@ -249,6 +259,8 @@ function printHelp(): void {
       '                            flags: --yes (skip remove confirmation)',
       '  anima pairing <sub>       manage DM pairing approvals (subs: list | approve | revoke | clear-pending)',
       '                            usage: anima pairing approve telegram <code>',
+      '  anima gateway <sub>       always-on agent gateway daemon  (subs: run | start | stop | restart | status | logs)',
+      '                            run = foreground, start = bg + Touch ID, stop = SIGTERM via lock',
       '  anima inspect [ref]       audit on-chain memory slots (flags: --slot, --tx, --raw, --diff, --json, --full, --out <dir>)',
       '  anima help                show this message',
       '',
