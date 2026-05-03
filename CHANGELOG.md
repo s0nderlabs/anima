@@ -4,6 +4,26 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.4] - 2026-05-03
+
+### Added (B4 complete — TUI auto-detects local gateway)
+
+- **`anima` (TUI) auto-routes to local gateway daemon** when one is running. `chat.tsx` checks for `~/.anima/agents/<id>/gateway.sock` before falling through to the in-process path: if the socket exists, it calls `runChatSandbox` with `unixSocketPath`. Same code path the sandbox mode uses, just over a unix socket instead of TCP. The TUI no longer holds the runtime — the gateway daemon does.
+- **`runChatSandbox` accepts `RunChatSandboxOpts.unixSocketPath`**. When set:
+  - `SandboxClient` is constructed with the same `unixSocketPath` (the v0.19.3 transport)
+  - The Daytona-specific `resumeArchivedSandbox` recovery path is skipped (no Daytona to resume in local mode); on connection failure the user is told to run `anima gateway start` and the process exits cleanly
+  - Spinner labels switch from "harness" to "gateway" so the user knows which transport is active
+
+### What this enables
+
+After `anima gateway start`, `anima` (TUI) is a thin client over the local socket. Closing the TUI does NOT stop the listeners (telegram, A2A inbox, market). The agent keeps replying via the gateway daemon. Hermes-aligned architecture: gateway is always-on, TUI is transient. The "walk away from laptop, agent keeps replying" promise now holds in local mode, not just sandbox mode.
+
+### Internal
+
+- 802 unit tests pass (re-verified post-bump per /seal Step 4d). Typecheck + lint clean. 124 forge tests pass.
+- chat.tsx footprint: +13 lines for the auto-detect block; chat-sandbox.tsx footprint: +25 lines for the `RunChatSandboxOpts` opt-in path. The bulk of the runtime stays unchanged — same SSE/HTTP/approval round-trip semantics.
+- Live test deferred to v0.19.5 alongside the rigorous tool-by-tool tmux drive (B6).
+
 ## [0.19.3] - 2026-05-03
 
 ### Added (B4 partial — unix socket transport, live-verified)
@@ -1100,6 +1120,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.4]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.4
 [0.19.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.3
 [0.19.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.2
 [0.19.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.1

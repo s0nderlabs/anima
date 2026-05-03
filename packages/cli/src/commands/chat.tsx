@@ -99,10 +99,26 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   }
   // Phase 11: deployTarget=sandbox routes the chat loop to a thin client of
   // the harness HTTP server. The agent's privkey lives only inside the
-  // container, so we skip keystore decrypt here. Local mode falls through.
+  // container, so we skip keystore decrypt here.
   if (config.deployTarget === 'sandbox' && config.sandbox?.endpoint) {
     const { runChatSandbox } = await import('./chat-sandbox')
     return runChatSandbox(config)
+  }
+  // Phase 14: if a local gateway daemon is running for this agent (socket
+  // present at ~/.anima/agents/<id>/gateway.sock), route to the same thin
+  // client over a unix socket. The TUI no longer holds the runtime — the
+  // gateway daemon does. Closing the TUI doesn't stop the listeners.
+  {
+    const { existsSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const _contractAddr = config.identity.iNFT.contract as Address
+    const _tokId = BigInt(config.identity.iNFT.tokenId)
+    const _aid = iNFTAgentId({ contractAddress: _contractAddr, tokenId: _tokId })
+    const _gatewaySock = join(agentPaths.agent(_aid).dir, 'gateway.sock')
+    if (existsSync(_gatewaySock)) {
+      const { runChatSandbox } = await import('./chat-sandbox')
+      return runChatSandbox(config, { unixSocketPath: _gatewaySock })
+    }
   }
   const contractAddress = config.identity.iNFT.contract as Address
   const tokenId = BigInt(config.identity.iNFT.tokenId)

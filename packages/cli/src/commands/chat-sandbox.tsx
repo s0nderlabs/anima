@@ -27,12 +27,27 @@ import { resumeArchivedSandbox, unlockAgentKeystore } from './init/sandbox-provi
  * decrypts the keystore here — that happened during `anima init` or `anima
  * deploy` when the privkey was ECIES-encrypted to the bootstrap pubkey.
  */
-export async function runChatSandbox(config: AnimaConfig): Promise<void> {
+export interface RunChatSandboxOpts {
+  /**
+   * When set, the client routes via this unix socket instead of the configured
+   * sandbox.endpoint TCP URL. Used for the local-gateway-daemon path
+   * (Phase 14): chat.tsx detects `~/.anima/agents/<id>/gateway.sock` and calls
+   * runChatSandbox with this opt; the sandbox-specific recovery path
+   * (resumeArchivedSandbox) is skipped because there's no Daytona to resume.
+   */
+  unixSocketPath?: string
+}
+
+export async function runChatSandbox(
+  config: AnimaConfig,
+  opts: RunChatSandboxOpts = {},
+): Promise<void> {
   if (!config.identity.iNFT || !config.identity.agent) {
     console.log('Config has no iNFT or agent. Re-run `anima init`.')
     process.exit(1)
   }
-  if (!config.sandbox?.endpoint || !config.sandbox.id) {
+  const isLocalGateway = !!opts.unixSocketPath
+  if (!isLocalGateway && (!config.sandbox?.endpoint || !config.sandbox.id)) {
     console.log(
       'deployTarget is sandbox but sandbox.endpoint or sandbox.id missing. Re-run `anima init`.',
     )
@@ -43,8 +58,8 @@ export async function runChatSandbox(config: AnimaConfig): Promise<void> {
   const tokenId = BigInt(config.identity.iNFT.tokenId)
   const agentId = iNFTAgentId({ contractAddress, tokenId })
   const agentAddress = config.identity.agent as Address
-  const sandboxEndpoint = config.sandbox.endpoint
-  const sandboxId = config.sandbox.id
+  const sandboxEndpoint = isLocalGateway ? 'http://localhost' : (config.sandbox?.endpoint as string)
+  const sandboxId = isLocalGateway ? `local-${agentId.slice(0, 8)}` : (config.sandbox?.id as string)
 
   const operator = await loadOrPickOperatorSigner({
     network: config.network,
@@ -60,20 +75,33 @@ export async function runChatSandbox(config: AnimaConfig): Promise<void> {
     endpoint: sandboxEndpoint,
     sandboxId,
     operator: operatorAccount,
+    unixSocketPath: opts.unixSocketPath,
   })
 
   const sReady = spinner()
-  sReady.start(`Connecting to harness ${sandboxEndpoint}`)
+  const probeLabel = isLocalGateway ? 'local gateway socket' : `harness ${sandboxEndpoint}`
+  sReady.start(`Connecting to ${probeLabel}`)
   try {
     // Fast probe first; if the harness is healthy we skip every recovery path.
     const health = await client.waitReady({ timeoutMs: 8_000, intervalMs: 1000 })
-    sReady.stop(`harness ready (uptime ${(health.uptimeMs / 1000).toFixed(0)}s)`)
+    sReady.stop(
+      `${isLocalGateway ? 'gateway' : 'harness'} ready (uptime ${(health.uptimeMs / 1000).toFixed(0)}s)`,
+    )
   } catch {
-    // Harness unreachable. The sandbox might be archived/stopped/error, OR it
-    // could be started but with a dead daemon (orphaned-harness). Both paths
-    // converge on `resumeArchivedSandbox`, which probes state, restores if
-    // needed, relaunches the harness daemon via toolbox exec, and re-handoffs
-    // the agent privkey. Re-handoff requires the keystore unlock that
+    // Local gateway has no Daytona to resume — the daemon is either alive or
+    // it isn't. Tell the user to (re)start it and exit.
+    if (isLocalGateway) {
+      sReady.stop(
+        `gateway unreachable at ${opts.unixSocketPath} — try \`anima gateway start\` then re-run`,
+      )
+      await operator.close?.()
+      process.exit(1)
+    }
+    // Sandbox path: harness might be archived/stopped/error, OR it could be
+    // started but with a dead daemon (orphaned-harness). Both paths converge
+    // on `resumeArchivedSandbox`, which probes state, restores if needed,
+    // relaunches the harness daemon via toolbox exec, and re-handoffs the
+    // agent privkey. Re-handoff requires the keystore unlock that
     // chat-sandbox normally skips.
     sReady.message('harness unreachable; attempting auto-resume')
     const provider = new SandboxProviderClient({
