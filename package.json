@@ -1,6 +1,6 @@
 {
   "name": "anima",
-  "version": "0.18.2",
+  "version": "0.18.3",
   "private": true,
   "type": "module",
   "description": "First fully on-chain sovereign agent harness on 0G",
@@ -26,6 +26,7 @@
     "@types/bun": "^1.1.14",
     "@types/node": "^22.10.2",
     "@s0nderlabs/anima-core": "workspace:*",
+    "@s0nderlabs/anima-plugin-telegram": "workspace:*",
     "@0glabs/0g-serving-broker": "^0.7.5",
     "@opentui/core": "^0.1.97",
     "@opentui/solid": "^0.1.97",

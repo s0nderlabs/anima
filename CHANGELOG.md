@@ -4,6 +4,19 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.3] - 2026-05-04
+
+### Added
+
+- **Mock-bot e2e test** at `test/local/e2e-telegram-mock.ts`. Spins up an in-process HTTP server matching the Telegram Bot API contract (getMe, getUpdates, deleteWebhook, sendMessage, setMessageReaction). 19 assertions cover token lock acquire/block/release, retry classifier (timeout=fail, conn=retry, forbidden=fail-silent), default-deny + pairing flow code generation, bypass command parser, chunking with (1/N) suffix, MarkdownV2 parse-error detector, session-key shape, full listener inbound→dispatch→reply roundtrip, explicit deleteWebhook before polling, delivery-failure notice text. Run via `bun test/local/e2e-telegram-mock.ts`.
+- **Operator-driven tmux drive runner** at `test/local/tmux-telegram-drive.ts`. agent-browser cannot reliably drive TG WebK (contenteditable + React controlled-input rejects programmatic typing — documented from May 3 session). Runner watches `activity.jsonl` for `wake source=telegram` + `brain-response source=telegram` + tool-call entries while the operator DMs the bot from their TG client. Exits 0 on observation, 1 on 5min timeout.
+
+### Internal
+
+- v0.18.3 closes Phase 12. The `phase-12-shipped.md` memory file documents all 9 bundles, hermes drift closures, file changes, and the demo path. Outstanding items (full 409/network retry loop, daemon split for local mode, photo/document inbound) deferred to v0.19+.
+- Test count: 783 unit + 19 mock e2e = 802 total assertions green.
+- `@s0nderlabs/anima-plugin-telegram` added as workspace devDep on root `package.json` so `test/local/*.ts` can import from it.
+
 ## [0.18.2] - 2026-05-04
 
 ### Added
@@ -994,6 +1007,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.18.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.3
 [0.18.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.2
 [0.18.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.1
 [0.18.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.0
