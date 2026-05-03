@@ -104,6 +104,12 @@ async function main(): Promise<void> {
       await runResume({ yes })
       return
     }
+    case 'pause': {
+      const yes = argv.includes('--yes') || argv.includes('-y')
+      const { runPause } = await import('./commands/pause')
+      await runPause({ yes })
+      return
+    }
     case 'ledger': {
       const sub = argv[1]
       const validSubs = ['balance', 'refund', 'retrieve', 'close'] as const
@@ -221,6 +227,7 @@ function printHelp(): void {
       '  anima deploy              migrate Local agent to 0G Sandbox via Option 3 handoff',
       '  anima upgrade [--ref vX]  roll harness to new ref in place (flags: --reprovision for fresh container)',
       '  anima resume              wake an archived/stopped sandbox (re-handoff agent privkey)',
+      '  anima pause               archive sandbox to stop runtime burn (resume with: anima resume)',
       '  anima inspect [ref]       audit on-chain memory slots (flags: --slot, --tx, --raw, --diff, --json, --full, --out <dir>)',
       '  anima help                show this message',
       '',

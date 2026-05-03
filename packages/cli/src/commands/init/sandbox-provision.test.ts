@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import type { SandboxRecord } from '@s0nderlabs/anima-core'
 import {
   createSandboxWithOrphanRetry,
+  ensureSandboxArchived,
   ensureSandboxStarted,
   pickPermissionMode,
 } from './sandbox-provision'
@@ -226,5 +227,68 @@ describe('ensureSandboxStarted', () => {
     await expect(
       ensureSandboxStarted(provider as never, 'sb-7', { intervalMs: 1 }),
     ).rejects.toThrow(/error state during resume/)
+  })
+})
+
+describe('ensureSandboxArchived', () => {
+  function fakeProvider(stateSequence: Array<SandboxRecord['state']>) {
+    let i = 0
+    let archives = 0
+    const provider = {
+      getSandbox: async (id: string) =>
+        ({ id, state: stateSequence[Math.min(i++, stateSequence.length - 1)] }) as SandboxRecord,
+      archiveSandbox: async () => {
+        archives += 1
+      },
+    }
+    return { provider, archivesCalled: () => archives }
+  }
+
+  test('no-op when sandbox already archived', async () => {
+    const { provider, archivesCalled } = fakeProvider(['archived'])
+    const r = await ensureSandboxArchived(provider as never, 'sb-a1')
+    expect(r.alreadyArchived).toBe(true)
+    expect(r.initialState).toBe('archived')
+    expect(r.finalState).toBe('archived')
+    expect(archivesCalled()).toBe(0)
+  })
+
+  test('throws on error state without calling archive', async () => {
+    const { provider, archivesCalled } = fakeProvider(['error'])
+    await expect(ensureSandboxArchived(provider as never, 'sb-a2')).rejects.toThrow(/error state/)
+    expect(archivesCalled()).toBe(0)
+  })
+
+  test('started → archiving → archived: calls /archive, polls until state flips', async () => {
+    const { provider, archivesCalled } = fakeProvider(['started', 'archiving', 'archived'])
+    const r = await ensureSandboxArchived(provider as never, 'sb-a3', { intervalMs: 1 })
+    expect(r.alreadyArchived).toBe(false)
+    expect(r.initialState).toBe('started')
+    expect(r.finalState).toBe('archived')
+    expect(archivesCalled()).toBe(1)
+  })
+
+  test('transient state (archiving): does NOT re-issue /archive', async () => {
+    const { provider, archivesCalled } = fakeProvider(['archiving', 'archiving', 'archived'])
+    const r = await ensureSandboxArchived(provider as never, 'sb-a4', { intervalMs: 1 })
+    expect(r.finalState).toBe('archived')
+    expect(archivesCalled()).toBe(0)
+  })
+
+  test('throws if deadline expires without reaching archived', async () => {
+    const { provider } = fakeProvider(['started', 'archiving', 'archiving', 'archiving'])
+    await expect(
+      ensureSandboxArchived(provider as never, 'sb-a5', {
+        intervalMs: 1,
+        deadlineMs: 50,
+      }),
+    ).rejects.toThrow(/did not reach archived/)
+  })
+
+  test('throws if state transitions to error mid-poll', async () => {
+    const { provider } = fakeProvider(['started', 'archiving', 'error'])
+    await expect(
+      ensureSandboxArchived(provider as never, 'sb-a6', { intervalMs: 1 }),
+    ).rejects.toThrow(/error during archive/)
   })
 })

@@ -80,3 +80,5 @@ export {
   UPGRADE_FAIL_KEYWORDS,
   buildUpgradeScript,
 } from './upgrade-script'
+
+export { type Heartbeat, type StartHeartbeatOpts, startHeartbeat } from './heartbeat'

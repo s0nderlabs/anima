@@ -4,6 +4,19 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.2] - 2026-05-03
+
+### Added
+
+- **`anima pause` command**: archives a started sandbox to stop the runtime burn during dev gaps. Sandbox UUID + endpoint preserved; resume via `anima resume` (~2-5 min cold restore). Does NOT require operator-keystore unlock, only the operator wallet to sign the archive HTTP request. Pairs with `anima resume` for full lifecycle control between dev sessions.
+- **Harness self-heartbeat**: the harness now self-pings its own public proxy URL every 30 minutes by default. Each ping hits Daytona's reverse proxy, refreshing `lastActivityAt` and reducing the chance of a healthy sandbox accidentally tripping the 60-min `autoArchiveInterval` (which only fires on `state=stopped`, but blips can transition through stopped briefly). Override via `HARNESS_HEARTBEAT_INTERVAL_MS` env var (used in canaries to compress the verification window). Heartbeat failures log warn but never crash; per-ping `AbortSignal.timeout(15_000)` so a stuck proxy can't block harness shutdown.
+- **`SandboxProviderClient.archiveSandbox(id)`**: signed POST to `/api/sandbox/:id/archive` with `action=archive`. Mirrors `stopSandbox` / `startSandbox` patterns.
+- **`ensureSandboxArchived` helper** in `sandbox-provision.ts`: pure state-machine wait (60s default) for `state=archived`. Acceptable transient: `archiving`. Throws on `error`. Used by `anima pause` to confirm Daytona acknowledges the archive.
+
+### Why these primitives matter
+
+Every active 0G Sandbox burns ~0.09 0G/hour (= 2.16 0G/day per 1 CPU + 1 GB). For a 13-day hackathon that's ~28 0G if always-on. With `anima pause` between dev sessions (12 h/day idle = ~13 0G saved over the hackathon), runway extends to ~22 days theoretical at the same deposit. The heartbeat is the autonomic complement: keeps healthy sandboxes from accidentally entering `stopped → archived` cycles when the operator is mid-session.
+
 ## [0.17.1] - 2026-05-03
 
 ### Added

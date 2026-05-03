@@ -68,6 +68,7 @@ Parent domain `anima.0g` is registered on SPACE ID on mainnet; `anima init` issu
 - `anima topup --compute N` — agent deposits N 0G into the 0G Compute ledger
 - `anima topup --provider N`: operator deposits N 0G into the Galileo SandboxServing contract (testnet runtime fees: ~0.09 0G/hour per active sandbox)
 - `anima resume`: wake a stopped or archived sandbox + re-handoff the agent privkey to the (newly restarted) harness. Same sandbox UUID + endpoint preserved. Use when the harness goes offline (Daytona auto-archive after 60min idle, or INSUFFICIENT_BALANCE settlement event)
+- `anima pause`: archive a started sandbox to stop the runtime burn during dev gaps. Sandbox UUID + endpoint preserved; resume with `anima resume` (~2-5 min cold restore). Does NOT require operator-keystore unlock, only the operator wallet to sign the archive request. Burn rate ~0.09 0G/hour means a 12 h/day idle window saves ~1.1 0G/day on testnet runtime fees.
 - `anima ledger [balance | refund | retrieve | close]` — drain the 0G Compute ledger of a retiring agent. `balance` shows main + per-provider sub-account state. `retrieve` calls `retrieveFund('inference')` to start the per-provider lock window (call again after the window to actually pull). `refund [--amount N | --all]` withdraws from the main account back to the agent EOA. `close --yes` deletes the ledger entirely.
 - `anima drain --to <addr>` — sweep the agent EOA's native balance to a target address. Defaults to `config.identity.operator` if `--to` omitted. Reserves 21000 × live gas price for the sweep tx; sends the rest. Use after `anima ledger refund` to finish recovering funds from a retired agent.
 - `anima sync` — force flush memory + activity-log to 0G Storage and anchor on chain. In sandbox mode proxies to the harness's `POST /sync` (no laptop-side keystore decrypt).
@@ -77,6 +78,10 @@ Parent domain `anima.0g` is registered on SPACE ID on mainnet; `anima init` issu
 - `anima deploy` — Local→Sandbox migration. Decrypts existing keystore via operator wallet, runs Galileo deposit + acknowledge → createSandbox → bootstrap → Option 3 ECIES handoff → publish `agent:endpoint` text record on subname. Operator never plaintexts the privkey on the laptop after handoff.
 - `anima upgrade [--ref vX.Y.Z] [--yes] [--reprovision]` — roll the sandbox harness to a new git ref while preserving identity + memory. Default = in-place: `git fetch + checkout + bun install + harness restart` inside the existing Daytona container (~30-60s downtime, $0). `--reprovision` opts into a fresh-container swap (~2-5 min, ~0.9 0G testnet) for the future when sealed mode is real.
 - `anima init --resume` — pick up a partial init from the last incomplete step
+
+### Sandbox lifecycle (deploy target = sandbox)
+
+Once an agent is deployed to 0G Sandbox, it burns ~0.09 0G/hour (Galileo testnet) for the underlying compute (1 CPU + 1 GB). The harness self-pings its public proxy URL every 30 minutes (override via `HARNESS_HEARTBEAT_INTERVAL_MS` env at boot) so that healthy `started` sandboxes don't accidentally enter Daytona's `stopped → archived` cycle. Use `anima pause` between dev sessions to stop the burn cleanly; `anima resume` brings the same container back online (~2-5 min for the filesystem restore from object storage). Refill the runtime budget with `anima topup --provider N`.
 
 ## Tools the agent can call
 

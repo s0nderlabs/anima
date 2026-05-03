@@ -452,6 +452,77 @@ export async function ensureSandboxStarted(
 }
 
 /**
+ * Pure state-machine wait for a sandbox to reach `state=archived`. Used by
+ * `anima pause` to confirm Daytona acknowledges the archive request before
+ * surfacing success to the operator. Issues `archiveSandbox` if the sandbox
+ * is not already in (or transitioning to) archived state.
+ *
+ * Single deadline (60s default). Acceptable transient: `archiving`. Throws on
+ * `error` state. Returns immediately if the sandbox is already archived.
+ */
+export interface EnsureSandboxArchivedOpts {
+  intervalMs?: number
+  /** Default 60_000ms (1 min). Daytona archive is filesystem-snapshot-only, fast. */
+  deadlineMs?: number
+  onProgress?: (msg: string) => void
+}
+
+export interface EnsureSandboxArchivedResult {
+  initialState: string
+  alreadyArchived: boolean
+  finalState: string
+}
+
+export async function ensureSandboxArchived(
+  provider: SandboxProviderClient,
+  sandboxId: string,
+  opts: EnsureSandboxArchivedOpts = {},
+): Promise<EnsureSandboxArchivedResult> {
+  const intervalMs = opts.intervalMs ?? 5000
+  const deadlineMs = opts.deadlineMs ?? 60_000
+  const progress = opts.onProgress ?? (() => {})
+
+  const initial = await provider.getSandbox(sandboxId)
+  if (initial.state === 'archived') {
+    return { initialState: 'archived', alreadyArchived: true, finalState: 'archived' }
+  }
+  if (initial.state === 'error') {
+    throw new Error(`sandbox ${sandboxId} is in error state; cannot archive`)
+  }
+
+  // `archiving` means a transition is already in flight; re-issuing /archive
+  // would be wasted at best and confuse the state machine at worst.
+  if (initial.state !== 'archiving') {
+    progress(`sandbox state=${initial.state}, calling archiveSandbox`)
+    try {
+      await provider.archiveSandbox(sandboxId)
+    } catch (e) {
+      throw new Error(`archiveSandbox(${sandboxId}) failed: ${(e as Error).message.slice(0, 200)}`)
+    }
+  } else {
+    progress('sandbox state=archiving (in transition, waiting)')
+  }
+
+  const deadline = Date.now() + deadlineMs
+  let lastState = initial.state
+  while (Date.now() < deadline) {
+    const cur = await provider.getSandbox(sandboxId).catch(() => null)
+    if (cur) lastState = cur.state
+    if (cur?.state === 'archived') {
+      return { initialState: initial.state, alreadyArchived: false, finalState: 'archived' }
+    }
+    if (cur?.state === 'error') {
+      throw new Error(`sandbox ${sandboxId} transitioned to error during archive`)
+    }
+    progress(`waiting for state=archived (current=${cur?.state ?? 'unknown'})`)
+    await sleep(intervalMs)
+  }
+  throw new Error(
+    `sandbox ${sandboxId} did not reach archived within ${Math.round(deadlineMs / 1000)}s (last=${lastState})`,
+  )
+}
+
+/**
  * Wake a stopped/archived sandbox AND re-handoff the agent privkey to the
  * (newly restarted) harness. Idempotent: if the harness is already Ready
  * with the correct agentAddress, returns without re-handoff.

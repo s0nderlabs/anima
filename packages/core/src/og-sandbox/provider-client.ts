@@ -240,6 +240,20 @@ export class SandboxProviderClient {
     )
   }
 
+  /**
+   * Archive a sandbox. Daytona moves the container's filesystem to cold object
+   * storage and frees the compute slot. Burn stops. Wake via `startSandbox`
+   * (transition `archived → restoring → started`, ~2-5 min for FS restore).
+   *
+   * Used by `anima pause` to pause a sandbox during dev gaps. The sandbox
+   * UUID + endpoint URL are preserved across pause / resume cycles.
+   */
+  async archiveSandbox(id: string): Promise<void> {
+    await this.#postSignedVoid(`/api/sandbox/${encodeURIComponent(id)}/archive`, {}, () =>
+      signRequest({ operator: this.operator, action: 'archive', resourceId: id }),
+    )
+  }
+
   async startSandbox(id: string): Promise<void> {
     await this.#postSignedVoid(`/api/sandbox/${encodeURIComponent(id)}/start`, {}, () =>
       signRequest({ operator: this.operator, action: 'start', resourceId: id }),

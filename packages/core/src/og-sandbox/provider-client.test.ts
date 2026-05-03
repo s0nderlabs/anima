@@ -136,6 +136,38 @@ describe('SandboxProviderClient', () => {
     await expect(client.createSandbox({ snapshot: 'x' })).rejects.toThrow(/POST.*403/)
   })
 
+  test('archiveSandbox sends signed POST to /archive with action=archive', async () => {
+    const m = mockFetch()
+    m.reply(() => new Response('', { status: 204 }))
+    const operator = privateKeyToAccount(generatePrivateKey())
+    const client = new SandboxProviderClient({ endpoint: ENDPOINT, operator, fetchImpl: m.fetch })
+    await client.archiveSandbox('sbx-archive-1')
+    const call = m.calls[0]
+    if (!call) throw new Error('no call recorded')
+    expect(call.url).toBe(`${ENDPOINT}/api/sandbox/sbx-archive-1/archive`)
+    expect(call.method).toBe('POST')
+    expect(call.headers['x-wallet-address']).toBeTruthy()
+    // Decode the canonical signed JSON from the base64 header to check action + resource
+    const signedJson = JSON.parse(
+      Buffer.from(call.headers['x-signed-message']!, 'base64').toString('utf8'),
+    )
+    expect(signedJson.action).toBe('archive')
+    expect(signedJson.resource_id).toBe('sbx-archive-1')
+  })
+
+  test('archiveSandbox propagates non-2xx errors', async () => {
+    const m = mockFetch()
+    m.reply(() => new Response('not found', { status: 404 }))
+    const operator = privateKeyToAccount(generatePrivateKey())
+    const client = new SandboxProviderClient({
+      endpoint: ENDPOINT,
+      operator,
+      fetchImpl: m.fetch,
+      retries: 0,
+    })
+    await expect(client.archiveSandbox('sbx-archive-2')).rejects.toThrow(/POST.*404/)
+  })
+
   test('read fetch attaches AbortSignal that fires on timeout (default 30s)', async () => {
     const calls: Array<{ signal: AbortSignal | undefined }> = []
     const fetchImpl = (async (_input: unknown, init?: RequestInit) => {
