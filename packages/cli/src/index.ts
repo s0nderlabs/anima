@@ -90,8 +90,14 @@ async function main(): Promise<void> {
       return
     }
     case 'upgrade': {
+      // --ref <val> takes priority. Otherwise the first non-flag arg becomes
+      // the ref, so `anima upgrade latest` and `anima upgrade v0.17.8` work
+      // without --ref. No positional + no --ref → undefined → command flow
+      // defaults to `latest` (resolved via GitHub API).
       const refIdx = argv.indexOf('--ref')
-      const ref = refIdx >= 0 ? argv[refIdx + 1] : undefined
+      const flagRef = refIdx >= 0 ? argv[refIdx + 1] : undefined
+      const positionalRef = argv.find(a => !a.startsWith('-') && a !== flagRef)
+      const ref = flagRef ?? positionalRef
       const yes = argv.includes('--yes') || argv.includes('-y')
       const reprovision = argv.includes('--reprovision')
       const { runUpgrade } = await import('./commands/upgrade')
@@ -225,7 +231,8 @@ function printHelp(): void {
       '  anima sync                force flush memory + activity-log to 0G + anchor on chain',
       '  anima migrate-keystore    upgrade v0.5.0 passphrase keystore to v0.6 operator-wallet',
       '  anima deploy              migrate Local agent to 0G Sandbox via Option 3 handoff',
-      '  anima upgrade [--ref vX]  roll harness to new ref in place (flags: --reprovision for fresh container)',
+      '  anima upgrade [<ref>]     roll harness to new ref in place (default: latest published release)',
+      '                            flags: --ref vX.Y.Z, --reprovision for fresh container',
       '  anima resume              wake an archived/stopped sandbox (re-handoff agent privkey)',
       '  anima pause               archive sandbox to stop runtime burn (resume with: anima resume)',
       '  anima inspect [ref]       audit on-chain memory slots (flags: --slot, --tx, --raw, --diff, --json, --full, --out <dir>)',

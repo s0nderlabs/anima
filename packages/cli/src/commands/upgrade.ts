@@ -17,6 +17,15 @@ import type { Address, Hex } from 'viem'
 import { findAndLoadConfig } from '../config/load'
 import { writeConfigTs } from '../config/render'
 import { SandboxClient } from '../sandbox/client'
+import { checkTagExists } from '../util/github-releases'
+import {
+  ANIMA_REPO_URL,
+  LATEST_KEYWORD,
+  type ResolvedRef,
+  expectedVersionFromRef,
+  formatResolvedRef,
+  resolveAnimaRef,
+} from '../util/ref-resolver'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 import {
   ensureSandboxStarted,
@@ -84,14 +93,45 @@ export async function runUpgrade(opts: UpgradeOpts = {}): Promise<void> {
     return
   }
 
-  const ref = opts.ref ?? process.env.ANIMA_BOOTSTRAP_REF ?? 'main'
   const mode: UpgradeMode = opts.reprovision ? 'reprovision' : 'in-place'
+
+  let resolved: ResolvedRef
+  try {
+    resolved = await resolveAnimaRef(opts.ref)
+  } catch (e) {
+    cancel(
+      `could not resolve ref: ${(e as Error).message.slice(0, 200)}\nGitHub API may be unreachable. Pin a tag with \`--ref vX.Y.Z\` to skip the lookup.`,
+    )
+    return
+  }
+
+  // Pre-flight tag visibility — closes the silent-success bug from 2026-05-03
+  // (see upgrade-silent-success-bug.md). Skip when we just resolved from
+  // `latest` (the API IS the source of truth) or for branch/SHA refs.
+  if (resolved.isTag && !resolved.resolvedFromLatest) {
+    try {
+      const exists = await checkTagExists(ANIMA_REPO_URL, resolved.ref)
+      if (!exists) {
+        cancel(
+          `Tag ${resolved.ref} is not visible on the remote yet (CI may still be propagating).\nTry again in 30s, or run \`anima upgrade ${LATEST_KEYWORD}\` to pick the most recent published release.`,
+        )
+        return
+      }
+    } catch (e) {
+      cancel(
+        `tag visibility check failed: ${(e as Error).message.slice(0, 200)}\nGitHub API may be unreachable. Set \`ANIMA_BOOTSTRAP_REF=main\` to skip tag verification for dev builds.`,
+      )
+      return
+    }
+  }
+
+  const refDisplay = formatResolvedRef(resolved)
 
   if (!opts.yes) {
     const message =
       mode === 'reprovision'
-        ? `Reprovision sandbox ${config.sandbox.id.slice(0, 8)} with a fresh container at ref=${ref}? (~60-90s downtime, ~0.9 0G testnet)`
-        : `Upgrade sandbox ${config.sandbox.id.slice(0, 8)} in place to ref=${ref}? (~30-60s downtime)`
+        ? `Reprovision sandbox ${config.sandbox.id.slice(0, 8)} with a fresh container at ref=${refDisplay}? (~60-90s downtime, ~0.9 0G testnet)`
+        : `Upgrade sandbox ${config.sandbox.id.slice(0, 8)} in place to ref=${refDisplay}? (~30-60s downtime)`
     const ok = await confirm({ message, initialValue: true })
     if (isCancel(ok) || !ok) {
       cancel('Aborted.')
@@ -149,7 +189,7 @@ export async function runUpgrade(opts: UpgradeOpts = {}): Promise<void> {
       oldSandboxId: sandboxId,
       config,
       loadedPath: loaded.path,
-      ref,
+      resolved,
     })
   } else {
     await runInPlaceUpgrade({
@@ -162,7 +202,7 @@ export async function runUpgrade(opts: UpgradeOpts = {}): Promise<void> {
       sandboxEndpoint: config.sandbox.endpoint,
       iNFTNetwork: config.network,
       brain: { provider: config.brain.provider as Address, model: config.brain.model ?? '' },
-      ref,
+      resolved,
     })
   }
 
@@ -179,7 +219,7 @@ interface InPlaceUpgradeArgs {
   sandboxEndpoint: string
   iNFTNetwork: AnimaNetwork
   brain: { provider: Address; model: string }
-  ref: string
+  resolved: ResolvedRef
 }
 
 async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
@@ -207,11 +247,11 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
     return
   }
 
-  sBox.message(`launching in-place upgrade to ref=${args.ref}`)
+  sBox.message(`launching in-place upgrade to ref=${args.resolved.ref}`)
   const { script } = buildUpgradeScript({
     sandboxId: args.sandboxId,
     operatorAddress: operatorAccount.address,
-    ref: args.ref,
+    ref: args.resolved.ref,
   })
   let launchOut: string
   try {
@@ -284,6 +324,43 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
     return
   }
 
+  // Post-flight version verification — DONE marker only proves the inner
+  // script finished, not that git checkout moved HEAD. Read package.json
+  // from the container and compare. Skip for non-tag refs (no expectation).
+  const expected = expectedVersionFromRef(args.resolved)
+  if (expected !== null) {
+    const verifyOut = await execRead(
+      `grep '"version"' $HOME/anima/packages/harness/package.json | head -1`,
+    )
+    const m = verifyOut.match(/"version"\s*:\s*"([^"]+)"/)
+    if (!m) {
+      sBox.stop('post-flight verification failed: cannot parse package.json version')
+      note(
+        [
+          'The upgrade reported success but we could not read the deployed package.json.',
+          'Re-running `anima upgrade` should land cleanly. If this persists, file an issue.',
+        ].join('\n'),
+        'recoverable',
+      )
+      return
+    }
+    const actual = m[1]
+    if (actual !== expected) {
+      sBox.stop(`silent-success regression: expected ${expected}, got ${actual}`)
+      note(
+        [
+          `The harness reported success but is running ${actual} instead of ${expected}.`,
+          'This means git fetch may not have seen the tag yet. Re-running',
+          `\`anima upgrade --ref ${args.resolved.ref}\` should land it correctly,`,
+          'or `anima upgrade latest` to pick the most recent published release.',
+        ].join('\n'),
+        'recoverable',
+      )
+      return
+    }
+    sBox.message(`verified harness version=${actual}`)
+  }
+
   // Re-handoff against the SAME endpoint (harness restarted with fresh keypair).
   sBox.message('re-handing off agent privkey to restarted harness')
   const sandboxClient = new SandboxClient({
@@ -320,7 +397,7 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
       '',
       `  sandbox       ${args.sandboxId} (unchanged)`,
       `  endpoint      ${args.sandboxEndpoint} (unchanged)`,
-      `  ref           ${args.ref}`,
+      `  ref           ${formatResolvedRef(args.resolved)}`,
       '',
       'Next: `anima` to chat (same harness endpoint, same agent EOA, new code)',
     ].join('\n'),
@@ -336,7 +413,7 @@ interface ReprovisionUpgradeArgs {
   oldSandboxId: string
   config: NonNullable<Awaited<ReturnType<typeof findAndLoadConfig>>>['config']
   loadedPath: string
-  ref: string
+  resolved: ResolvedRef
 }
 
 async function runReprovisionUpgrade(args: ReprovisionUpgradeArgs): Promise<void> {
@@ -377,7 +454,7 @@ async function runReprovisionUpgrade(args: ReprovisionUpgradeArgs): Promise<void
       },
       iNFTNetwork: args.config.network,
       name: args.config.subname || 'anima',
-      ref: args.ref,
+      ref: args.resolved.ref,
       onProgress: msg => sBox.message(msg),
     })
     sBox.stop(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`)
@@ -427,7 +504,7 @@ async function runReprovisionUpgrade(args: ReprovisionUpgradeArgs): Promise<void
       `  old sandbox   ${args.oldSandboxId}`,
       `  new sandbox   ${sandboxResult.sandboxId}`,
       `  endpoint      ${sandboxResult.endpoint}`,
-      `  ref           ${args.ref}`,
+      `  ref           ${formatResolvedRef(args.resolved)}`,
       '',
       'Next: `anima` to chat (now routes through the new harness)',
     ].join('\n'),

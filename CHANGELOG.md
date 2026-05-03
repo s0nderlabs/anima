@@ -4,6 +4,20 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.8] - 2026-05-03
+
+### Added
+
+- **`anima upgrade` now resolves to the latest GitHub release by default**. Bare `anima upgrade` queries `api.github.com/repos/s0nderlabs/anima/releases/latest` and uses whatever tag is published. Shortcuts: `anima upgrade latest` (explicit) and `anima upgrade v0.17.8` (positional pin). The old `--ref` flag continues to work; `ANIMA_BOOTSTRAP_REF=main` is the dev escape hatch. Closes the friction of looking up the latest version + retyping it.
+- **Pre-flight tag visibility check**. When the user pins an explicit tag, the CLI calls `GET /repos/.../git/refs/tags/<tag>` before invoking the in-container upgrade. A 404 surfaces as a clear `Tag <ref> is not visible on the remote yet (CI may still be propagating). Try again in 30s` cancel, instead of letting the upgrade run and fail mid-fetch.
+- **Post-flight version verification**. After the in-container DONE marker, the CLI reads `~/anima/packages/harness/package.json` from the container and asserts `version` matches the resolved tag. On mismatch, the upgrade aborts BEFORE the agent privkey re-handoff with a `silent-success regression: expected X, got Y` message + retry hint. Closes the silent-success bug surfaced 2026-05-03 on enigma where `anima upgrade --ref v0.17.7` reported success but the container stayed at v0.17.5.
+
+### Internal
+
+- New `packages/cli/src/util/github-releases.ts`: `parseGitHubRepoUrl`, `resolveLatestRelease`, `checkTagExists`. AbortSignal-timed (10s default), no auth needed for public repo, `fetchImpl` injection point for tests.
+- New `packages/cli/src/util/ref-resolver.ts`: `resolveAnimaRef(rawRef?, opts?)` returns `{ref, isTag, resolvedFromLatest}`. Single source of truth for ref resolution; ready to be reused by `anima init` / `anima deploy --reprovision` in a future ship.
+- 19 new unit tests across the two helper modules (mocked fetch, no live API calls).
+
 ## [0.17.7] - 2026-05-03
 
 ### Added
