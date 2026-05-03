@@ -467,12 +467,20 @@ export async function ensureSandboxStarted(
  *   started / starting            -> stop + wait + archive + wait (two-phase)
  *   error                         -> throw
  *
- * Default deadline budgets are per-phase: 60s for stop, 60s for archive.
+ * Default deadlines per phase: 60s for stop, 5min for archive (Daytona snapshots
+ * the filesystem to object storage; verified live to take >60s sometimes).
  * Used by `anima pause` to confirm Daytona acknowledges the full transition.
  */
 export interface EnsureSandboxArchivedOpts {
   intervalMs?: number
-  /** Default 60_000ms per phase (stop + archive). */
+  /** Stop-phase deadline. Default 60_000ms. */
+  stopDeadlineMs?: number
+  /** Archive-phase deadline. Default 300_000ms (5 min). */
+  archiveDeadlineMs?: number
+  /**
+   * Legacy alias for stop+archive deadlines. If set, used for both phases.
+   * Prefer `stopDeadlineMs` / `archiveDeadlineMs` for asymmetric tuning.
+   */
   deadlineMs?: number
   onProgress?: (msg: string) => void
 }
@@ -491,7 +499,8 @@ export async function ensureSandboxArchived(
   opts: EnsureSandboxArchivedOpts = {},
 ): Promise<EnsureSandboxArchivedResult> {
   const intervalMs = opts.intervalMs ?? 5000
-  const deadlineMs = opts.deadlineMs ?? 60_000
+  const stopDeadlineMs = opts.stopDeadlineMs ?? opts.deadlineMs ?? 60_000
+  const archiveDeadlineMs = opts.archiveDeadlineMs ?? opts.deadlineMs ?? 300_000
   const progress = opts.onProgress ?? (() => {})
 
   const initial = await provider.getSandbox(sandboxId)
@@ -521,7 +530,7 @@ export async function ensureSandboxArchived(
     } catch (e) {
       throw new Error(`stopSandbox(${sandboxId}) failed: ${(e as Error).message.slice(0, 200)}`)
     }
-    const stopDeadline = Date.now() + deadlineMs
+    const stopDeadline = Date.now() + stopDeadlineMs
     while (Date.now() < stopDeadline) {
       const cur = await provider.getSandbox(sandboxId).catch(() => null)
       if (cur?.state === 'stopped') break
@@ -534,7 +543,7 @@ export async function ensureSandboxArchived(
     const afterStop = await provider.getSandbox(sandboxId)
     if (afterStop.state !== 'stopped') {
       throw new Error(
-        `sandbox ${sandboxId} did not reach stopped within ${Math.round(deadlineMs / 1000)}s (last=${afterStop.state})`,
+        `sandbox ${sandboxId} did not reach stopped within ${Math.round(stopDeadlineMs / 1000)}s (last=${afterStop.state})`,
       )
     }
   }
@@ -553,7 +562,7 @@ export async function ensureSandboxArchived(
     progress('sandbox state=archiving (in transition, waiting)')
   }
 
-  const archiveDeadline = Date.now() + deadlineMs
+  const archiveDeadline = Date.now() + archiveDeadlineMs
   let lastState = stateBeforeArchive
   while (Date.now() < archiveDeadline) {
     const cur = await provider.getSandbox(sandboxId).catch(() => null)
@@ -573,7 +582,7 @@ export async function ensureSandboxArchived(
     await sleep(intervalMs)
   }
   throw new Error(
-    `sandbox ${sandboxId} did not reach archived within ${Math.round(deadlineMs / 1000)}s (last=${lastState})`,
+    `sandbox ${sandboxId} did not reach archived within ${Math.round(archiveDeadlineMs / 1000)}s (last=${lastState})`,
   )
 }
 

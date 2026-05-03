@@ -105,18 +105,16 @@ export function buildHarnessRelaunchScript(
     'echo "[$(date -u +%FT%TZ)] relaunch-done pid=$HARNESS_PID"',
   ].join('\n')
 
-  // base64-wrapped bash -c so Daytona's argv-only execInToolbox handles it
+  // base64-wrapped bash -c so Daytona's argv-only execInToolbox handles it.
+  // Note the trailing `& echo` (NOT `& && echo`): `&` is the background operator
+  // that fires-and-continues; `&&` after it would be a syntax error.
   const innerB64 = Buffer.from(inner, 'utf8').toString('base64')
   const innerPath = '/tmp/anima-relaunch-inner.sh'
-  const outer = [
-    `echo ${shQuote(innerB64)} | base64 -d > ${innerPath}`,
-    `chmod +x ${innerPath}`,
-    `nohup bash ${innerPath} >/dev/null 2>&1 &`,
-    'echo relaunch-launched',
-  ].join(' && ')
+  const fileWrites = `echo ${shQuote(innerB64)} | base64 -d > ${innerPath} && chmod +x ${innerPath}`
+  const launchBody = `${fileWrites} && nohup bash ${innerPath} >/dev/null 2>&1 & echo relaunch-launched`
 
   return {
-    script: `bash -c ${shQuote(outer)}`,
+    script: `bash -c '${launchBody}'`,
     progressLogPath: PROGRESS_LOG,
     doneMarkerPath: DONE_MARKER,
     failMarkerPath: FAIL_MARKER,

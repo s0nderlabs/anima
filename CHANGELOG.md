@@ -4,6 +4,13 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.6] - 2026-05-03
+
+### Fixed
+
+- **`anima pause` archive deadline 60s → 5min**. Daytona's archive snapshots the container filesystem to object storage; verified live to take >60s sometimes. `ensureSandboxArchived` now defaults to a 5-minute archive-phase deadline (still 60s for the stop phase). Operators can override via the new `archiveDeadlineMs` / `stopDeadlineMs` opts; the legacy `deadlineMs` opt still works for callers that want symmetric tuning.
+- **Harness relaunch script syntax error**. v0.17.4's `buildHarnessRelaunchScript` joined the launch parts with `&&` between every step, including between the `nohup ... &` background-fire and the trailing `echo relaunch-launched`. That produced `& && echo` which bash rejects. Mirrored the upgrade-script.ts / bootstrap.ts pattern: chain file-write commands with `&&`, then use a single space-separated `&` (background) followed by the success-line `echo`.
+
 ## [0.17.5] - 2026-05-03
 
 ### Fixed
