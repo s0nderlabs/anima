@@ -66,6 +66,8 @@ Parent domain `anima.0g` is registered on SPACE ID on mainnet; `anima init` issu
 - `anima restore <iNFT-ref>` — recover an agent on a new machine from its iNFT (refs: `eip155:16661:0x...:N` or `0g-mainnet:0x...:N`)
 - `anima topup --agent N` — operator sends N 0G to the agent EOA (infra gas)
 - `anima topup --compute N` — agent deposits N 0G into the 0G Compute ledger
+- `anima topup --provider N`: operator deposits N 0G into the Galileo SandboxServing contract (testnet runtime fees: ~0.09 0G/hour per active sandbox)
+- `anima resume`: wake a stopped or archived sandbox + re-handoff the agent privkey to the (newly restarted) harness. Same sandbox UUID + endpoint preserved. Use when the harness goes offline (Daytona auto-archive after 60min idle, or INSUFFICIENT_BALANCE settlement event)
 - `anima ledger [balance | refund | retrieve | close]` — drain the 0G Compute ledger of a retiring agent. `balance` shows main + per-provider sub-account state. `retrieve` calls `retrieveFund('inference')` to start the per-provider lock window (call again after the window to actually pull). `refund [--amount N | --all]` withdraws from the main account back to the agent EOA. `close --yes` deletes the ledger entirely.
 - `anima drain --to <addr>` — sweep the agent EOA's native balance to a target address. Defaults to `config.identity.operator` if `--to` omitted. Reserves 21000 × live gas price for the sweep tx; sends the rest. Use after `anima ledger refund` to finish recovering funds from a retired agent.
 - `anima sync` — force flush memory + activity-log to 0G Storage and anchor on chain. In sandbox mode proxies to the harness's `POST /sync` (no laptop-side keystore decrypt).

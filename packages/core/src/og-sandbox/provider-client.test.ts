@@ -135,4 +135,67 @@ describe('SandboxProviderClient', () => {
     const client = new SandboxProviderClient({ endpoint: ENDPOINT, operator, fetchImpl: m.fetch })
     await expect(client.createSandbox({ snapshot: 'x' })).rejects.toThrow(/POST.*403/)
   })
+
+  test('read fetch attaches AbortSignal that fires on timeout (default 30s)', async () => {
+    const calls: Array<{ signal: AbortSignal | undefined }> = []
+    const fetchImpl = (async (_input: unknown, init?: RequestInit) => {
+      calls.push({ signal: init?.signal ?? undefined })
+      return new Response(JSON.stringify({ create_fee: '0' }), { status: 200 })
+    }) as typeof fetch
+    const operator = privateKeyToAccount(generatePrivateKey())
+    const client = new SandboxProviderClient({
+      endpoint: ENDPOINT,
+      operator,
+      fetchImpl,
+    })
+    await client.info()
+    const c = calls[0]
+    if (!c) throw new Error('no call')
+    expect(c.signal).toBeDefined()
+    expect(c.signal!.aborted).toBe(false)
+  })
+
+  test('read timeout fires when fetch hangs past read timeout', async () => {
+    let abortedDuringHang = false
+    const fetchImpl = (async (_input: unknown, init?: RequestInit) => {
+      // Wait until the signal aborts (which proves the timeout wired through)
+      await new Promise<void>((_resolve, reject) => {
+        init!.signal!.addEventListener('abort', () => {
+          abortedDuringHang = true
+          reject(new DOMException('aborted', 'AbortError'))
+        })
+      })
+      return new Response('', { status: 200 })
+    }) as typeof fetch
+    const operator = privateKeyToAccount(generatePrivateKey())
+    const client = new SandboxProviderClient({
+      endpoint: ENDPOINT,
+      operator,
+      fetchImpl,
+      requestTimeoutMs: { read: 50 },
+      retries: 0,
+    })
+    await expect(client.info()).rejects.toThrow()
+    expect(abortedDuringHang).toBe(true)
+  })
+
+  test('write timeout uses the longer write deadline', async () => {
+    const calls: Array<{ signal: AbortSignal }> = []
+    const fetchImpl = (async (_input: unknown, init?: RequestInit) => {
+      calls.push({ signal: init!.signal! })
+      return new Response(JSON.stringify({ id: 'x', state: 'creating' }), { status: 200 })
+    }) as typeof fetch
+    const operator = privateKeyToAccount(generatePrivateKey())
+    const client = new SandboxProviderClient({
+      endpoint: ENDPOINT,
+      operator,
+      fetchImpl,
+      requestTimeoutMs: { read: 1, write: 60_000 },
+    })
+    // Reads with 1ms timeout would already abort; writes with 60s should be fine
+    await client.createSandbox({ snapshot: 'x' })
+    const c = calls[0]
+    if (!c) throw new Error('no call')
+    expect(c.signal.aborted).toBe(false)
+  })
 })

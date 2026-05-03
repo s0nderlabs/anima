@@ -1,5 +1,7 @@
 import { cancel, intro, isCancel, outro, password, select, spinner } from '@clack/prompts'
 import {
+  SANDBOX_PROVIDER_GALILEO,
+  SandboxSettlementClient,
   agentPaths,
   depositToLedger,
   explorerTxUrl,
@@ -19,6 +21,8 @@ export interface TopupOpts {
   agent?: number
   /** Top up the compute ledger from agent EOA, amount in 0G. */
   compute?: number
+  /** Top up the Galileo sandbox provider deposit from operator wallet, amount in 0G. */
+  provider?: number
 }
 
 export async function runTopup(opts: TopupOpts): Promise<void> {
@@ -43,7 +47,7 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
   })
   const paths = agentPaths.agent(finalAgentId)
 
-  let mode: 'agent' | 'compute' | null = null
+  let mode: 'agent' | 'compute' | 'provider' | null = null
   let amount = 0
   if (opts.agent !== undefined) {
     mode = 'agent'
@@ -51,6 +55,9 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
   } else if (opts.compute !== undefined) {
     mode = 'compute'
     amount = opts.compute
+  } else if (opts.provider !== undefined) {
+    mode = 'provider'
+    amount = opts.provider
   }
 
   if (!mode) {
@@ -67,8 +74,13 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
           label: 'Compute ledger (inference credits)',
           hint: 'agent deposits 0G into 0G Compute',
         },
+        {
+          value: 'provider' as const,
+          label: 'Sandbox provider deposit (Galileo testnet runtime fees)',
+          hint: 'operator deposits 0G into SandboxServing for harness billing',
+        },
       ],
-    })) as 'agent' | 'compute' | symbol
+    })) as 'agent' | 'compute' | 'provider' | symbol
     if (isCancel(choice)) {
       cancel('Aborted.')
       return
@@ -88,6 +100,52 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
       return
     }
     amount = Number(amtRaw)
+  }
+
+  if (mode === 'provider') {
+    const operator = await loadOrPickOperatorSigner({ network, hint: config.operator })
+    if (!operator) return
+    const operatorAccount = await operator.account()
+    const galileoPub = await operator.publicClient('0g-testnet')
+    const galileoWallet = await operator.walletClient('0g-testnet')
+    const settle = new SandboxSettlementClient({
+      publicClient: galileoPub,
+      walletClient: galileoWallet,
+    })
+    const wei = parseEther(String(amount))
+
+    const sBefore = spinner()
+    sBefore.start('Reading current Galileo deposit')
+    let before = 0n
+    try {
+      before = await settle.getBalance(operatorAccount.address, SANDBOX_PROVIDER_GALILEO)
+      sBefore.stop(
+        `current deposit ${formatEther(before)} 0G (~${(Number(before) / 1e18 / 0.09).toFixed(1)}h runway)`,
+      )
+    } catch (e) {
+      sBefore.stop(`balance read failed: ${(e as Error).message.slice(0, 120)}`)
+    }
+
+    const sDep = spinner()
+    sDep.start(`Depositing ${amount} 0G to Galileo provider`)
+    try {
+      const tx = await settle.deposit({
+        recipient: operatorAccount.address,
+        provider: SANDBOX_PROVIDER_GALILEO,
+        amountWei: wei,
+      })
+      await waitForReceiptResilient(galileoPub, tx, { tries: 60, delayMs: 2000 })
+      const after = await settle.getBalance(operatorAccount.address, SANDBOX_PROVIDER_GALILEO)
+      sDep.stop(
+        `deposit confirmed → ${explorerTxUrl('0g-testnet', tx)} (new balance ${formatEther(after)} 0G ≈ ${(Number(after) / 1e18 / 0.09).toFixed(1)}h)`,
+      )
+      outro(`Galileo deposit topped up by ${amount} 0G`)
+    } catch (e) {
+      sDep.stop(`deposit failed: ${(e as Error).message.slice(0, 120)}`)
+    } finally {
+      await operator.close?.()
+    }
+    return
   }
 
   if (mode === 'agent') {

@@ -93,6 +93,12 @@ export interface SandboxProviderClientOpts {
   retries?: number
   /** Default 2000ms. Each attempt waits attempt * baseMs. */
   retryBaseMs?: number
+  /**
+   * Per-request fetch deadline (ms), applied via `AbortSignal.timeout` per
+   * attempt. Without these, a stuck Daytona backend can hang the CLI for
+   * minutes. Defaults: 30s for read, 60s for write/exec.
+   */
+  requestTimeoutMs?: { read?: number; write?: number }
 }
 
 /**
@@ -120,6 +126,8 @@ export class SandboxProviderClient {
   #fetch: typeof fetch
   #retries: number
   #retryBaseMs: number
+  #readTimeoutMs: number
+  #writeTimeoutMs: number
 
   constructor(opts: SandboxProviderClientOpts) {
     this.endpoint = opts.endpoint.replace(/\/$/, '')
@@ -127,6 +135,8 @@ export class SandboxProviderClient {
     this.#fetch = opts.fetchImpl ?? globalThis.fetch
     this.#retries = opts.retries ?? 3
     this.#retryBaseMs = opts.retryBaseMs ?? 2000
+    this.#readTimeoutMs = opts.requestTimeoutMs?.read ?? 30_000
+    this.#writeTimeoutMs = opts.requestTimeoutMs?.write ?? 60_000
   }
 
   /**
@@ -136,10 +146,15 @@ export class SandboxProviderClient {
    * already used`) and stale expiries (`401 request expired`), so retrying
    * with the same headers after a 504 always fails. Public reads (no headers)
    * pass `() => undefined`.
+   *
+   * Each attempt also injects a fresh `AbortSignal.timeout(timeoutMs)` so a
+   * stuck backend cannot hang the CLI indefinitely. AbortError from the
+   * timeout is treated as retryable (caller's loop will see lastErr).
    */
   async #fetchWithRetry(
     url: string,
     buildInit: () => Promise<RequestInit | undefined> | RequestInit | undefined,
+    timeoutMs: number,
   ): Promise<Response> {
     let attempt = 0
     let lastErr: unknown
@@ -147,7 +162,8 @@ export class SandboxProviderClient {
     while (attempt <= this.#retries) {
       try {
         const init = await buildInit()
-        const r = await this.#fetch(url, init)
+        const signal = AbortSignal.timeout(timeoutMs)
+        const r = await this.#fetch(url, { ...init, signal })
         if (!RETRYABLE_STATUSES.has(r.status)) return r
         lastResponse = r
         lastErr = new Error(`${init?.method ?? 'GET'} ${url}: ${r.status} (retryable)`)
@@ -213,6 +229,7 @@ export class SandboxProviderClient {
           resourceId: id,
         }),
       }),
+      this.#writeTimeoutMs,
     )
     if (!r.ok) throw new Error(`deleteSandbox(${id}) failed: ${r.status} ${await safeText(r)}`)
   }
@@ -258,15 +275,21 @@ export class SandboxProviderClient {
   }
 
   async #getPublic<T>(path: string): Promise<T> {
-    const r = await this.#fetchWithRetry(`${this.endpoint}${path}`, () => undefined)
+    const r = await this.#fetchWithRetry(
+      `${this.endpoint}${path}`,
+      () => undefined,
+      this.#readTimeoutMs,
+    )
     if (!r.ok) throw new Error(`GET ${path}: ${r.status}`)
     return (await r.json()) as T
   }
 
   async #getSigned<T>(path: string, sign: () => Promise<SignedHeaders>): Promise<T> {
-    const r = await this.#fetchWithRetry(`${this.endpoint}${path}`, async () => ({
-      headers: await sign(),
-    }))
+    const r = await this.#fetchWithRetry(
+      `${this.endpoint}${path}`,
+      async () => ({ headers: await sign() }),
+      this.#readTimeoutMs,
+    )
     if (!r.ok) throw new Error(`GET ${path}: ${r.status} ${await safeText(r)}`)
     return (await r.json()) as T
   }
@@ -276,11 +299,15 @@ export class SandboxProviderClient {
     body: unknown,
     sign: () => Promise<SignedHeaders>,
   ): Promise<T> {
-    const r = await this.#fetchWithRetry(`${this.endpoint}${path}`, async () => ({
-      method: 'POST',
-      headers: { ...(await sign()), 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    }))
+    const r = await this.#fetchWithRetry(
+      `${this.endpoint}${path}`,
+      async () => ({
+        method: 'POST',
+        headers: { ...(await sign()), 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+      this.#writeTimeoutMs,
+    )
     if (!r.ok) throw new Error(`POST ${path}: ${r.status} ${await safeText(r)}`)
     return (await r.json()) as T
   }
@@ -290,11 +317,15 @@ export class SandboxProviderClient {
     body: unknown,
     sign: () => Promise<SignedHeaders>,
   ): Promise<void> {
-    const r = await this.#fetchWithRetry(`${this.endpoint}${path}`, async () => ({
-      method: 'POST',
-      headers: { ...(await sign()), 'content-type': 'application/json' },
-      body: JSON.stringify(body),
-    }))
+    const r = await this.#fetchWithRetry(
+      `${this.endpoint}${path}`,
+      async () => ({
+        method: 'POST',
+        headers: { ...(await sign()), 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+      this.#writeTimeoutMs,
+    )
     if (!r.ok) throw new Error(`POST ${path}: ${r.status} ${await safeText(r)}`)
   }
 }

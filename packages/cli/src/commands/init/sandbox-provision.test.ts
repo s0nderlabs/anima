@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import type { SandboxRecord } from '@s0nderlabs/anima-core'
-import { createSandboxWithOrphanRetry, pickPermissionMode } from './sandbox-provision'
+import {
+  createSandboxWithOrphanRetry,
+  ensureSandboxStarted,
+  pickPermissionMode,
+} from './sandbox-provision'
 
 describe('pickPermissionMode', () => {
   const original = process.env.ANIMA_PERMISSIONS
@@ -137,5 +141,90 @@ describe('createSandboxWithOrphanRetry', () => {
       createSandboxWithOrphanRetry(provider, 'snap', 'phantom', () => {}),
     ).rejects.toThrow(/409/)
     expect(createCalls).toBe(1)
+  })
+})
+
+describe('ensureSandboxStarted', () => {
+  function fakeProvider(stateSequence: Array<SandboxRecord['state']>) {
+    let i = 0
+    let starts = 0
+    const provider = {
+      getSandbox: async (id: string) =>
+        ({ id, state: stateSequence[Math.min(i++, stateSequence.length - 1)] }) as SandboxRecord,
+      startSandbox: async () => {
+        starts += 1
+      },
+    }
+    return { provider, startsCalled: () => starts }
+  }
+
+  test('no-op when sandbox already started', async () => {
+    const { provider, startsCalled } = fakeProvider(['started'])
+    const r = await ensureSandboxStarted(provider as never, 'sb-1')
+    expect(r.alreadyStarted).toBe(true)
+    expect(r.initialState).toBe('started')
+    expect(r.finalState).toBe('started')
+    expect(startsCalled()).toBe(0)
+  })
+
+  test('throws on error state without calling start', async () => {
+    const { provider, startsCalled } = fakeProvider(['error'])
+    await expect(ensureSandboxStarted(provider as never, 'sb-2')).rejects.toThrow(/error state/)
+    expect(startsCalled()).toBe(0)
+  })
+
+  test('stopped → started: calls /start, polls until state flips', async () => {
+    const { provider, startsCalled } = fakeProvider(['stopped', 'starting', 'started'])
+    const r = await ensureSandboxStarted(provider as never, 'sb-3', { intervalMs: 1 })
+    expect(r.alreadyStarted).toBe(false)
+    expect(r.initialState).toBe('stopped')
+    expect(r.finalState).toBe('started')
+    expect(startsCalled()).toBe(1)
+  })
+
+  test('archived → restoring → started: calls /start, accepts long path', async () => {
+    const { provider, startsCalled } = fakeProvider([
+      'archived',
+      'restoring',
+      'restoring',
+      'starting',
+      'started',
+    ])
+    const msgs: string[] = []
+    const r = await ensureSandboxStarted(provider as never, 'sb-4', {
+      intervalMs: 1,
+      onProgress: m => msgs.push(m),
+    })
+    expect(r.alreadyStarted).toBe(false)
+    expect(r.initialState).toBe('archived')
+    expect(r.finalState).toBe('started')
+    expect(startsCalled()).toBe(1)
+    // Progress should mention the friendly "archived" wording at least once
+    expect(msgs.some(m => m.includes('archived'))).toBe(true)
+  })
+
+  test('transient state (restoring): does NOT re-issue /start', async () => {
+    const { provider, startsCalled } = fakeProvider(['restoring', 'restoring', 'started'])
+    const r = await ensureSandboxStarted(provider as never, 'sb-5', { intervalMs: 1 })
+    expect(r.finalState).toBe('started')
+    // initial state was already transient → don't double-fire /start
+    expect(startsCalled()).toBe(0)
+  })
+
+  test('throws if deadline expires without reaching started', async () => {
+    const { provider } = fakeProvider(['stopped', 'starting', 'starting', 'starting'])
+    await expect(
+      ensureSandboxStarted(provider as never, 'sb-6', {
+        intervalMs: 1,
+        stoppedDeadlineMs: 50,
+      }),
+    ).rejects.toThrow(/did not reach started/)
+  })
+
+  test('throws if state transitions to error mid-poll', async () => {
+    const { provider } = fakeProvider(['stopped', 'starting', 'error'])
+    await expect(
+      ensureSandboxStarted(provider as never, 'sb-7', { intervalMs: 1 }),
+    ).rejects.toThrow(/error state during resume/)
   })
 })

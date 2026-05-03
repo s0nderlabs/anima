@@ -1,3 +1,4 @@
+import { cancel, note } from '@clack/prompts'
 import {
   type AnimaNetwork,
   type AnimaPlugin,
@@ -28,7 +29,8 @@ import {
   BOOTSTRAP_SUCCESS_MARKER_PREFIX,
   buildBootstrapScript,
 } from '@s0nderlabs/anima-harness'
-import { type Address, type Hex, hexToBytes, parseEther } from 'viem'
+import { type Address, type Hex, formatEther, hexToBytes, parseEther } from 'viem'
+import type { LocalAccount } from 'viem/accounts'
 import { SandboxClient } from '../../sandbox/client'
 import { withSilencedConsole } from '../../util/silence-console'
 
@@ -354,6 +356,178 @@ export async function handoffAgentToHarness(
 }
 
 /**
+ * Ensure a sandbox is in `started` state. Handles every Daytona transition:
+ *
+ *  - `started`            → no-op
+ *  - `stopped`            → /start, poll up to 60s
+ *  - `archived`/`archiving` → /start, poll up to 5min (filesystem restore from
+ *                            object storage takes minutes)
+ *  - `restoring`/`starting`/`pulling_snapshot` → poll without re-issuing /start
+ *  - `error`              → throws
+ *  - any unknown state    → /start, poll up to 5min
+ *
+ * Pure state-machine wait: no /bootstrap/provision handoff. Use
+ * `resumeArchivedSandbox` for the full wake-and-handoff flow.
+ *
+ * Per the documented Daytona controller (`apps/api/src/sandbox/controllers/
+ * sandbox.controller.ts:487`), `/start` is the same endpoint for both
+ * `stopped → started` and `archived → restoring → started` transitions.
+ */
+export interface EnsureSandboxStartedOpts {
+  /** Polling tick interval. Default 5000ms. */
+  intervalMs?: number
+  /** Max time to wait when source state is stopped. Default 60_000ms. */
+  stoppedDeadlineMs?: number
+  /** Max time to wait when source state is archived/archiving/restoring. Default 300_000ms. */
+  archivedDeadlineMs?: number
+  /** Progress callback for spinner UX. */
+  onProgress?: (msg: string) => void
+}
+
+export interface EnsureSandboxStartedResult {
+  /** State observed BEFORE we did anything. */
+  initialState: string
+  /** Whether the sandbox was already started (no /start was issued). */
+  alreadyStarted: boolean
+  /** Final state observed (always `started` on success). */
+  finalState: string
+}
+
+const ARCHIVE_LIKE_STATES = new Set(['archived', 'archiving', 'restoring'])
+
+export async function ensureSandboxStarted(
+  provider: SandboxProviderClient,
+  sandboxId: string,
+  opts: EnsureSandboxStartedOpts = {},
+): Promise<EnsureSandboxStartedResult> {
+  const intervalMs = opts.intervalMs ?? 5000
+  const stoppedDeadlineMs = opts.stoppedDeadlineMs ?? 60_000
+  const archivedDeadlineMs = opts.archivedDeadlineMs ?? 300_000
+  const progress = opts.onProgress ?? (() => {})
+
+  const initial = await provider.getSandbox(sandboxId)
+  if (initial.state === 'started') {
+    return { initialState: initial.state, alreadyStarted: true, finalState: 'started' }
+  }
+  if (initial.state === 'error') {
+    throw new Error(`sandbox ${sandboxId} is in error state; cannot resume`)
+  }
+
+  const isArchiveLike = ARCHIVE_LIKE_STATES.has(initial.state)
+  const deadlineMs = isArchiveLike ? archivedDeadlineMs : stoppedDeadlineMs
+  const friendly = isArchiveLike ? 'archived' : initial.state
+
+  // Issue /start unless we're already in a transitional state.
+  // `restoring`/`starting`/`pulling_snapshot` mean a transition is in flight;
+  // re-issuing /start could confuse the state machine.
+  const transientStates = new Set(['starting', 'restoring', 'pulling_snapshot'])
+  if (!transientStates.has(initial.state)) {
+    progress(`sandbox state=${friendly}, calling startSandbox`)
+    try {
+      await provider.startSandbox(sandboxId)
+    } catch (e) {
+      throw new Error(`startSandbox(${sandboxId}) failed: ${(e as Error).message.slice(0, 200)}`)
+    }
+  } else {
+    progress(`sandbox state=${initial.state} (in transition, waiting)`)
+  }
+
+  const deadline = Date.now() + deadlineMs
+  let lastState = initial.state
+  while (Date.now() < deadline) {
+    const cur = await provider.getSandbox(sandboxId).catch(() => null)
+    if (cur) lastState = cur.state
+    if (cur?.state === 'started') {
+      return { initialState: initial.state, alreadyStarted: false, finalState: 'started' }
+    }
+    if (cur?.state === 'error') {
+      throw new Error(`sandbox ${sandboxId} transitioned to error state during resume`)
+    }
+    progress(`waiting for state=started (current=${cur?.state ?? 'unknown'})`)
+    await sleep(intervalMs)
+  }
+  throw new Error(
+    `sandbox ${sandboxId} did not reach started within ${Math.round(deadlineMs / 1000)}s (last=${lastState})`,
+  )
+}
+
+/**
+ * Wake a stopped/archived sandbox AND re-handoff the agent privkey to the
+ * (newly restarted) harness. Idempotent: if the harness is already Ready
+ * with the correct agentAddress, returns without re-handoff.
+ *
+ * Used by `anima resume` (operator wakes their agent) and `runInPlaceUpgrade`
+ * after the upgrade-script restarts the harness in place.
+ */
+export interface ResumeArchivedSandboxOpts {
+  provider: SandboxProviderClient
+  sandboxId: string
+  sandboxEndpoint: string
+  operatorAccount: LocalAccount
+  agentPrivkey: Hex
+  agentAddress: Address
+  iNFTRef: { contract: Address; tokenId: bigint }
+  iNFTNetwork: AnimaNetwork
+  brain: { provider: Address; model: string }
+  plugins?: AnimaPlugin[]
+  promptAppend?: string
+  onProgress?: (msg: string) => void
+  ensureStartedOpts?: EnsureSandboxStartedOpts
+}
+
+export interface ResumeArchivedSandboxResult {
+  initialState: string
+  alreadyReady: boolean
+  bootstrapPubkey?: Hex
+}
+
+export async function resumeArchivedSandbox(
+  opts: ResumeArchivedSandboxOpts,
+): Promise<ResumeArchivedSandboxResult> {
+  const progress = opts.onProgress ?? (() => {})
+  const sandboxClient = new SandboxClient({
+    endpoint: opts.sandboxEndpoint,
+    sandboxId: opts.sandboxId,
+    operator: opts.operatorAccount,
+  })
+
+  const ensureResult = await ensureSandboxStarted(opts.provider, opts.sandboxId, {
+    ...opts.ensureStartedOpts,
+    onProgress: progress,
+  })
+
+  // Fast-path: if the sandbox was already started, the harness MAY be Ready
+  // with the correct agentAddress already; skip the re-handoff cost in that case.
+  if (ensureResult.alreadyStarted) {
+    const h = await sandboxClient.health().catch(() => null)
+    if (
+      h?.state === 'Ready' &&
+      h.runtimeReady &&
+      h.agentAddress?.toLowerCase() === opts.agentAddress.toLowerCase()
+    ) {
+      progress('harness already Ready with matching agent; skipping handoff')
+      return { initialState: ensureResult.initialState, alreadyReady: true }
+    }
+  }
+
+  // Re-handoff: pubkey + envelope + provision + waitReady.
+  progress('re-handing off agent privkey to harness')
+  const { bootstrapPubkey } = await handoffAgentToHarness({
+    sandboxClient,
+    agentPrivkey: opts.agentPrivkey,
+    agentAddress: opts.agentAddress,
+    iNFTRef: opts.iNFTRef,
+    iNFTNetwork: opts.iNFTNetwork,
+    brain: opts.brain,
+    plugins: opts.plugins,
+    promptAppend: opts.promptAppend,
+    onProgress: progress,
+  })
+
+  return { initialState: ensureResult.initialState, alreadyReady: false, bootstrapPubkey }
+}
+
+/**
  * Read tool output from Daytona's `process/execute` endpoint, normalizing
  * the `{exitCode, result}` (older docs claimed `{stdout, stderr}` but live
  * runs return `result` for the combined stream). Wraps the command in
@@ -459,6 +633,42 @@ export function pickPermissionMode(): PermissionMode {
   const raw = process.env.ANIMA_PERMISSIONS?.trim().toLowerCase()
   if (raw === 'prompt' || raw === 'strict' || raw === 'off') return raw
   return 'off'
+}
+
+/**
+ * Pre-flight check on the operator's Galileo provider deposit. The May 2 2026
+ * enigma archive was caused by this balance dropping below `min_balance` mid
+ * settlement, so the safe floor is 2× min_balance (= 0.12 0G). Returns true
+ * if the operator may proceed; returns false (and surfaces a `cancel(...)`
+ * with a `topup --provider` suggestion) otherwise.
+ *
+ * Best-effort: a chain RPC failure surfaces as a `note` warning and returns
+ * true (don't block on read failures).
+ */
+export async function preflightProviderDeposit(operator: OperatorSigner): Promise<boolean> {
+  try {
+    const operatorAddress = await operator.address()
+    const galileoPublic = await operator.publicClient('0g-testnet')
+    const settle = new SandboxSettlementClient({ publicClient: galileoPublic })
+    const balance = await settle.getBalance(operatorAddress, SANDBOX_PROVIDER_GALILEO)
+    const safeFloor = parseEther('0.12')
+    if (balance < safeFloor) {
+      cancel(
+        [
+          `Galileo provider deposit ${formatEther(balance)} 0G is below safe threshold (0.12 0G).`,
+          'Run `anima topup --provider 1` to deposit 1 0G first (~11h runway).',
+        ].join('\n'),
+      )
+      return false
+    }
+    return true
+  } catch (e) {
+    note(
+      `pre-flight balance check failed: ${(e as Error).message.slice(0, 120)}`,
+      'continuing without check',
+    )
+    return true
+  }
 }
 
 /**

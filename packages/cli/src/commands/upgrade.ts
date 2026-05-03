@@ -4,7 +4,6 @@ import {
   type OperatorSigner,
   SANDBOX_PROVIDER_URL_GALILEO,
   SandboxProviderClient,
-  type SandboxRecord,
 } from '@s0nderlabs/anima-core'
 import {
   UPGRADE_DONE_MARKER,
@@ -20,9 +19,11 @@ import { writeConfigTs } from '../config/render'
 import { SandboxClient } from '../sandbox/client'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 import {
+  ensureSandboxStarted,
   extractExecOutput,
   handoffAgentToHarness,
   makeExecRead,
+  preflightProviderDeposit,
   publishSandboxEndpoint,
   runSandboxProvision,
   unlockAgentKeystore,
@@ -112,6 +113,14 @@ export async function runUpgrade(opts: UpgradeOpts = {}): Promise<void> {
     return
   }
 
+  // Pre-flight: Galileo deposit balance. The May 2 INSUFFICIENT_BALANCE event
+  // archived enigma; refusing up-front with a clear suggestion is much better
+  // UX than letting the upgrade run + fail mid-bootstrap.
+  if (!(await preflightProviderDeposit(operator))) {
+    await operator.close?.()
+    return
+  }
+
   const sUnlock = spinner()
   sUnlock.start('Fetching keystore + decrypting via operator wallet')
   let agentPrivkey: Hex
@@ -181,35 +190,21 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
   })
 
   const sBox = spinner()
-  sBox.start('Verifying sandbox state')
-  let sb: SandboxRecord
+  sBox.start('Ensuring sandbox is started')
   try {
-    sb = await provider.getSandbox(args.sandboxId)
+    await ensureSandboxStarted(provider, args.sandboxId, {
+      onProgress: msg => sBox.message(msg),
+    })
   } catch (e) {
-    sBox.stop(`getSandbox failed: ${(e as Error).message.slice(0, 160)}`)
+    sBox.stop(`ensure-started failed: ${(e as Error).message.slice(0, 200)}`)
     note(
       [
-        'The sandbox provider could not confirm the sandbox is reachable.',
-        'If this persists, run `anima upgrade --reprovision` to provision a fresh container.',
+        'The sandbox could not be brought to started state.',
+        'If state is `error` or restore failed, run `anima upgrade --reprovision` to spin a fresh container.',
       ].join('\n'),
       'recoverable',
     )
     return
-  }
-  if (sb.state !== 'started') {
-    sBox.message(`sandbox state=${sb.state}, starting`)
-    try {
-      await provider.startSandbox(args.sandboxId)
-      const startDeadline = Date.now() + 60_000
-      while (Date.now() < startDeadline) {
-        const cur = await provider.getSandbox(args.sandboxId).catch(() => null)
-        if (cur?.state === 'started') break
-        await sleep(2000)
-      }
-    } catch (e) {
-      sBox.stop(`startSandbox failed: ${(e as Error).message.slice(0, 160)}`)
-      return
-    }
   }
 
   sBox.message(`launching in-place upgrade to ref=${args.ref}`)

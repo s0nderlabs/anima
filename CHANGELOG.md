@@ -4,6 +4,25 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1] - 2026-05-03
+
+### Added
+
+- **`anima resume` command**: wakes a stopped or archived sandbox and re-handoffs the agent privkey to the (newly restarted) harness. Same sandbox UUID + endpoint preserved. ~30s for stopped sandboxes, 2-5 min for archived sandboxes (Daytona restores filesystem from object storage). Use whenever the harness goes offline (Daytona auto-archive after 60 min idle, or `INSUFFICIENT_BALANCE` settlement event).
+- **`anima topup --provider <amount>`**: deposit 0G into the Galileo SandboxServing settlement contract for the operator wallet. Use to refill runtime burn budget (~0.09 0G/hour per active sandbox). Interactive `anima topup` adds a third option alongside `agent` (EOA gas) and `compute` (0G Compute ledger).
+- **`ensureSandboxStarted` / `resumeArchivedSandbox`** exported helpers in `sandbox-provision.ts`. State-aware polling that handles every Daytona transition: `stopped → started` (60s), `archived → restoring → started` (5min), `starting`/`restoring`/`pulling_snapshot` (poll without re-issuing /start). Single source of truth for "ensure sandbox is alive + harness is ready".
+- **`SandboxProviderClient.requestTimeoutMs`** config: per-request fetch deadlines (read 30s, write 60s default), applied via `AbortSignal.timeout` on every attempt. Without these, a stuck Daytona backend would hang the CLI for minutes.
+
+### Fixed
+
+- **`anima upgrade` (in-place mode) hung on archived sandboxes**. v0.17.0 polled only 60s for state=started, but `archived → restoring → started` takes minutes (Daytona restores filesystem from object storage). v0.17.1 uses the new `ensureSandboxStarted` helper which gives a 5-minute deadline when source state is archived. Caught live on May 3 2026: enigma was archived overnight by 0G's settler after a `INSUFFICIENT_BALANCE` voucher event (block 31185427, May 2 23:06:58 UTC), v0.17.0 hung for 3 minutes, v0.17.1 with state-aware deadlines + matching `restoring`/`starting` intermediate states completes the flow correctly.
+- **No fetch timeout on `SandboxProviderClient`**: every method (createSandbox, startSandbox, execInToolbox, etc.) used raw `fetch` with no `AbortSignal`. A stuck Daytona backend would hang indefinitely. Now every method uses `AbortSignal.timeout(...)` per attempt with sensible defaults; configurable via `requestTimeoutMs`.
+- **No pre-flight balance check** on Galileo deposit before upgrade or resume. Upgrades would proceed and burn the keystore-unlock signature, then fail mid-flow when `runSandboxProvision`'s deposit step hit the contract floor. v0.17.1 reads `getBalance` up-front; if below 2× `min_balance` (0.12 0G), aborts with a clear `anima topup --provider 1` suggestion.
+
+### Live root-cause data (this changelog references chain evidence)
+
+The May 2 2026 enigma archive was directly caused by Galileo testnet deposit running out (`compute_price_per_sec=0` is the FLAT rate but per-CPU + per-GB-mem charges accumulate to ~0.0015 0G/min = 0.09 0G/hour for our 1 CPU + 1 GB sandbox = 2.16 0G/day). 353 successful vouchers settled 17:54-23:06 May 2 UTC; voucher #3245 at 23:06:58 returned `INSUFFICIENT_BALANCE`. 0G's settler dispatched a StopSignal → `runStopHandler` ran `dtona.StopSandbox → WaitStopped → ArchiveSandbox`. The 60-minute Daytona auto-archive cron was NOT involved (it requires `state=stopped`, which only happened AFTER the settler stopped the sandbox).
+
 ## [0.17.0] - 2026-05-03
 
 ### Changed

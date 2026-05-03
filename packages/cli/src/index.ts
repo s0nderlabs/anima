@@ -61,10 +61,12 @@ async function main(): Promise<void> {
     case 'topup': {
       const agentIdx = argv.indexOf('--agent')
       const computeIdx = argv.indexOf('--compute')
+      const providerIdx = argv.indexOf('--provider')
       const agent = agentIdx >= 0 ? Number(argv[agentIdx + 1]) : undefined
       const compute = computeIdx >= 0 ? Number(argv[computeIdx + 1]) : undefined
+      const provider = providerIdx >= 0 ? Number(argv[providerIdx + 1]) : undefined
       const { runTopup } = await import('./commands/topup')
-      await runTopup({ agent, compute })
+      await runTopup({ agent, compute, provider })
       return
     }
     case 'model': {
@@ -94,6 +96,12 @@ async function main(): Promise<void> {
       const reprovision = argv.includes('--reprovision')
       const { runUpgrade } = await import('./commands/upgrade')
       await runUpgrade({ ref, yes, reprovision })
+      return
+    }
+    case 'resume': {
+      const yes = argv.includes('--yes') || argv.includes('-y')
+      const { runResume } = await import('./commands/resume')
+      await runResume({ yes })
       return
     }
     case 'ledger': {
@@ -203,7 +211,7 @@ function printHelp(): void {
       '  anima status              show agent + wallet + config state',
       '  anima logs                tail the activity log  (flags: --tail N, --agent <id>)',
       '  anima restore <ref>       recover an agent from an iNFT (ref: eip155:16661:0x..:N)',
-      '  anima topup               add funds  (flags: --agent N  --compute N)',
+      '  anima topup               add funds  (flags: --agent N  --compute N  --provider N)',
       '  anima ledger [sub]        compute ledger ops  (subs: balance | refund | retrieve | close)',
       '                            flags: --amount N  --all  --yes',
       '  anima drain --to <addr>   sweep agent EOA balance to address (default: operator)',
@@ -212,6 +220,7 @@ function printHelp(): void {
       '  anima migrate-keystore    upgrade v0.5.0 passphrase keystore to v0.6 operator-wallet',
       '  anima deploy              migrate Local agent to 0G Sandbox via Option 3 handoff',
       '  anima upgrade [--ref vX]  roll harness to new ref in place (flags: --reprovision for fresh container)',
+      '  anima resume              wake an archived/stopped sandbox (re-handoff agent privkey)',
       '  anima inspect [ref]       audit on-chain memory slots (flags: --slot, --tx, --raw, --diff, --json, --full, --out <dir>)',
       '  anima help                show this message',
       '',
