@@ -4,6 +4,22 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.5] - 2026-05-03
+
+### Fixed (TUI regression: chat HTTP timeout)
+
+- **`/chat` HTTP no longer blocks on per-turn memory sync.** v0.19.4 wired the local TUI through the gateway daemon over a unix socket, but the gateway's `runChatTurn` synchronously awaited `sync.flushTurn()` before returning. Chain anchor on 0G mainnet takes 30-60s, longer than Bun fetch's idle timeout, so the TUI showed `chat failed: The operation timed out` even though the brain had already replied. Same pattern that worked for the listener (a2a/market) drains is now used for the stdin path: brain.infer awaited inline, sync.flushTurn fire-and-forget, sync result emitted via SSE `sync-flush` event (TUI already renders that as `synced ... → tx ...`).
+- Coalesced overlapping flushes via `#pendingFlush`. `flushSync` (manual `/sync`) and `stop()` await any in-flight background flush before continuing, so explicit syncs still see a complete view.
+
+### Why this matters
+
+Before this fix, the local TUI looked broken even though the gateway was healthy: brain prose appeared in the activity log, tool indicators appeared via SSE, but the TUI rendered the timeout error and the user thought the agent had hung. After the fix, the chat round-trip is decoupled from the chain anchor: the user sees the brain reply immediately, then a `synced ... → tx 0x...` row some time later when the anchor lands. Same UX guarantees as the sandbox path, no protocol changes.
+
+### Internal
+
+- `runChatTurn` no longer returns `syncTx`; the TUI listens for the SSE event instead. `ChatTurnResult.syncTx` is removed (was the only client of it; the telegram dispatch path uses its own sync flow that is independent).
+- 802 unit tests pass. Typecheck + lint clean. 124 forge tests pass. Live verified on specter (mainnet iNFT #4) via window 4 TUI thin-client over the gateway daemon: `what time is it on this machine` → `shell.run(date)` → `Sun May 3 21:23:57 WIB 2026` (no timeout); `what is 2 plus 2` → `code.execute(2+2)` + `code.execute(print(2+2))` → `2 + 2 = 4` (no timeout).
+
 ## [0.19.4] - 2026-05-03
 
 ### Added (B4 complete — TUI auto-detects local gateway)

@@ -37,6 +37,8 @@ export class RealRuntime implements RuntimeAdapter {
   #drainInbound: (() => Promise<void>) | null = null
   #drainMarket: (() => Promise<void>) | null = null
   #network: '0g-mainnet' | '0g-testnet' | null = null
+  #events: EventHub | null = null
+  #pendingFlush: Promise<void> | null = null
 
   constructor(opts: RealRuntimeOpts) {
     this.#approvals = opts.approvals
@@ -65,6 +67,7 @@ export class RealRuntime implements RuntimeAdapter {
       secrets: opts.secrets,
     })
     this.#runtime = runtime
+    this.#events = opts.events
     this.#wireDrains(opts.events)
     this.#ready = true
   }
@@ -99,17 +102,11 @@ export class RealRuntime implements RuntimeAdapter {
     })
     const durationMs = Date.now() - startedAt
 
-    // Per-turn sync flush. Awaited here so the chat caller learns the txHash;
-    // listeners drain after via background drain promise.
-    let syncTx: string | undefined
-    try {
-      const flush = await r.sync.flushTurn()
-      if (flush.txHash && flush.changedSlots.length > 0) {
-        syncTx = flush.txHash
-      }
-    } catch {
-      // Surface but don't fail the turn.
-    }
+    // Per-turn sync flush is BACKGROUND. Chain anchor on 0G mainnet takes
+    // 30-60s; awaiting here would block the /chat HTTP response past Bun
+    // fetch's idle timeout. The TUI subscribes to the `sync-flush` SSE
+    // event for the txHash. Same pattern as the a2a/market drains below.
+    void this.#fireBackgroundFlush()
 
     // Fire-and-forget drain of listener events that arrived during the turn.
     void this.#drainInbound?.()
@@ -123,13 +120,46 @@ export class RealRuntime implements RuntimeAdapter {
         durationMs: 0,
       })),
       durationMs,
-      syncTx,
     }
+  }
+
+  async #fireBackgroundFlush(): Promise<void> {
+    const r = this.#runtime
+    const events = this.#events
+    if (!r || !events) return
+    if (this.#pendingFlush) {
+      // Coalesce: a flush is already in flight, the next turn's writes
+      // will ride on its (or the next) cycle.
+      return
+    }
+    const p = (async () => {
+      try {
+        const flush = await r.sync.flushTurn()
+        if (flush.txHash && flush.changedSlots.length > 0 && this.#network) {
+          events.publish('sync-flush', {
+            txHash: flush.txHash,
+            slots: flush.changedSlots,
+            explorer: explorerTxUrl(this.#network, flush.txHash),
+          })
+        }
+      } catch (err) {
+        events.publish('log', {
+          level: 'error',
+          message: `sync flush failed: ${(err as Error).message}`,
+        })
+      } finally {
+        this.#pendingFlush = null
+      }
+    })()
+    this.#pendingFlush = p
   }
 
   async flushSync(): Promise<{ tx?: string; slots: string[] }> {
     if (!this.#runtime) throw new Error('runtime-not-started')
     const r = this.#runtime
+    if (this.#pendingFlush) {
+      await this.#pendingFlush.catch(() => {})
+    }
     const result = await r.sync.flushAll()
     return {
       tx: result.txHash ?? undefined,
@@ -145,6 +175,9 @@ export class RealRuntime implements RuntimeAdapter {
     if (this.#stopping) return
     this.#stopping = true
     this.#ready = false
+    if (this.#pendingFlush) {
+      await this.#pendingFlush.catch(() => {})
+    }
     if (this.#runtime) {
       await this.#runtime.dispose()
       this.#runtime = null
