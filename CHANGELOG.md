@@ -4,6 +4,14 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.7] - 2026-05-03
+
+### Added
+
+- **`anima` chat auto-resumes a dead harness**. Previously, running `anima` against a paused or otherwise unreachable harness errored out at `harness not ready` and required manually running `anima resume` first. Now `chat-sandbox.tsx` falls back to the full resume path (probe state, restore from archive if needed, relaunch the harness daemon, re-handoff the agent privkey) and retries `waitReady` automatically. The fast-path `waitReady` is shortened to 8 seconds so healthy harnesses still feel instant.
+- **`HARNESS_VERSION` is now derived from the harness package.json** (`import pkg from '../package.json' with { type: 'json' }`). `/healthz` reports the actual deployed version instead of the previously hardcoded `0.15.0`. Closes #202.
+- **`release.yml` fail-fast guard**: a new step at the top of the workflow compares `${GITHUB_REF_NAME}` against `v$(node -p "require('./package.json').version")` and exits 1 with a clear `::error::` annotation if they don't match. Catches the "tagged before bumping version" race that previously surfaced as `403 Forbidden: cannot publish over previously published versions` deep in the publish steps. Saves ~90 seconds + a wasted-CI-minute email per offense.
+
 ## [0.17.6] - 2026-05-03
 
 ### Fixed

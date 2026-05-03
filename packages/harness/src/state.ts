@@ -1,9 +1,14 @@
 import type { Address, Hex } from 'viem'
+import pkg from '../package.json' with { type: 'json' }
 import type { ApprovalRelay } from './approval-relay'
 import type { EventHub } from './events'
 import type { RuntimeAdapter, RuntimeConfig } from './runtime'
 
-export const HARNESS_VERSION = '0.15.0'
+// Derived from package.json so /healthz always reports the version that's
+// actually running. Kept as a const so existing consumers (tests, server.ts)
+// don't need to change. The JSON import attribute is supported by bun + tsc
+// (TypeScript 5+) and produces a synchronous, type-safe import.
+export const HARNESS_VERSION: string = (pkg as { version: string }).version
 
 export type HarnessState = 'Bootstrapping' | 'Provisioned' | 'Ready' | 'ShuttingDown'
 

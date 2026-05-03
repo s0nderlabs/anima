@@ -1,8 +1,11 @@
 import { spinner } from '@clack/prompts'
 import {
   type AnimaConfig,
+  type AnimaNetwork,
   type PermissionDecision,
   type PermissionRequest,
+  SANDBOX_PROVIDER_URL_GALILEO,
+  SandboxProviderClient,
   iNFTAgentId,
 } from '@s0nderlabs/anima-core'
 import type { HarnessEventKind } from '@s0nderlabs/anima-harness'
@@ -11,6 +14,7 @@ import { SandboxClient } from '../sandbox/client'
 import { summarizeApprovalSubject } from '../ui/approval-summary'
 import { shortAddr } from '../util/format'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
+import { resumeArchivedSandbox, unlockAgentKeystore } from './init/sandbox-provision'
 
 /**
  * Sandbox-mode chat loop. Runs when `config.deployTarget === 'sandbox'` and
@@ -61,12 +65,62 @@ export async function runChatSandbox(config: AnimaConfig): Promise<void> {
   const sReady = spinner()
   sReady.start(`Connecting to harness ${sandboxEndpoint}`)
   try {
-    const health = await client.waitReady({ timeoutMs: 60_000, intervalMs: 1500 })
+    // Fast probe first; if the harness is healthy we skip every recovery path.
+    const health = await client.waitReady({ timeoutMs: 8_000, intervalMs: 1000 })
     sReady.stop(`harness ready (uptime ${(health.uptimeMs / 1000).toFixed(0)}s)`)
-  } catch (e) {
-    sReady.stop(`harness not ready: ${(e as Error).message}`)
-    await operator.close?.()
-    process.exit(1)
+  } catch {
+    // Harness unreachable. The sandbox might be archived/stopped/error, OR it
+    // could be started but with a dead daemon (orphaned-harness). Both paths
+    // converge on `resumeArchivedSandbox`, which probes state, restores if
+    // needed, relaunches the harness daemon via toolbox exec, and re-handoffs
+    // the agent privkey. Re-handoff requires the keystore unlock that
+    // chat-sandbox normally skips.
+    sReady.message('harness unreachable; attempting auto-resume')
+    const provider = new SandboxProviderClient({
+      endpoint: SANDBOX_PROVIDER_URL_GALILEO,
+      operator: operatorAccount,
+    })
+    if (!config.brain.provider) {
+      sReady.stop('harness unreachable AND brain provider missing; run `anima model`')
+      await operator.close?.()
+      process.exit(1)
+    }
+    let agentPrivkey: `0x${string}`
+    try {
+      agentPrivkey = await unlockAgentKeystore({
+        operator,
+        network: config.network as AnimaNetwork,
+        contractAddress,
+        tokenId,
+        agentAddress,
+      })
+    } catch (e) {
+      sReady.stop(`auto-resume keystore unlock failed: ${(e as Error).message.slice(0, 160)}`)
+      await operator.close?.()
+      process.exit(1)
+    }
+    try {
+      await resumeArchivedSandbox({
+        provider,
+        sandboxId,
+        sandboxEndpoint,
+        operatorAccount,
+        agentPrivkey,
+        agentAddress,
+        iNFTRef: { contract: contractAddress, tokenId },
+        iNFTNetwork: config.network as AnimaNetwork,
+        brain: { provider: config.brain.provider as Address, model: config.brain.model ?? '' },
+        onProgress: msg => sReady.message(msg),
+      })
+      const health = await client.waitReady({ timeoutMs: 30_000, intervalMs: 1500 })
+      sReady.stop(
+        `harness back online via auto-resume (uptime ${(health.uptimeMs / 1000).toFixed(0)}s)`,
+      )
+    } catch (e) {
+      sReady.stop(`auto-resume failed: ${(e as Error).message.slice(0, 200)}`)
+      await operator.close?.()
+      process.exit(1)
+    }
   }
 
   // opentui import dance: render() runs the chat UI; clack spinners must
