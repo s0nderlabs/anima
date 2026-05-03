@@ -452,17 +452,23 @@ export async function ensureSandboxStarted(
 }
 
 /**
- * Pure state-machine wait for a sandbox to reach `state=archived`. Used by
- * `anima pause` to confirm Daytona acknowledges the archive request before
- * surfacing success to the operator. Issues `archiveSandbox` if the sandbox
- * is not already in (or transitioning to) archived state.
+ * Drive a sandbox to `state=archived` from any valid starting state.
+ * Daytona requires the sandbox be `stopped` before `/archive` is accepted
+ * (verified live: `started + /archive` returns 400 "Sandbox is not stopped").
  *
- * Single deadline (60s default). Acceptable transient: `archiving`. Throws on
- * `error` state. Returns immediately if the sandbox is already archived.
+ * Lifecycle handled:
+ *   archived                      -> no-op
+ *   archiving                     -> wait for archived
+ *   stopped                       -> archive + wait
+ *   started / starting            -> stop + wait + archive + wait (two-phase)
+ *   error                         -> throw
+ *
+ * Default deadline budgets are per-phase: 60s for stop, 60s for archive.
+ * Used by `anima pause` to confirm Daytona acknowledges the full transition.
  */
 export interface EnsureSandboxArchivedOpts {
   intervalMs?: number
-  /** Default 60_000ms (1 min). Daytona archive is filesystem-snapshot-only, fast. */
+  /** Default 60_000ms per phase (stop + archive). */
   deadlineMs?: number
   onProgress?: (msg: string) => void
 }
@@ -471,6 +477,8 @@ export interface EnsureSandboxArchivedResult {
   initialState: string
   alreadyArchived: boolean
   finalState: string
+  /** True if the sandbox had to be stopped first (started → stopped → archived). */
+  stoppedFirst: boolean
 }
 
 export async function ensureSandboxArchived(
@@ -484,16 +492,54 @@ export async function ensureSandboxArchived(
 
   const initial = await provider.getSandbox(sandboxId)
   if (initial.state === 'archived') {
-    return { initialState: 'archived', alreadyArchived: true, finalState: 'archived' }
+    return {
+      initialState: 'archived',
+      alreadyArchived: true,
+      finalState: 'archived',
+      stoppedFirst: false,
+    }
   }
   if (initial.state === 'error') {
     throw new Error(`sandbox ${sandboxId} is in error state; cannot archive`)
   }
 
-  // `archiving` means a transition is already in flight; re-issuing /archive
-  // would be wasted at best and confuse the state machine at worst.
-  if (initial.state !== 'archiving') {
-    progress(`sandbox state=${initial.state}, calling archiveSandbox`)
+  // Phase 1: stop the sandbox if it's currently running.
+  // Daytona refuses `/archive` unless state=stopped (returns 400 "Sandbox is
+  // not stopped"). `started`/`starting`/`stopping` all need to land on
+  // `stopped` before we can issue `/archive`.
+  let stoppedFirst = false
+  const needsStop = initial.state === 'started' || initial.state === 'starting'
+  if (needsStop) {
+    stoppedFirst = true
+    progress(`sandbox state=${initial.state}, calling stopSandbox`)
+    try {
+      await provider.stopSandbox(sandboxId)
+    } catch (e) {
+      throw new Error(`stopSandbox(${sandboxId}) failed: ${(e as Error).message.slice(0, 200)}`)
+    }
+    const stopDeadline = Date.now() + deadlineMs
+    while (Date.now() < stopDeadline) {
+      const cur = await provider.getSandbox(sandboxId).catch(() => null)
+      if (cur?.state === 'stopped') break
+      if (cur?.state === 'error') {
+        throw new Error(`sandbox ${sandboxId} transitioned to error during stop`)
+      }
+      progress(`waiting for state=stopped (current=${cur?.state ?? 'unknown'})`)
+      await sleep(intervalMs)
+    }
+    const afterStop = await provider.getSandbox(sandboxId)
+    if (afterStop.state !== 'stopped') {
+      throw new Error(
+        `sandbox ${sandboxId} did not reach stopped within ${Math.round(deadlineMs / 1000)}s (last=${afterStop.state})`,
+      )
+    }
+  }
+
+  // Phase 2: archive the (now-)stopped sandbox.
+  // Skip the call if a previous archive is already in flight.
+  const stateBeforeArchive = stoppedFirst ? 'stopped' : (await provider.getSandbox(sandboxId)).state
+  if (stateBeforeArchive !== 'archiving') {
+    progress(`sandbox state=${stateBeforeArchive}, calling archiveSandbox`)
     try {
       await provider.archiveSandbox(sandboxId)
     } catch (e) {
@@ -503,13 +549,18 @@ export async function ensureSandboxArchived(
     progress('sandbox state=archiving (in transition, waiting)')
   }
 
-  const deadline = Date.now() + deadlineMs
-  let lastState = initial.state
-  while (Date.now() < deadline) {
+  const archiveDeadline = Date.now() + deadlineMs
+  let lastState = stateBeforeArchive
+  while (Date.now() < archiveDeadline) {
     const cur = await provider.getSandbox(sandboxId).catch(() => null)
     if (cur) lastState = cur.state
     if (cur?.state === 'archived') {
-      return { initialState: initial.state, alreadyArchived: false, finalState: 'archived' }
+      return {
+        initialState: initial.state,
+        alreadyArchived: false,
+        finalState: 'archived',
+        stoppedFirst,
+      }
     }
     if (cur?.state === 'error') {
       throw new Error(`sandbox ${sandboxId} transitioned to error during archive`)

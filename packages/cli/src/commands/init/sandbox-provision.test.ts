@@ -233,62 +233,112 @@ describe('ensureSandboxStarted', () => {
 describe('ensureSandboxArchived', () => {
   function fakeProvider(stateSequence: Array<SandboxRecord['state']>) {
     let i = 0
+    let stops = 0
     let archives = 0
     const provider = {
       getSandbox: async (id: string) =>
         ({ id, state: stateSequence[Math.min(i++, stateSequence.length - 1)] }) as SandboxRecord,
+      stopSandbox: async () => {
+        stops += 1
+      },
       archiveSandbox: async () => {
         archives += 1
       },
     }
-    return { provider, archivesCalled: () => archives }
+    return { provider, archivesCalled: () => archives, stopsCalled: () => stops }
   }
 
   test('no-op when sandbox already archived', async () => {
-    const { provider, archivesCalled } = fakeProvider(['archived'])
+    const { provider, archivesCalled, stopsCalled } = fakeProvider(['archived'])
     const r = await ensureSandboxArchived(provider as never, 'sb-a1')
     expect(r.alreadyArchived).toBe(true)
     expect(r.initialState).toBe('archived')
     expect(r.finalState).toBe('archived')
+    expect(r.stoppedFirst).toBe(false)
     expect(archivesCalled()).toBe(0)
+    expect(stopsCalled()).toBe(0)
   })
 
-  test('throws on error state without calling archive', async () => {
-    const { provider, archivesCalled } = fakeProvider(['error'])
+  test('throws on error state without calling stop or archive', async () => {
+    const { provider, archivesCalled, stopsCalled } = fakeProvider(['error'])
     await expect(ensureSandboxArchived(provider as never, 'sb-a2')).rejects.toThrow(/error state/)
     expect(archivesCalled()).toBe(0)
+    expect(stopsCalled()).toBe(0)
   })
 
-  test('started → archiving → archived: calls /archive, polls until state flips', async () => {
-    const { provider, archivesCalled } = fakeProvider(['started', 'archiving', 'archived'])
+  test('stopped → archiving → archived: skips stop, calls /archive', async () => {
+    // Phase 1 reads state once (stopped — no stop needed).
+    // Phase 2 reads state, sees stopped, calls archive.
+    // Then poll loop reads archiving → archived.
+    const { provider, archivesCalled, stopsCalled } = fakeProvider([
+      'stopped',
+      'stopped',
+      'archiving',
+      'archived',
+    ])
     const r = await ensureSandboxArchived(provider as never, 'sb-a3', { intervalMs: 1 })
     expect(r.alreadyArchived).toBe(false)
-    expect(r.initialState).toBe('started')
+    expect(r.initialState).toBe('stopped')
     expect(r.finalState).toBe('archived')
+    expect(r.stoppedFirst).toBe(false)
+    expect(stopsCalled()).toBe(0)
     expect(archivesCalled()).toBe(1)
   })
 
-  test('transient state (archiving): does NOT re-issue /archive', async () => {
-    const { provider, archivesCalled } = fakeProvider(['archiving', 'archiving', 'archived'])
+  test('started → stopping → stopped → archiving → archived: two-phase', async () => {
+    const { provider, archivesCalled, stopsCalled } = fakeProvider([
+      'started',
+      'stopping',
+      'stopped',
+      'stopped',
+      'archiving',
+      'archived',
+    ])
     const r = await ensureSandboxArchived(provider as never, 'sb-a4', { intervalMs: 1 })
+    expect(r.initialState).toBe('started')
     expect(r.finalState).toBe('archived')
+    expect(r.stoppedFirst).toBe(true)
+    expect(stopsCalled()).toBe(1)
+    expect(archivesCalled()).toBe(1)
+  })
+
+  test('transient state (archiving) on entry: does NOT re-issue /archive', async () => {
+    const { provider, archivesCalled, stopsCalled } = fakeProvider([
+      'archiving',
+      'archiving',
+      'archived',
+    ])
+    const r = await ensureSandboxArchived(provider as never, 'sb-a5', { intervalMs: 1 })
+    expect(r.finalState).toBe('archived')
+    expect(stopsCalled()).toBe(0)
     expect(archivesCalled()).toBe(0)
   })
 
-  test('throws if deadline expires without reaching archived', async () => {
-    const { provider } = fakeProvider(['started', 'archiving', 'archiving', 'archiving'])
+  test('throws if archive deadline expires', async () => {
+    const { provider } = fakeProvider(['stopped', 'stopped', 'archiving', 'archiving', 'archiving'])
     await expect(
-      ensureSandboxArchived(provider as never, 'sb-a5', {
-        intervalMs: 1,
-        deadlineMs: 50,
-      }),
+      ensureSandboxArchived(provider as never, 'sb-a6', { intervalMs: 1, deadlineMs: 30 }),
     ).rejects.toThrow(/did not reach archived/)
   })
 
-  test('throws if state transitions to error mid-poll', async () => {
-    const { provider } = fakeProvider(['started', 'archiving', 'error'])
+  test('throws if stop deadline expires', async () => {
+    const { provider } = fakeProvider(['started', 'stopping', 'stopping', 'stopping'])
     await expect(
-      ensureSandboxArchived(provider as never, 'sb-a6', { intervalMs: 1 }),
+      ensureSandboxArchived(provider as never, 'sb-a7', { intervalMs: 1, deadlineMs: 30 }),
+    ).rejects.toThrow(/did not reach stopped/)
+  })
+
+  test('throws if state transitions to error mid-archive', async () => {
+    const { provider } = fakeProvider(['stopped', 'stopped', 'archiving', 'error'])
+    await expect(
+      ensureSandboxArchived(provider as never, 'sb-a8', { intervalMs: 1 }),
     ).rejects.toThrow(/error during archive/)
+  })
+
+  test('throws if state transitions to error mid-stop', async () => {
+    const { provider } = fakeProvider(['started', 'stopping', 'error'])
+    await expect(
+      ensureSandboxArchived(provider as never, 'sb-a9', { intervalMs: 1 }),
+    ).rejects.toThrow(/error during stop/)
   })
 })

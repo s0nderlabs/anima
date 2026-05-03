@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.3] - 2026-05-03
+
+### Fixed
+
+- **`anima pause` now handles started sandboxes**. v0.17.2 issued `/archive` directly against `started` state and Daytona returned 400 "Sandbox is not stopped" (verified live on enigma during canary). `ensureSandboxArchived` is now a two-phase state-machine: phase 1 stops the sandbox if it's `started`/`starting` (60s deadline), phase 2 archives the now-stopped sandbox (60s deadline). The result struct gains a `stoppedFirst: boolean` flag so callers can tell whether the two-phase path was taken. Live canary then succeeded.
+
 ## [0.17.2] - 2026-05-03
 
 ### Added
