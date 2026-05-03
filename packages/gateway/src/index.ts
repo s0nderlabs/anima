@@ -1,7 +1,7 @@
 export {
-  HARNESS_VERSION,
-  type HarnessSession,
-  type HarnessState,
+  GATEWAY_VERSION,
+  type GatewaySession,
+  type GatewayState,
   type INFTRef,
   type CreateSessionOpts,
   type ProvisionInputs,
@@ -27,8 +27,8 @@ export {
 } from './auth'
 
 export {
-  type HarnessEvent,
-  type HarnessEventKind,
+  type GatewayEvent,
+  type GatewayEventKind,
   type Subscriber,
   EventHub,
 } from './events'
@@ -57,7 +57,7 @@ export {
   ApprovalRelay,
 } from './approval-relay'
 
-export { type ServerDeps, createHarnessServer } from './server'
+export { type ServerDeps, createGatewayServer } from './server'
 
 export {
   type BuildBootstrapScriptOpts,
@@ -90,5 +90,5 @@ export {
   RELAUNCH_FAIL_MARKER,
   RELAUNCH_PROGRESS_LOG,
   RELAUNCH_SUCCESS_MARKER_PREFIX,
-  buildHarnessRelaunchScript,
+  buildGatewayRelaunchScript,
 } from './relaunch-script'

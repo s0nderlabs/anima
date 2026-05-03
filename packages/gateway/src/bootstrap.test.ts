@@ -46,8 +46,8 @@ describe('buildBootstrapScript', () => {
     expect(inner).toContain('curl -fsSL https://bun.sh/install')
     expect(inner).toContain('git clone --depth 1 --branch')
     expect(inner).toContain('bun install --frozen-lockfile')
-    expect(inner).toContain('nohup bun "$ANIMA_DIR/packages/harness/bin/anima-harness"')
-    expect(inner).toContain(`echo "anima-harness-pid=$HARNESS_PID" > ${BOOTSTRAP_DONE_MARKER}`)
+    expect(inner).toContain('nohup bun "$ANIMA_DIR/packages/gateway/bin/anima-gateway"')
+    expect(inner).toContain(`echo "anima-gateway-pid=$HARNESS_PID" > ${BOOTSTRAP_DONE_MARKER}`)
   })
 
   test('frees port 8080 via fuser before harness launch (Daytona snapshot guard)', () => {
@@ -172,7 +172,7 @@ describe('buildBootstrapScript', () => {
   })
 
   test('exposes BOOTSTRAP_SUCCESS_MARKER_PREFIX for callers that grep done file', () => {
-    expect(BOOTSTRAP_SUCCESS_MARKER_PREFIX).toBe('anima-harness-pid=')
+    expect(BOOTSTRAP_SUCCESS_MARKER_PREFIX).toBe('anima-gateway-pid=')
   })
 
   test('outer script stays under Daytona request-size ceiling (v0.16.5 was 5340 OK, v0.16.6 was 6136 BROKEN)', () => {

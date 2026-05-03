@@ -7,8 +7,8 @@ import { ApprovalRelay } from './approval-relay'
 import { approvalResponseHash, chatMessageHash, provisionMessageHash } from './auth'
 import { EventHub } from './events'
 import type { RuntimeConfig } from './runtime'
-import { createHarnessServer } from './server'
-import { type HarnessSession, createSession } from './state'
+import { createGatewayServer } from './server'
+import { type GatewaySession, createSession } from './state'
 import { StubRuntime } from './stub-runtime'
 
 const INFT_REF = { contract: '0x9e71d79f06f956d4d2666b5c93dafab721c84721', tokenId: '6' } as const
@@ -26,7 +26,7 @@ interface Fixture {
   server: http.Server
   port: number
   base: string
-  session: HarnessSession
+  session: GatewaySession
   operatorPriv: Hex
   operatorAddress: Address
   agentPriv: Hex
@@ -56,7 +56,7 @@ async function setupFixture(): Promise<Fixture> {
     approvals: new ApprovalRelay(events),
     runtime: new StubRuntime(),
   })
-  const server = createHarnessServer({ session })
+  const server = createGatewayServer({ session })
   const port = await listenOnRandomPort(server)
   return {
     server,

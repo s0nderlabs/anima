@@ -29,7 +29,7 @@ export interface BuildRelaunchScriptResult {
   script: string
   /** File the caller can tail to read relaunch progress. */
   progressLogPath: string
-  /** File written when relaunch succeeds (line: `anima-harness-pid=<N>`). */
+  /** File written when relaunch succeeds (line: `anima-gateway-pid=<N>`). */
   doneMarkerPath: string
   /** File written when relaunch fails. Body contains a short failure keyword. */
   failMarkerPath: string
@@ -43,7 +43,7 @@ function shQuote(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`
 }
 
-export function buildHarnessRelaunchScript(
+export function buildGatewayRelaunchScript(
   opts: BuildRelaunchScriptOpts,
 ): BuildRelaunchScriptResult {
   const port = opts.port ?? 8080
@@ -80,7 +80,7 @@ export function buildHarnessRelaunchScript(
     '  echo "[launch attempt $h_attempt/3]"',
     `  fuser -k ${port}/tcp 2>/dev/null || true`,
     '  sleep 1',
-    '  nohup bun "$ANIMA_DIR/packages/harness/bin/anima-harness" > "$HOME/anima-logs/anima-harness.log" 2>&1 &',
+    '  nohup bun "$ANIMA_DIR/packages/gateway/bin/anima-gateway" > "$HOME/anima-logs/anima-gateway.log" 2>&1 &',
     '  HARNESS_PID=$!',
     '  disown',
     '  sleep 10',
@@ -89,7 +89,7 @@ export function buildHarnessRelaunchScript(
     '    break',
     '  fi',
     '  echo "[harness died on attempt $h_attempt, log tail:]"',
-    '  tail -n 50 "$HOME/anima-logs/anima-harness.log" 2>/dev/null',
+    '  tail -n 50 "$HOME/anima-logs/anima-gateway.log" 2>/dev/null',
     '  if [ $h_attempt -lt 3 ]; then',
     '    echo "[retrying in 5s]"',
     '    sleep 5',
@@ -97,11 +97,11 @@ export function buildHarnessRelaunchScript(
     'done',
     'if [ "$HARNESS_OK" -ne 1 ]; then',
     '  echo "[all 3 harness launch attempts failed, full log dump:]"',
-    '  tail -n 200 "$HOME/anima-logs/anima-harness.log" 2>/dev/null',
+    '  tail -n 200 "$HOME/anima-logs/anima-gateway.log" 2>/dev/null',
     `  echo "harness-died-early" > ${FAIL_MARKER}`,
     '  exit 22',
     'fi',
-    `echo "anima-harness-pid=$HARNESS_PID" > ${DONE_MARKER}`,
+    `echo "anima-gateway-pid=$HARNESS_PID" > ${DONE_MARKER}`,
     'echo "[$(date -u +%FT%TZ)] relaunch-done pid=$HARNESS_PID"',
   ].join('\n')
 
@@ -124,4 +124,4 @@ export function buildHarnessRelaunchScript(
 export const RELAUNCH_DONE_MARKER = DONE_MARKER
 export const RELAUNCH_FAIL_MARKER = FAIL_MARKER
 export const RELAUNCH_PROGRESS_LOG = PROGRESS_LOG
-export const RELAUNCH_SUCCESS_MARKER_PREFIX = 'anima-harness-pid='
+export const RELAUNCH_SUCCESS_MARKER_PREFIX = 'anima-gateway-pid='

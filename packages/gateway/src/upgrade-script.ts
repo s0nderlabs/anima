@@ -87,8 +87,9 @@ export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeSc
     `retry 'git checkout' git checkout ${shQuote(opts.ref)} || { echo "git-checkout-failed" > ${FAIL_MARKER}; exit 22; }`,
     `retry 'bun deps' bun install --frozen-lockfile || { echo "bun-install-failed" > ${FAIL_MARKER}; exit 23; }`,
     '',
-    'echo "[restart harness]"',
+    'echo "[restart gateway]"',
     'pkill -f anima-harness 2>/dev/null || true',
+    'pkill -f anima-gateway 2>/dev/null || true',
     `fuser -k ${port}/tcp 2>/dev/null || true`,
     'sleep 3',
     '',
@@ -104,7 +105,7 @@ export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeSc
     '  echo "[launch attempt $h_attempt/3]"',
     `  fuser -k ${port}/tcp 2>/dev/null || true`,
     '  sleep 1',
-    '  nohup bun "$HOME/anima/packages/harness/bin/anima-harness" > "$HOME/anima-logs/anima-harness.log" 2>&1 &',
+    '  nohup bun "$HOME/anima/packages/gateway/bin/anima-gateway" > "$HOME/anima-logs/anima-gateway.log" 2>&1 &',
     '  HARNESS_PID=$!',
     '  disown',
     '  sleep 10',
@@ -113,7 +114,7 @@ export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeSc
     '    break',
     '  fi',
     '  echo "[harness died on attempt $h_attempt, log tail:]"',
-    '  tail -n 50 "$HOME/anima-logs/anima-harness.log" 2>/dev/null',
+    '  tail -n 50 "$HOME/anima-logs/anima-gateway.log" 2>/dev/null',
     '  if [ $h_attempt -lt 3 ]; then',
     '    echo "[retrying in 5s]"',
     '    sleep 5',
@@ -121,11 +122,11 @@ export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeSc
     'done',
     'if [ "$HARNESS_OK" -ne 1 ]; then',
     '  echo "[all 3 harness launch attempts failed, full log dump:]"',
-    '  tail -n 200 "$HOME/anima-logs/anima-harness.log" 2>/dev/null',
+    '  tail -n 200 "$HOME/anima-logs/anima-gateway.log" 2>/dev/null',
     `  echo "harness-died-early" > ${FAIL_MARKER}`,
     '  exit 24',
     'fi',
-    `echo "anima-harness-pid=$HARNESS_PID" > ${DONE_MARKER}`,
+    `echo "anima-gateway-pid=$HARNESS_PID" > ${DONE_MARKER}`,
     'echo "[$(date -u +%FT%TZ)] upgrade-done pid=$HARNESS_PID"',
     '',
   ].join('\n')
@@ -150,7 +151,7 @@ export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeSc
 export const UPGRADE_DONE_MARKER = DONE_MARKER
 export const UPGRADE_FAIL_MARKER = FAIL_MARKER
 export const UPGRADE_PROGRESS_LOG = PROGRESS_LOG
-export const UPGRADE_SUCCESS_MARKER_PREFIX = 'anima-harness-pid='
+export const UPGRADE_SUCCESS_MARKER_PREFIX = 'anima-gateway-pid='
 
 /** Substring keywords the inner subshell writes to FAIL_MARKER on failure. */
 export const UPGRADE_FAIL_KEYWORDS = [

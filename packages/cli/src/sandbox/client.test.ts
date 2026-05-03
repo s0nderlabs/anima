@@ -6,9 +6,9 @@ import {
   EventHub,
   type RuntimeConfig,
   StubRuntime,
-  createHarnessServer,
+  createGatewayServer,
   createSession,
-} from '@s0nderlabs/anima-harness'
+} from '@s0nderlabs/anima-gateway'
 import { type Hex, hexToBytes } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { SandboxClient } from './client'
@@ -60,7 +60,7 @@ async function setupFixture(): Promise<Fixture> {
     approvals: new ApprovalRelay(events),
     runtime: new StubRuntime(),
   })
-  const server = createHarnessServer({ session })
+  const server = createGatewayServer({ session })
   const port = await listenOnRandomPort(server)
   const base = `http://127.0.0.1:${port}`
   const client = new SandboxClient({

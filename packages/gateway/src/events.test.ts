@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { EventHub, type HarnessEvent } from './events'
+import { EventHub, type GatewayEvent } from './events'
 
 describe('EventHub', () => {
   test('publishes events in seq order with monotonic ids', () => {
@@ -14,7 +14,7 @@ describe('EventHub', () => {
 
   test('subscribers receive future events', () => {
     const hub = new EventHub()
-    const got: HarnessEvent[] = []
+    const got: GatewayEvent[] = []
     const unsub = hub.subscribe(e => got.push(e))
     hub.publish('log', { msg: 'a' })
     hub.publish('log', { msg: 'b' })
@@ -29,7 +29,7 @@ describe('EventHub', () => {
     hub.publish('log', { msg: 'a' })
     const b = hub.publish('log', { msg: 'b' })
     hub.publish('log', { msg: 'c' })
-    const got: HarnessEvent[] = []
+    const got: GatewayEvent[] = []
     hub.subscribe(e => got.push(e), b.seq)
     expect(got.map(e => e.seq)).toEqual([3])
   })
@@ -44,7 +44,7 @@ describe('EventHub', () => {
 
   test('one slow subscriber does not block the bus', () => {
     const hub = new EventHub()
-    const got: HarnessEvent[] = []
+    const got: GatewayEvent[] = []
     hub.subscribe(() => {
       throw new Error('boom')
     })

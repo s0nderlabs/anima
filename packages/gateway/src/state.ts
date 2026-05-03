@@ -8,17 +8,17 @@ import type { RuntimeAdapter, RuntimeConfig } from './runtime'
 // actually running. Kept as a const so existing consumers (tests, server.ts)
 // don't need to change. The JSON import attribute is supported by bun + tsc
 // (TypeScript 5+) and produces a synchronous, type-safe import.
-export const HARNESS_VERSION: string = (pkg as { version: string }).version
+export const GATEWAY_VERSION: string = (pkg as { version: string }).version
 
-export type HarnessState = 'Bootstrapping' | 'Provisioned' | 'Ready' | 'ShuttingDown'
+export type GatewayState = 'Bootstrapping' | 'Provisioned' | 'Ready' | 'ShuttingDown'
 
 export interface INFTRef {
   contract: Address
   tokenId: string
 }
 
-export interface HarnessSession {
-  state: HarnessState
+export interface GatewaySession {
+  state: GatewayState
   version: string
   sandboxId: string
   bootedAt: number
@@ -45,7 +45,7 @@ export interface HarnessSession {
 }
 
 export interface CreateSessionOpts {
-  bootstrap: HarnessSession['bootstrap']
+  bootstrap: GatewaySession['bootstrap']
   expectedOperatorAddress: Address
   sandboxId: string
   events: EventHub
@@ -54,10 +54,10 @@ export interface CreateSessionOpts {
   version?: string
 }
 
-export function createSession(opts: CreateSessionOpts): HarnessSession {
+export function createSession(opts: CreateSessionOpts): GatewaySession {
   return {
     state: 'Bootstrapping',
-    version: opts.version ?? HARNESS_VERSION,
+    version: opts.version ?? GATEWAY_VERSION,
     sandboxId: opts.sandboxId,
     bootedAt: Date.now(),
     provisionedAt: null,
@@ -83,7 +83,7 @@ export interface ProvisionInputs {
   config: RuntimeConfig
 }
 
-export function transitionToProvisioned(session: HarnessSession, inputs: ProvisionInputs): void {
+export function transitionToProvisioned(session: GatewaySession, inputs: ProvisionInputs): void {
   if (session.state !== 'Bootstrapping') {
     throw new Error(`cannot transition to Provisioned from state=${session.state}`)
   }
@@ -97,7 +97,7 @@ export function transitionToProvisioned(session: HarnessSession, inputs: Provisi
   session.events.publish('state-change', { state: 'Provisioned' })
 }
 
-export function transitionToReady(session: HarnessSession): void {
+export function transitionToReady(session: GatewaySession): void {
   if (session.state !== 'Provisioned') {
     throw new Error(`cannot transition to Ready from state=${session.state}`)
   }
@@ -106,7 +106,7 @@ export function transitionToReady(session: HarnessSession): void {
   session.events.publish('state-change', { state: 'Ready' })
 }
 
-export function transitionToShuttingDown(session: HarnessSession): void {
+export function transitionToShuttingDown(session: GatewaySession): void {
   session.state = 'ShuttingDown'
   session.events.publish('state-change', { state: 'ShuttingDown' })
 }

@@ -1,8 +1,8 @@
 {
   "name": "@s0nderlabs/anima",
-  "version": "0.18.3",
+  "version": "0.19.0",
   "type": "module",
-  "description": "anima CLI: sovereign agent harness on 0G. Runs `anima init` to mint an iNFT and bring up your agent",
+  "description": "anima CLI: sovereign agent gateway on 0G. Runs `anima init` to mint an iNFT and bring up your agent",
   "license": "MIT",
   "homepage": "https://github.com/s0nderlabs/anima",
   "repository": {
@@ -13,14 +13,28 @@
   "bugs": {
     "url": "https://github.com/s0nderlabs/anima/issues"
   },
-  "keywords": ["0g", "anima", "agent", "ai", "cli", "tui", "sovereign", "harness", "inft"],
+  "keywords": [
+    "0g",
+    "anima",
+    "agent",
+    "ai",
+    "cli",
+    "tui",
+    "sovereign",
+    "gateway",
+    "inft"
+  ],
   "publishConfig": {
     "access": "public"
   },
   "engines": {
     "bun": ">=1.1"
   },
-  "files": ["src", "bin", "README.md"],
+  "files": [
+    "src",
+    "bin",
+    "README.md"
+  ],
   "bin": {
     "anima": "./bin/anima"
   },
@@ -35,7 +49,7 @@
     "@opentui/core": "^0.1.97",
     "@opentui/solid": "^0.1.97",
     "@s0nderlabs/anima-core": "workspace:*",
-    "@s0nderlabs/anima-harness": "workspace:*",
+    "@s0nderlabs/anima-gateway": "workspace:*",
     "@s0nderlabs/anima-plugin-comms": "workspace:*",
     "@s0nderlabs/anima-plugin-onchain": "workspace:*",
     "@s0nderlabs/anima-plugin-system": "workspace:*",

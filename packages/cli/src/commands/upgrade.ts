@@ -12,7 +12,7 @@ import {
   UPGRADE_PROGRESS_LOG,
   UPGRADE_SUCCESS_MARKER_PREFIX,
   buildUpgradeScript,
-} from '@s0nderlabs/anima-harness'
+} from '@s0nderlabs/anima-gateway'
 import type { Address, Hex } from 'viem'
 import { findAndLoadConfig } from '../config/load'
 import { writeConfigTs } from '../config/render'
@@ -30,7 +30,7 @@ import { loadOrPickOperatorSigner } from './init/operator-picker'
 import {
   ensureSandboxStarted,
   extractExecOutput,
-  handoffAgentToHarness,
+  handoffAgentToGateway,
   makeExecRead,
   preflightProviderDeposit,
   publishSandboxEndpoint,
@@ -348,7 +348,7 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
   const expected = expectedVersionFromRef(args.resolved)
   if (expected !== null) {
     const verifyOut = await execRead(
-      `grep '"version"' $HOME/anima/packages/harness/package.json | head -1`,
+      `grep '"version"' $HOME/anima/packages/gateway/package.json | head -1`,
     )
     const m = verifyOut.match(/"version"\s*:\s*"([^"]+)"/)
     if (!m) {
@@ -388,7 +388,7 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
   })
   // Phase 12 / B6: ship telegram secrets via secondary envelope if present.
   // Operator decrypts the local blob; ECIES-encrypts to bootstrap pubkey
-  // happens inside handoffAgentToHarness.
+  // happens inside handoffAgentToGateway.
   let telegramSecretsPlain:
     | { botToken: string; allowedUserIds: number[]; pairingApproved?: number[] }
     | undefined
@@ -418,7 +418,7 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
     // Continue without — non-fatal. The harness will run without telegram.
   }
   try {
-    await handoffAgentToHarness({
+    await handoffAgentToGateway({
       sandboxClient,
       agentPrivkey: args.agentPrivkey,
       agentAddress: args.agentAddress,

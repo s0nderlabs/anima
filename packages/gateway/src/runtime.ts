@@ -53,7 +53,7 @@ export interface RuntimeAdapter {
     agentPrivkey: Hex
     config: RuntimeConfig
     events: EventHub
-    secrets?: import('./secrets').HarnessSecrets
+    secrets?: import('./secrets').GatewaySecrets
   }): Promise<void>
   runChatTurn(input: ChatTurnInput): Promise<ChatTurnResult>
   flushSync(): Promise<{ tx?: string; slots: string[] }>

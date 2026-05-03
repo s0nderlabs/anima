@@ -3,7 +3,7 @@
  * subscribes to. Runtime adapters publish; HTTP server forwards to clients.
  */
 
-export type HarnessEventKind =
+export type GatewayEventKind =
   | 'tool-call-start'
   | 'tool-call-end'
   | 'turn-start'
@@ -16,29 +16,29 @@ export type HarnessEventKind =
   | 'log'
   | 'state-change'
 
-export interface HarnessEvent {
+export interface GatewayEvent {
   /** Monotonic per-hub id used for SSE last-event-id reconnects. */
   seq: number
-  kind: HarnessEventKind
+  kind: GatewayEventKind
   ts: number
   data: unknown
 }
 
-export type Subscriber = (event: HarnessEvent) => void
+export type Subscriber = (event: GatewayEvent) => void
 
 export class EventHub {
   #seq = 0
   #subs = new Set<Subscriber>()
-  #buffer: HarnessEvent[] = []
+  #buffer: GatewayEvent[] = []
   #bufferLimit: number
 
   constructor(opts: { bufferLimit?: number } = {}) {
     this.#bufferLimit = opts.bufferLimit ?? 256
   }
 
-  publish(kind: HarnessEventKind, data: unknown): HarnessEvent {
+  publish(kind: GatewayEventKind, data: unknown): GatewayEvent {
     this.#seq += 1
-    const event: HarnessEvent = { seq: this.#seq, kind, ts: Date.now(), data }
+    const event: GatewayEvent = { seq: this.#seq, kind, ts: Date.now(), data }
     this.#buffer.push(event)
     if (this.#buffer.length > this.#bufferLimit) this.#buffer.shift()
     for (const sub of this.#subs) {
@@ -73,7 +73,7 @@ export class EventHub {
   }
 
   /** Drain buffered events; used in tests + graceful shutdown drains. */
-  buffer(): HarnessEvent[] {
+  buffer(): GatewayEvent[] {
     return [...this.#buffer]
   }
 }

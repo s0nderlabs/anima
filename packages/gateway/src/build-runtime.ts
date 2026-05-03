@@ -58,7 +58,7 @@ import type { ApprovalRelay } from './approval-relay'
 import type { EventHub } from './events'
 import { restoreMemoryFromChain } from './memory-restore'
 import type { RuntimeConfig } from './runtime'
-import type { HarnessSecrets } from './secrets'
+import type { GatewaySecrets } from './secrets'
 
 export interface BuildRuntimeOpts {
   config: RuntimeConfig
@@ -88,7 +88,7 @@ export interface BuildRuntimeOpts {
    * approval bridge so the operator can DM the bot from their phone and
    * approve tool calls via inline keyboard.
    */
-  secrets?: HarnessSecrets
+  secrets?: GatewaySecrets
 }
 
 export interface BuiltRuntime {

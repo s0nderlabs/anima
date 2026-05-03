@@ -1,12 +1,14 @@
 {
   "name": "anima",
-  "version": "0.18.3",
+  "version": "0.19.0",
   "private": true,
   "type": "module",
   "description": "First fully on-chain sovereign agent harness on 0G",
   "repository": "github.com/s0nderlabs/anima",
   "license": "MIT",
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "build": "bun run --filter='*' build",
     "typecheck": "tsc -b",

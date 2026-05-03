@@ -12,7 +12,7 @@
   },
   "references": [
     { "path": "../core" },
-    { "path": "../harness" },
+    { "path": "../gateway" },
     { "path": "../plugin-system" },
     { "path": "../plugin-telegram" }
   ],

@@ -138,9 +138,19 @@ export async function encryptAgentKey(opts: {
 }
 
 export async function decryptAgentKey(opts: {
-  signer: OperatorSigner
+  signer?: OperatorSigner
   agentAddress: Address
   keystore: OperatorEncryptedKeystore
+  /**
+   * Optional pre-derived AES-256 key (32 bytes). When present, skips
+   * `signer.signTypedData` entirely. Used by the headless gateway path: a
+   * prior interactive `anima gateway start` derives the key once via the
+   * operator signer, persists it in the operator-session file, and the
+   * gateway daemon reads it from there at boot. Bypasses Touch ID at every
+   * daemon restart while preserving the keystore-derivation security model
+   * (key is fully equivalent to what `signer` would produce, just cached).
+   */
+  precomputedKey?: Buffer
 }): Promise<Hex> {
   if (opts.keystore.version !== OPERATOR_KEYSTORE_VERSION) {
     throw new Error(
@@ -154,7 +164,18 @@ export async function decryptAgentKey(opts: {
   const iv = buf.subarray(0, 12)
   const tag = buf.subarray(12, 28)
   const ct = buf.subarray(28)
-  const key = await deriveKey(opts.signer, opts.agentAddress)
+  let key: Buffer
+  if (opts.precomputedKey) {
+    if (opts.precomputedKey.length !== 32) {
+      throw new Error(`Precomputed key must be 32 bytes, got ${opts.precomputedKey.length}`)
+    }
+    key = opts.precomputedKey
+  } else {
+    if (!opts.signer) {
+      throw new Error('decryptAgentKey requires either signer or precomputedKey')
+    }
+    key = await deriveKey(opts.signer, opts.agentAddress)
+  }
   const decipher = createDecipheriv('aes-256-gcm', key, iv)
   decipher.setAuthTag(tag)
   const pt = Buffer.concat([decipher.update(ct), decipher.final()])
@@ -205,10 +226,12 @@ export async function encryptOperatorBlob(opts: {
 }
 
 export async function decryptOperatorBlob(opts: {
-  signer: OperatorSigner
+  signer?: OperatorSigner
   scope: OperatorBlobScope
   agentAddress: Address
   blob: OperatorEncryptedBlob
+  /** Pre-derived scope key (32 bytes). Skips signer when present. */
+  precomputedKey?: Buffer
 }): Promise<Uint8Array> {
   if (opts.blob.version !== OPERATOR_KEYSTORE_VERSION) {
     throw new Error(
@@ -227,11 +250,43 @@ export async function decryptOperatorBlob(opts: {
   const iv = buf.subarray(0, 12)
   const tag = buf.subarray(12, 28)
   const ct = buf.subarray(28)
-  const key = await deriveScopedKey(opts.signer, opts.scope, opts.agentAddress)
+  let key: Buffer
+  if (opts.precomputedKey) {
+    if (opts.precomputedKey.length !== 32) {
+      throw new Error(`Precomputed key must be 32 bytes, got ${opts.precomputedKey.length}`)
+    }
+    key = opts.precomputedKey
+  } else {
+    if (!opts.signer) {
+      throw new Error('decryptOperatorBlob requires either signer or precomputedKey')
+    }
+    key = await deriveScopedKey(opts.signer, opts.scope, opts.agentAddress)
+  }
   const decipher = createDecipheriv('aes-256-gcm', key, iv)
   decipher.setAuthTag(tag)
   const pt = Buffer.concat([decipher.update(ct), decipher.final()])
   return new Uint8Array(pt)
+}
+
+/**
+ * Derive the legacy keystore AES key for `decryptAgentKey`. Public so the
+ * operator-session writer can pre-derive once and cache. Headless gateway
+ * boots from the cached key.
+ */
+export async function deriveKeystoreKey(signer: OperatorSigner, agent: Address): Promise<Buffer> {
+  return deriveKey(signer, agent)
+}
+
+/**
+ * Derive a scope-specific AES key for `decryptOperatorBlob`. Same caching
+ * use case as `deriveKeystoreKey`.
+ */
+export async function deriveBlobKey(
+  signer: OperatorSigner,
+  agent: Address,
+  scope: OperatorBlobScope,
+): Promise<Buffer> {
+  return deriveScopedKey(signer, scope, agent)
 }
 
 export function encodeOperatorBlobBytes(blob: OperatorEncryptedBlob): Uint8Array {

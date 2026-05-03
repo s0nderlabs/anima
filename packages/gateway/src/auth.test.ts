@@ -111,16 +111,16 @@ describe('provision sig verification', () => {
     const operatorPriv = generatePrivateKey()
     req.operatorAddress = privateKeyToAccount(operatorPriv).address
 
-    const otherHarnessPub = generateBootstrapKeypair().pubkeyHexCompressed
-    const realHarnessPub = generateBootstrapKeypair().pubkeyHexCompressed
+    const otherGatewayPub = generateBootstrapKeypair().pubkeyHexCompressed
+    const realGatewayPub = generateBootstrapKeypair().pubkeyHexCompressed
 
-    const hashForOther = provisionMessageHash(req, otherHarnessPub)
+    const hashForOther = provisionMessageHash(req, otherGatewayPub)
     const sig = await sign(operatorPriv, hashForOther)
 
     const r = await verifyProvisionSig({
       request: req,
       signature: sig,
-      bootstrapPubkey: realHarnessPub,
+      bootstrapPubkey: realGatewayPub,
       expectedOperator: req.operatorAddress,
     })
     expect(r.ok).toBe(false)

@@ -60,7 +60,7 @@ export interface BuildBootstrapScriptResult {
   script: string
   /**
    * Path the caller should poll via `execInToolbox(id, { command: cat <path> })`
-   * to detect bootstrap completion. Returns success line `anima-harness-pid=<N>`
+   * to detect bootstrap completion. Returns success line `anima-gateway-pid=<N>`
    * once everything is up; absent until then.
    */
   doneMarkerPath: string
@@ -162,7 +162,7 @@ export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBoots
     '  echo "[launch attempt $h_attempt/3]"',
     `  fuser -k ${port}/tcp 2>/dev/null || true`,
     '  sleep 1',
-    '  nohup bun "$ANIMA_DIR/packages/harness/bin/anima-harness" > "$HOME/anima-logs/anima-harness.log" 2>&1 &',
+    '  nohup bun "$ANIMA_DIR/packages/gateway/bin/anima-gateway" > "$HOME/anima-logs/anima-gateway.log" 2>&1 &',
     '  HARNESS_PID=$!',
     '  disown',
     '  sleep 10',
@@ -171,7 +171,7 @@ export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBoots
     '    break',
     '  fi',
     '  echo "[harness died on attempt $h_attempt, log tail:]"',
-    '  tail -n 50 "$HOME/anima-logs/anima-harness.log" 2>/dev/null',
+    '  tail -n 50 "$HOME/anima-logs/anima-gateway.log" 2>/dev/null',
     '  if [ $h_attempt -lt 3 ]; then',
     '    echo "[retrying in 5s]"',
     '    sleep 5',
@@ -179,11 +179,11 @@ export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBoots
     'done',
     'if [ "$HARNESS_OK" -ne 1 ]; then',
     '  echo "[all 3 harness launch attempts failed, full log dump:]"',
-    '  tail -n 200 "$HOME/anima-logs/anima-harness.log" 2>/dev/null',
+    '  tail -n 200 "$HOME/anima-logs/anima-gateway.log" 2>/dev/null',
     `  echo "harness-died-early" > ${FAIL_MARKER}`,
     '  exit 18',
     'fi',
-    `echo "anima-harness-pid=$HARNESS_PID" > ${DONE_MARKER}`,
+    `echo "anima-gateway-pid=$HARNESS_PID" > ${DONE_MARKER}`,
     'echo "[$(date -u +%FT%TZ)] bootstrap-done pid=$HARNESS_PID"',
     '',
   ].join('\n')
@@ -220,7 +220,7 @@ export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBoots
 export const BOOTSTRAP_DONE_MARKER = DONE_MARKER
 export const BOOTSTRAP_FAIL_MARKER = FAIL_MARKER
 export const BOOTSTRAP_PROGRESS_LOG = PROGRESS_LOG
-export const BOOTSTRAP_SUCCESS_MARKER_PREFIX = 'anima-harness-pid='
+export const BOOTSTRAP_SUCCESS_MARKER_PREFIX = 'anima-gateway-pid='
 
 /**
  * The exact strings the inner subshell writes to FAIL_MARKER on each step

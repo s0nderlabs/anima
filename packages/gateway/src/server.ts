@@ -3,13 +3,21 @@ import { decryptWithPrivkey } from '@s0nderlabs/anima-core'
 import { type Address, type Hex, bytesToHex, getAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { type ProvisionRequest, verifyApprovalSig, verifyChatSig, verifyProvisionSig } from './auth'
-import type { EventHub, HarnessEvent } from './events'
+import type { EventHub, GatewayEvent } from './events'
 import type { RuntimeConfig } from './runtime'
-import { type HarnessSession, transitionToProvisioned, transitionToReady } from './state'
+import { type GatewaySession, transitionToProvisioned, transitionToReady } from './state'
 
 export interface ServerDeps {
-  session: HarnessSession
+  session: GatewaySession
   logger?: (line: string) => void
+  /**
+   * When true, skip EIP-191 sig checks on /chat and /approval routes. Used
+   * by the local-mode gateway where the unix socket file permission (0600)
+   * provides equivalent authentication: only the user who owns the socket
+   * can connect, so wallet-sig replay defense is unnecessary. /provision
+   * is unreachable in local mode anyway (session starts in Ready state).
+   */
+  trustLocal?: boolean
 }
 
 const JSON_HEADERS = { 'content-type': 'application/json' } as const
@@ -43,7 +51,7 @@ async function readJson(req: http.IncomingMessage, maxBytes = 256 * 1024): Promi
   })
 }
 
-function ssePayload(event: HarnessEvent): string {
+function ssePayload(event: GatewayEvent): string {
   return `id: ${event.seq}\nevent: ${event.kind}\ndata: ${JSON.stringify({ ts: event.ts, data: event.data })}\n\n`
 }
 
@@ -73,9 +81,10 @@ function attachSse(res: http.ServerResponse, hub: EventHub, sinceSeq?: number): 
   return cleanup
 }
 
-export function createHarnessServer(deps: ServerDeps): http.Server {
+export function createGatewayServer(deps: ServerDeps): http.Server {
   const log = deps.logger ?? (() => {})
   const { session } = deps
+  const trustLocal = deps.trustLocal === true
 
   return http.createServer(async (req, res) => {
     const url = req.url ?? '/'
@@ -180,8 +189,8 @@ export function createHarnessServer(deps: ServerDeps): http.Server {
 
         // Optional secrets envelope (Phase 12 / B6). Decrypted with the
         // bootstrap privkey same as the agent privkey envelope. JSON parsed
-        // against the HarnessSecrets zod schema; failures abort provision.
-        let secrets: import('./secrets').HarnessSecrets | undefined
+        // against the GatewaySecrets zod schema; failures abort provision.
+        let secrets: import('./secrets').GatewaySecrets | undefined
         if (request.secretsEnvelope) {
           let secretsBytes: Uint8Array
           try {
@@ -194,8 +203,8 @@ export function createHarnessServer(deps: ServerDeps): http.Server {
             return send(res, 400, { error: 'secrets-decrypt-failed' })
           }
           try {
-            const { parseHarnessSecrets } = await import('./secrets')
-            secrets = parseHarnessSecrets(new TextDecoder().decode(secretsBytes))
+            const { parseGatewaySecrets } = await import('./secrets')
+            secrets = parseGatewaySecrets(new TextDecoder().decode(secretsBytes))
           } catch (e) {
             log(`secrets-parse-fail: ${(e as Error).message}`)
             return send(res, 400, { error: 'secrets-parse-failed' })
@@ -244,32 +253,37 @@ export function createHarnessServer(deps: ServerDeps): http.Server {
         const body = (await readJson(req)) as {
           message: string
           ts: number
-          signature: Hex
+          signature?: Hex
           operatorAddress?: Address
         }
-        if (!body?.message || typeof body.ts !== 'number' || !body.signature) {
+        if (!body?.message || typeof body.ts !== 'number') {
           return send(res, 400, { error: 'missing-fields' })
         }
         const operator = session.operatorAddress
         if (!operator) {
           return send(res, 500, { error: 'operator-not-set' })
         }
-        const verified = await verifyChatSig({
-          message: body.message,
-          ts: body.ts,
-          sandboxId: session.sandboxId,
-          signature: body.signature,
-          expectedOperator: operator,
-        })
-        if (!verified.ok) {
-          log(`chat-rejected reason=${verified.reason}`)
-          return send(res, 401, { error: 'unauthorized', reason: verified.reason })
+        if (!trustLocal) {
+          if (!body.signature) {
+            return send(res, 400, { error: 'missing-fields' })
+          }
+          const verified = await verifyChatSig({
+            message: body.message,
+            ts: body.ts,
+            sandboxId: session.sandboxId,
+            signature: body.signature,
+            expectedOperator: operator,
+          })
+          if (!verified.ok) {
+            log(`chat-rejected reason=${verified.reason}`)
+            return send(res, 401, { error: 'unauthorized', reason: verified.reason })
+          }
         }
         try {
           const result = await session.runtime.runChatTurn({
             message: body.message,
             ts: body.ts,
-            signature: body.signature,
+            signature: body.signature ?? '0x',
             operatorAddress: operator,
           })
           return send(res, 200, result)
@@ -297,9 +311,9 @@ export function createHarnessServer(deps: ServerDeps): http.Server {
         const body = (await readJson(req)) as {
           decision: 'allow' | 'allow-session' | 'deny'
           ts: number
-          signature: Hex
+          signature?: Hex
         }
-        if (!body?.decision || typeof body.ts !== 'number' || !body.signature) {
+        if (!body?.decision || typeof body.ts !== 'number') {
           return send(res, 400, { error: 'missing-fields' })
         }
         const operator = session.operatorAddress
@@ -309,17 +323,22 @@ export function createHarnessServer(deps: ServerDeps): http.Server {
         if (!session.approvals.has(approvalId)) {
           return send(res, 404, { error: 'unknown-approval', id: approvalId })
         }
-        const verified = await verifyApprovalSig({
-          approvalId,
-          decision: body.decision,
-          ts: body.ts,
-          sandboxId: session.sandboxId,
-          signature: body.signature,
-          expectedOperator: operator,
-        })
-        if (!verified.ok) {
-          log(`approval-rejected id=${approvalId} reason=${verified.reason}`)
-          return send(res, 401, { error: 'unauthorized', reason: verified.reason })
+        if (!trustLocal) {
+          if (!body.signature) {
+            return send(res, 400, { error: 'missing-fields' })
+          }
+          const verified = await verifyApprovalSig({
+            approvalId,
+            decision: body.decision,
+            ts: body.ts,
+            sandboxId: session.sandboxId,
+            signature: body.signature,
+            expectedOperator: operator,
+          })
+          if (!verified.ok) {
+            log(`approval-rejected id=${approvalId} reason=${verified.reason}`)
+            return send(res, 401, { error: 'unauthorized', reason: verified.reason })
+          }
         }
         const ok = session.approvals.resolve(approvalId, body.decision)
         return send(res, ok ? 200 : 409, { ok, id: approvalId, decision: body.decision })

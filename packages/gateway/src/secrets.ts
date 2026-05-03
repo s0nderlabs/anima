@@ -14,13 +14,13 @@ export const TelegramSecretsSchema = z.object({
   pairingApproved: z.array(z.number().int().nonnegative()).optional(),
 })
 
-export const HarnessSecretsSchema = z.object({
+export const GatewaySecretsSchema = z.object({
   telegram: TelegramSecretsSchema.optional(),
 })
 
 export type TelegramSecrets = z.infer<typeof TelegramSecretsSchema>
-export type HarnessSecrets = z.infer<typeof HarnessSecretsSchema>
+export type GatewaySecrets = z.infer<typeof GatewaySecretsSchema>
 
-export function parseHarnessSecrets(json: string): HarnessSecrets {
-  return HarnessSecretsSchema.parse(JSON.parse(json))
+export function parseGatewaySecrets(json: string): GatewaySecrets {
+  return GatewaySecretsSchema.parse(JSON.parse(json))
 }

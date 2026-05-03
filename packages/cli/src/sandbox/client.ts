@@ -1,12 +1,12 @@
 import type { PermissionDecision } from '@s0nderlabs/anima-core'
 import {
-  type HarnessEventKind,
+  type GatewayEventKind,
   type ProvisionEnvelope,
   type RuntimeConfig,
   approvalResponseHash,
   chatMessageHash,
   provisionMessageHash,
-} from '@s0nderlabs/anima-harness'
+} from '@s0nderlabs/anima-gateway'
 import type { Address, Hex, LocalAccount } from 'viem'
 
 export interface SandboxClientOpts {
@@ -60,7 +60,7 @@ export interface ProvisionPayload {
 
 export interface ParsedSseEvent {
   seq: number
-  kind: HarnessEventKind
+  kind: GatewayEventKind
   ts: number
   data: unknown
 }
@@ -257,7 +257,7 @@ export class SandboxClient {
 
 function parseSseChunk(chunk: string): ParsedSseEvent | null {
   let id: number | null = null
-  let kind: HarnessEventKind | null = null
+  let kind: GatewayEventKind | null = null
   let dataLine = ''
   for (const rawLine of chunk.split('\n')) {
     const line = rawLine.trimEnd()
@@ -266,7 +266,7 @@ function parseSseChunk(chunk: string): ParsedSseEvent | null {
       const n = Number.parseInt(line.slice(4), 10)
       if (Number.isFinite(n)) id = n
     } else if (line.startsWith('event: ')) {
-      kind = line.slice(7) as HarnessEventKind
+      kind = line.slice(7) as GatewayEventKind
     } else if (line.startsWith('data: ')) {
       dataLine = dataLine ? `${dataLine}\n${line.slice(6)}` : line.slice(6)
     }

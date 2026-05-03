@@ -4,6 +4,32 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-05-03
+
+### Changed
+
+- **`packages/harness` renamed to `packages/gateway`**. Same code, semantic name. The harness was always a gateway in role: a long-running process that owns the brain runtime, listeners (TG + A2A inbox + market), tool registry, and memory sync. Phase 14 separates this gateway role from the TUI cleanly. v0.19.0 is the foundation rename; v0.19.1 adds the local entrypoint (`anima gateway run`) that runs the same gateway code on a laptop without the Daytona handshake.
+- **npm package: `@s0nderlabs/anima-harness` → `@s0nderlabs/anima-gateway`** (workspace dep + npm name). v0.18.x consumers must update imports.
+- **Type renames**: `HARNESS_VERSION` → `GATEWAY_VERSION`, `HarnessSession` → `GatewaySession`, `HarnessState` → `GatewayState`, `HarnessEvent`/`HarnessEventKind` → `GatewayEvent`/`GatewayEventKind`, `HarnessSecrets`/`HarnessSecretsSchema` → `GatewaySecrets`/`GatewaySecretsSchema`. Function renames: `createHarnessServer` → `createGatewayServer`, `handoffAgentToHarness` → `handoffAgentToGateway`, `buildHarnessRelaunchScript` → `buildGatewayRelaunchScript`, `probeHarnessAlive` → `probeGatewayAlive`, `relaunchHarnessDaemon` → `relaunchGatewayDaemon`, `parseHarnessSecrets` → `parseGatewaySecrets`.
+- **Binary**: `bin/anima-harness` → `bin/anima-gateway`. The `pkill -f anima-gateway` in upgrade-script.ts is augmented with a sibling `pkill -f anima-harness` for backward-compat: v0.18.x → v0.19.0 in-place upgrade kills BOTH the legacy and new daemon on the existing Daytona container.
+
+### Added
+
+- **`packages/core/src/wallet/operator-session.ts`** — per-agent on-disk cache of operator-derived AES-256 keys (one per scope: keystore + telegram + future scopes). File at `~/.anima/agents/<id>/.operator-session` with permission 0600 and 24-hour default TTL. Written via `precomputeAllScopes(signer, agent, [scopes])` after a single Touch ID unlock; read by the headless gateway daemon at boot to bypass interactive operator unlock per restart. Same security model as hermes's `~/.hermes/.env` plaintext API key store. Atomic temp+rename writes with explicit `chmod 0o600` (try/catch wraps for non-POSIX hosts where chmod is advisory). Stale sessions auto-deleted on read. Exports: `writeOperatorSession`, `readOperatorSession`, `clearOperatorSession`, `isOperatorSessionFresh`, `getSessionKey`, `precomputeAllScopes`, `buildOperatorSession`, `OPERATOR_SESSION_VERSION`, `DEFAULT_OPERATOR_SESSION_TTL_MS`. 19 unit tests.
+- **Pre-derived key opt on `decryptAgentKey` and `decryptOperatorBlob`**. Both accept optional `precomputedKey: Buffer` (32 bytes) that bypasses `signer.signTypedData`. The pre-derived key is fully equivalent to the on-the-fly derived key (RFC-6979 deterministic ECDSA + HKDF-SHA256), so the security model is preserved. Net effect: the gateway daemon can boot from disk + a session file without prompting Touch ID.
+- **`deriveKeystoreKey` and `deriveBlobKey`** are now public exports (used by the operator-session writer to compute the cached keys).
+
+- **`trustLocal` flag on `createGatewayServer`**. When true, `/chat` and `/approval/:id/respond` skip EIP-191 signature verification. Defaults to false (sandbox-mode unchanged). Will be enabled by `anima gateway run` (v0.19.1) when binding a unix socket where file permissions provide equivalent authentication. Today: zero callers pass `trustLocal: true`, so no functional change.
+
+### Internal
+
+- 802 unit tests pass (up from 783; +19 from operator-session.test.ts).
+- Typecheck + lint clean.
+- 124 forge tests pass (no contract changes).
+- bun.lock refreshed to pin all 7 workspace packages at 0.19.0.
+- `tsconfig.json` and `packages/cli/tsconfig.json` references updated for the rename.
+- The `entrypoint.ts` (sandbox path) is unchanged in behavior; only string-level renames.
+
 ## [0.18.3] - 2026-05-04
 
 ### Added
@@ -1007,6 +1033,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.0
 [0.18.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.3
 [0.18.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.2
 [0.18.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.18.1

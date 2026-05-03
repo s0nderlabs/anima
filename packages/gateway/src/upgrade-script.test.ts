@@ -44,9 +44,9 @@ describe('buildUpgradeScript', () => {
     expect(inner).toContain('git fetch --tags --depth 50 origin')
     expect(inner).toContain(`git checkout '${baseOpts.ref}'`)
     expect(inner).toContain('bun install --frozen-lockfile')
-    expect(inner).toContain('pkill -f anima-harness')
-    expect(inner).toContain('nohup bun "$HOME/anima/packages/harness/bin/anima-harness"')
-    expect(inner).toContain(`echo "anima-harness-pid=$HARNESS_PID" > ${UPGRADE_DONE_MARKER}`)
+    expect(inner).toContain('pkill -f anima-gateway')
+    expect(inner).toContain('nohup bun "$HOME/anima/packages/gateway/bin/anima-gateway"')
+    expect(inner).toContain(`echo "anima-gateway-pid=$HARNESS_PID" > ${UPGRADE_DONE_MARKER}`)
   })
 
   test('inner subshell does NOT do bootstrap-only steps (apt / clone / bun-binary)', () => {
@@ -148,7 +148,7 @@ describe('buildUpgradeScript', () => {
   })
 
   test('exposes UPGRADE_SUCCESS_MARKER_PREFIX matching bootstrap (callers grep done file)', () => {
-    expect(UPGRADE_SUCCESS_MARKER_PREFIX).toBe('anima-harness-pid=')
+    expect(UPGRADE_SUCCESS_MARKER_PREFIX).toBe('anima-gateway-pid=')
   })
 
   test('outer script stays under Daytona request-size ceiling (<5000 bytes)', () => {

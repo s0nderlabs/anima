@@ -31,8 +31,8 @@ import {
   RELAUNCH_FAIL_MARKER,
   RELAUNCH_PROGRESS_LOG,
   buildBootstrapScript,
-  buildHarnessRelaunchScript,
-} from '@s0nderlabs/anima-harness'
+  buildGatewayRelaunchScript,
+} from '@s0nderlabs/anima-gateway'
 import { type Address, type Hex, formatEther, hexToBytes, parseEther } from 'viem'
 import type { LocalAccount } from 'viem/accounts'
 import { SandboxClient } from '../../sandbox/client'
@@ -263,7 +263,7 @@ export async function runSandboxProvision(
     sandboxId,
     operator: operatorAccount,
   })
-  const { bootstrapPubkey } = await handoffAgentToHarness({
+  const { bootstrapPubkey } = await handoffAgentToGateway({
     sandboxClient,
     agentPrivkey: opts.agentPrivkey,
     agentAddress: opts.agentAddress,
@@ -298,7 +298,7 @@ export async function runSandboxProvision(
  * Both paths talk to a `Bootstrapping` harness that has just generated a
  * fresh ephemeral keypair, so the wire-level sequence is identical.
  */
-export interface HandoffAgentToHarnessOpts {
+export interface HandoffAgentToGatewayOpts {
   sandboxClient: SandboxClient
   agentPrivkey: Hex
   agentAddress: Address
@@ -321,8 +321,8 @@ export interface HandoffAgentToHarnessOpts {
   onProgress?: (msg: string) => void
 }
 
-export async function handoffAgentToHarness(
-  opts: HandoffAgentToHarnessOpts,
+export async function handoffAgentToGateway(
+  opts: HandoffAgentToGatewayOpts,
 ): Promise<{ bootstrapPubkey: Hex }> {
   const progress = opts.onProgress ?? (() => {})
   const endpoint = opts.sandboxClient.endpoint
@@ -670,10 +670,10 @@ export async function resumeArchivedSandbox(
   //      Daytona didn't notice (the container is up, the process isn't).
   // Probe /bootstrap/pubkey; if no response, fire the relaunch script.
   progress('checking if harness daemon is alive')
-  const harnessUp = await probeHarnessAlive(opts.sandboxEndpoint, 8_000)
-  if (!harnessUp) {
+  const gatewayUp = await probeGatewayAlive(opts.sandboxEndpoint, 8_000)
+  if (!gatewayUp) {
     progress('harness daemon unreachable; relaunching via toolbox exec')
-    await relaunchHarnessDaemon({
+    await relaunchGatewayDaemon({
       provider: opts.provider,
       sandboxId: opts.sandboxId,
       sandboxEndpoint: opts.sandboxEndpoint,
@@ -684,7 +684,7 @@ export async function resumeArchivedSandbox(
 
   // Re-handoff: pubkey + envelope + provision + waitReady.
   progress('re-handing off agent privkey to harness')
-  const { bootstrapPubkey } = await handoffAgentToHarness({
+  const { bootstrapPubkey } = await handoffAgentToGateway({
     sandboxClient,
     agentPrivkey: opts.agentPrivkey,
     agentAddress: opts.agentAddress,
@@ -699,7 +699,7 @@ export async function resumeArchivedSandbox(
   return { initialState: ensureResult.initialState, alreadyReady: false, bootstrapPubkey }
 }
 
-async function probeHarnessAlive(endpoint: string, timeoutMs: number): Promise<boolean> {
+async function probeGatewayAlive(endpoint: string, timeoutMs: number): Promise<boolean> {
   try {
     const r = await fetch(`${endpoint}/bootstrap/pubkey`, {
       method: 'GET',
@@ -711,7 +711,7 @@ async function probeHarnessAlive(endpoint: string, timeoutMs: number): Promise<b
   }
 }
 
-interface RelaunchHarnessOpts {
+interface RelaunchGatewayOpts {
   provider: SandboxProviderClient
   sandboxId: string
   sandboxEndpoint: string
@@ -719,9 +719,9 @@ interface RelaunchHarnessOpts {
   onProgress?: (msg: string) => void
 }
 
-async function relaunchHarnessDaemon(opts: RelaunchHarnessOpts): Promise<void> {
+async function relaunchGatewayDaemon(opts: RelaunchGatewayOpts): Promise<void> {
   const progress = opts.onProgress ?? (() => {})
-  const { script } = buildHarnessRelaunchScript({
+  const { script } = buildGatewayRelaunchScript({
     sandboxId: opts.sandboxId,
     operatorAddress: opts.operatorAddress,
   })
@@ -746,7 +746,7 @@ async function relaunchHarnessDaemon(opts: RelaunchHarnessOpts): Promise<void> {
   const exec = makeExecRead(opts.provider, opts.sandboxId)
   const deadline = Date.now() + 60_000
   while (Date.now() < deadline) {
-    if (await probeHarnessAlive(opts.sandboxEndpoint, 4_000)) {
+    if (await probeGatewayAlive(opts.sandboxEndpoint, 4_000)) {
       progress('harness daemon back online')
       return
     }

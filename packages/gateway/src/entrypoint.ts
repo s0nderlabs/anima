@@ -5,8 +5,8 @@ import { ApprovalRelay } from './approval-relay'
 import { EventHub } from './events'
 import { startHeartbeat } from './heartbeat'
 import { RealRuntime } from './real-runtime'
-import { createHarnessServer } from './server'
-import { HARNESS_VERSION, createSession, transitionToShuttingDown } from './state'
+import { createGatewayServer } from './server'
+import { GATEWAY_VERSION, createSession, transitionToShuttingDown } from './state'
 import { StubRuntime } from './stub-runtime'
 
 function envOrDie(name: string): string {
@@ -47,14 +47,14 @@ const session = createSession({
   events,
   approvals,
   runtime,
-  version: HARNESS_VERSION,
+  version: GATEWAY_VERSION,
 })
 
 const log = (line: string): void => {
   process.stdout.write(`[harness] ${new Date().toISOString()} ${line}\n`)
 }
 
-const server = createHarnessServer({ session, logger: log })
+const server = createGatewayServer({ session, logger: log })
 
 // Self-heartbeat keeps activity flowing through the public proxy so a healthy
 // sandbox never looks idle to Daytona's auto-archive cron. Default 30 min;

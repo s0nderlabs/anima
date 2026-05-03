@@ -11,7 +11,7 @@ import type { ChatTurnInput, ChatTurnResult, RuntimeAdapter, RuntimeConfig } fro
 
 export interface RealRuntimeOpts {
   approvals: ApprovalRelay
-  /** Optional override of the agent state directory. Default `${TMPDIR}/anima-harness/<agentId>`. */
+  /** Optional override of the agent state directory. Default `${TMPDIR}/anima-gateway/<agentId>`. */
   agentDirRoot?: string
 }
 
@@ -40,14 +40,14 @@ export class RealRuntime implements RuntimeAdapter {
 
   constructor(opts: RealRuntimeOpts) {
     this.#approvals = opts.approvals
-    this.#agentDirRoot = opts.agentDirRoot ?? join(tmpdir(), 'anima-harness')
+    this.#agentDirRoot = opts.agentDirRoot ?? join(tmpdir(), 'anima-gateway')
   }
 
   async start(opts: {
     agentPrivkey: Hex
     config: RuntimeConfig
     events: EventHub
-    secrets?: import('./secrets').HarnessSecrets
+    secrets?: import('./secrets').GatewaySecrets
   }): Promise<void> {
     const agentAddress = privateKeyToAccount(opts.agentPrivkey).address
     this.#network = opts.config.network

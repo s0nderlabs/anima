@@ -1,8 +1,8 @@
 {
   "name": "@s0nderlabs/anima-core",
-  "version": "0.18.3",
+  "version": "0.19.0",
   "type": "module",
-  "description": "Always-on infrastructure for anima, the sovereign agent harness on 0G (runtime, brain, identity, memory, storage, wallet, tool registry)",
+  "description": "Always-on infrastructure for anima, the sovereign agent gateway on 0G (runtime, brain, identity, memory, storage, wallet, tool registry)",
   "license": "MIT",
   "homepage": "https://github.com/s0nderlabs/anima",
   "repository": {
@@ -13,14 +13,26 @@
   "bugs": {
     "url": "https://github.com/s0nderlabs/anima/issues"
   },
-  "keywords": ["0g", "anima", "agent", "ai", "sovereign", "harness", "inft", "erc-7857"],
+  "keywords": [
+    "0g",
+    "anima",
+    "agent",
+    "ai",
+    "sovereign",
+    "gateway",
+    "inft",
+    "erc-7857"
+  ],
   "publishConfig": {
     "access": "public"
   },
   "engines": {
     "bun": ">=1.1"
   },
-  "files": ["src", "README.md"],
+  "files": [
+    "src",
+    "README.md"
+  ],
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "exports": {

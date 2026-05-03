@@ -1,6 +1,6 @@
 {
   "name": "@s0nderlabs/anima-plugin-system",
-  "version": "0.18.3",
+  "version": "0.19.0",
   "type": "module",
   "description": "Filesystem + shell + browser + skills tools plugin for anima",
   "license": "MIT",
@@ -13,14 +13,26 @@
   "bugs": {
     "url": "https://github.com/s0nderlabs/anima/issues"
   },
-  "keywords": ["0g", "anima", "agent", "fs", "shell", "browser", "tools", "plugin"],
+  "keywords": [
+    "0g",
+    "anima",
+    "agent",
+    "fs",
+    "shell",
+    "browser",
+    "tools",
+    "plugin"
+  ],
   "publishConfig": {
     "access": "public"
   },
   "engines": {
     "bun": ">=1.1"
   },
-  "files": ["src", "README.md"],
+  "files": [
+    "src",
+    "README.md"
+  ],
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {

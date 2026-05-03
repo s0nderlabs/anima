@@ -18,7 +18,22 @@ export {
   encodeOperatorBlobBytes,
   decodeOperatorBlobBytes,
   sniffKeystoreVersion,
+  deriveKeystoreKey,
+  deriveBlobKey,
   type OperatorEncryptedKeystore,
   type OperatorEncryptedBlob,
 } from './operator-keystore-crypto'
+export {
+  OPERATOR_SESSION_VERSION,
+  DEFAULT_OPERATOR_SESSION_TTL_MS,
+  type OperatorSession,
+  operatorSessionPath,
+  writeOperatorSession,
+  readOperatorSession,
+  clearOperatorSession,
+  isOperatorSessionFresh,
+  getSessionKey,
+  precomputeAllScopes,
+  buildOperatorSession,
+} from './operator-session'
 export { drainAgentEOA, type DrainAgentResult } from './drain'

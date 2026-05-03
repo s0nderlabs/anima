@@ -4,7 +4,7 @@ import { ApprovalRelay } from './approval-relay'
 import { EventHub } from './events'
 import type { RuntimeConfig } from './runtime'
 import {
-  HARNESS_VERSION,
+  GATEWAY_VERSION,
   createSession,
   transitionToProvisioned,
   transitionToReady,
@@ -44,7 +44,7 @@ describe('state machine', () => {
   test('createSession → Bootstrapping with timestamps', () => {
     const s = newSession()
     expect(s.state).toBe('Bootstrapping')
-    expect(s.version).toBe(HARNESS_VERSION)
+    expect(s.version).toBe(GATEWAY_VERSION)
     expect(s.sandboxId).toBe('sbx-test')
     expect(s.bootedAt).toBeGreaterThan(0)
     expect(s.provisionedAt).toBeNull()

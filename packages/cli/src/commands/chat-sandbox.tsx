@@ -8,7 +8,7 @@ import {
   SandboxProviderClient,
   iNFTAgentId,
 } from '@s0nderlabs/anima-core'
-import type { HarnessEventKind } from '@s0nderlabs/anima-harness'
+import type { GatewayEventKind } from '@s0nderlabs/anima-gateway'
 import type { Address } from 'viem'
 import { SandboxClient } from '../sandbox/client'
 import { summarizeApprovalSubject } from '../ui/approval-summary'
@@ -149,7 +149,7 @@ export async function runChatSandbox(config: AnimaConfig): Promise<void> {
   // harness's ApprovalRelay handles the actual permission unblock).
   const approvalIdRef: { current: string | null } = { current: null }
 
-  const renderEvent = (kind: HarnessEventKind, data: unknown): void => {
+  const renderEvent = (kind: GatewayEventKind, data: unknown): void => {
     const d = data as Record<string, unknown>
     switch (kind) {
       case 'tool-call-start':

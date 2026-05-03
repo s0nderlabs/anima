@@ -45,7 +45,7 @@ describe('RealRuntime contract', () => {
     approvals.stop()
   })
 
-  test('agentDirRoot defaults to system tmpdir/anima-harness', () => {
+  test('agentDirRoot defaults to system tmpdir/anima-gateway', () => {
     const events = new EventHub()
     const approvals = new ApprovalRelay(events)
     const rt = new RealRuntime({ approvals })

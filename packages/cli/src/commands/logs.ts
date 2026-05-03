@@ -11,7 +11,7 @@ import { extractExecOutput } from './init/sandbox-provision'
 
 export async function runLogs(opts: { agent?: string; tail?: number } = {}): Promise<void> {
   // Phase 11: in sandbox mode the activity log lives in the container at
-  // /var/log/anima-harness.log. Tail it via toolbox exec.
+  // /var/log/anima-gateway.log. Tail it via toolbox exec.
   const found = await findAndLoadConfig().catch(() => null)
   if (
     found?.config.deployTarget === 'sandbox' &&
@@ -37,7 +37,7 @@ export async function runLogs(opts: { agent?: string; tail?: number } = {}): Pro
         // Harness logs to ~/anima-logs/ inside the container (daytona user;
         // /var/log needs root). bash -c needed because Daytona exec splits
         // argv-style without a shell.
-        command: `bash -c 'tail -n ${tail} ~/anima-logs/anima-harness.log'`,
+        command: `bash -c 'tail -n ${tail} ~/anima-logs/anima-gateway.log'`,
         timeout: 60,
       })
       const out = extractExecOutput(r)
