@@ -636,23 +636,23 @@ export async function resumeArchivedSandbox(
     }
   }
 
-  // After Daytona restores an archived sandbox, the filesystem comes back but
-  // every process inside the container is gone. The bootstrap-launched harness
-  // daemon is dead. Probe /bootstrap/pubkey briefly; if it doesn't answer,
-  // re-execute the harness daemon via `provider.execInToolbox` before handoff.
-  if (ensureResult.initialState !== 'started') {
-    progress('checking if harness daemon is still alive after restore')
-    const harnessUp = await probeHarnessAlive(opts.sandboxEndpoint, 8_000)
-    if (!harnessUp) {
-      progress('harness daemon missing post-restore; relaunching via toolbox exec')
-      await relaunchHarnessDaemon({
-        provider: opts.provider,
-        sandboxId: opts.sandboxId,
-        sandboxEndpoint: opts.sandboxEndpoint,
-        operatorAddress: opts.operatorAccount.address,
-        onProgress: progress,
-      })
-    }
+  // The harness daemon may be missing in two scenarios:
+  //   1. archive→restore: Daytona kills every process when archiving, restore
+  //      brings filesystem back but no daemons.
+  //   2. orphaned `started` sandbox where the harness died for some reason and
+  //      Daytona didn't notice (the container is up, the process isn't).
+  // Probe /bootstrap/pubkey; if no response, fire the relaunch script.
+  progress('checking if harness daemon is alive')
+  const harnessUp = await probeHarnessAlive(opts.sandboxEndpoint, 8_000)
+  if (!harnessUp) {
+    progress('harness daemon unreachable; relaunching via toolbox exec')
+    await relaunchHarnessDaemon({
+      provider: opts.provider,
+      sandboxId: opts.sandboxId,
+      sandboxEndpoint: opts.sandboxEndpoint,
+      operatorAddress: opts.operatorAccount.address,
+      onProgress: progress,
+    })
   }
 
   // Re-handoff: pubkey + envelope + provision + waitReady.
