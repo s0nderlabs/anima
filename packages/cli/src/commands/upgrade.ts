@@ -1,6 +1,7 @@
 import { cancel, confirm, intro, isCancel, note, outro, spinner } from '@clack/prompts'
 import {
   type AnimaNetwork,
+  type AnimaPlugin,
   type OperatorSigner,
   SANDBOX_PROVIDER_URL_GALILEO,
   SandboxProviderClient,
@@ -221,6 +222,7 @@ export async function runUpgrade(opts: UpgradeOpts = {}): Promise<void> {
       iNFTNetwork: config.network,
       brain: { provider: config.brain.provider as Address, model: config.brain.model ?? '' },
       subname: config.subname,
+      plugins: config.plugins,
       resolved,
     })
   }
@@ -240,6 +242,13 @@ interface InPlaceUpgradeArgs {
   brain: { provider: Address; model: string }
   /** Optional .0g subname forwarded into the harness handoff RuntimeConfig. */
   subname?: string | null
+  /**
+   * Plugins enabled in the local config; threaded into the harness
+   * RuntimeConfig so the sandbox loads the same plugin set (telegram listener
+   * in particular). Without this the harness defaults to ['system','comms','onchain']
+   * and silently drops 'telegram' even when telegram-secrets are provisioned.
+   */
+  plugins?: AnimaPlugin[]
   resolved: ResolvedRef
 }
 
@@ -429,6 +438,7 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
       iNFTNetwork: args.iNFTNetwork,
       brain: args.brain,
       subname: args.subname,
+      plugins: args.plugins,
       telegramSecrets: telegramSecretsPlain,
       onProgress: msg => sBox.message(msg),
     })
@@ -510,6 +520,7 @@ async function runReprovisionUpgrade(args: ReprovisionUpgradeArgs): Promise<void
       name: args.config.subname || 'anima',
       ref: args.resolved.ref,
       subname: args.config.subname,
+      plugins: args.config.plugins,
       onProgress: msg => sBox.message(msg),
     })
     sBox.stop(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`)

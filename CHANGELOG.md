@@ -4,6 +4,16 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.11] - 2026-05-04
+
+### Fixed
+
+- **`anima upgrade` now threads `config.plugins` into the harness handoff.** P0 hackathon-blocking bug discovered during the enigma sandbox TG canary on v0.19.10. Without this fix, `runInPlaceUpgrade` and `runReprovisionUpgrade` called `handoffAgentToGateway` / `runSandboxProvision` without `plugins`, so the harness fell back to the `['system','comms','onchain']` default in `sandbox-provision.ts`. Operators who ran `anima telegram setup` followed by `anima upgrade` got a sandbox that had `telegram-secrets` provisioned (visible as `(with telegram secrets)` in the provisioned log) but the plugin loader never received `'telegram'` so the listener never started. The bot consumed the polling queue (visible via `getUpdates`) but `[telegram] listener.start() called` never logged. Fix: thread `plugins?: AnimaPlugin[]` through `InPlaceUpgradeArgs` → `handoffAgentToGateway`, plus matching `plugins: args.config.plugins` on the `runSandboxProvision` (reprovision) path. Live verified: re-running `anima upgrade v0.19.10` from the patched local CLI on enigma surfaced both `[telegram] listener.start() called for @enigma` and `[telegram] listener active @anima_enigma_bot` logs, then a real "what time is it on this machine" DM via `web.telegram.org/k/#@anima_enigma_bot` routed cleanly through the brain → `shell.run` inline-keyboard approval rendered in the chat.
+
+### Files changed
+
+- `packages/cli/src/commands/upgrade.ts` (+11 lines): `AnimaPlugin` type import, `plugins?: AnimaPlugin[]` field on `InPlaceUpgradeArgs` with explanatory comment, three call-site additions wiring `config.plugins` → `args.plugins` → `handoffAgentToGateway` / `runSandboxProvision`.
+
 ## [0.19.10] - 2026-05-04
 
 ### Fixed (telegram dispatch was broken in v0.19.0–v0.19.9; every TG message returned "sorry, something went wrong")
@@ -1265,6 +1275,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.11]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.11
 [0.19.10]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.10
 [0.19.9]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.9
 [0.19.4]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.4
