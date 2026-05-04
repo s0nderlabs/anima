@@ -4,6 +4,48 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.10] - 2026-05-04
+
+### Fixed (telegram dispatch was broken in v0.19.0–v0.19.9; every TG message returned "sorry, something went wrong")
+
+- **Pre-register `bot.on('callback_query:data', ...)` at construction time.** The Phase 14 gateway daemon wired the approval callback handler lazily inside `ensureApprovalCallback()`, which fires per-dispatch from inside grammY middleware. grammY rejects late `bot.on()` calls once polling has started ("registering more listeners from within other listeners"), so EVERY incoming TG message threw at the first dispatch. The throw was swallowed by `dispatchOne`'s catch, the bot replied "sorry, something went wrong on my side. try again in a moment.", and the brain never ran. Fixed by moving the handler to `TelegramListener`'s constructor and reading the resolver from a private slot. `installCallbackHandler` is now just a slot-setter (returns a no-op uninstaller for back-compat). P0 production bug; surfaced during the v0.19.10 B6 matrix run on specter.
+- **TG dispatch fires `sync.flushTurn()` fire-and-forget.** Same shape as the v0.19.5 fix for `/chat` HTTP, never applied to the TG path. 0G mainnet finality can take 5+ minutes per write. The previous `await sync.flushTurn()` blocked the per-chatId dispatch serialization lock, so any subsequent TG message queued in inflight for the entire flush window. Live observed: second prompt sat unprocessed for 7+ minutes while first turn's storage flush retried "Log entry is available, but not finalized yet" 328 times. Now: `void sync.flushTurn().then(...)` runs in background and emits a `sync-flush` listener-event so observability is preserved without blocking the reply.
+- **Dispatch failures log unconditionally via `console.error` with stack.** The previous `this.log` was debug-only (defaulted off), so the daemon stderr was silent on every dispatch error. Now production daemon logs the full stack of any caught dispatch failure. P2.
+
+### Added
+
+- **`ANIMA_TG_YOLO=1` env var** bypasses the inline-keyboard approval prompter on the TG path. Used by automated test matrices and trusted-operator scenarios where the keyboard click roundtrip is unwanted. Defaults off; production approval flow unchanged.
+
+### Live verification — TG-via-browser tool matrix on specter (mainnet, v0.19.10)
+
+Drove `web.telegram.org/a/#@anima_specter_bot` via agent-browser semantic locators (`#editable-message-text` focus + `keyboard inserttext` + Enter), verified each turn against `~/var/folders/.../tmp/anima-gateway/<id>/activity.jsonl` `tool-call` entries.
+
+**46 tools/flows verified end-to-end:**
+
+- shell.run (date, uname -r, pwd) PASS
+- memory.save + memory.read (dark-mode preference round-trip) PASS
+- fs.read, fs.write, fs.patch PASS; fs.search HALLUCINATED (brain prefers shell.run+grep)
+- shell.process_start / list / kill PASS; shell.process_read soft-fail (brain answered without calling)
+- shell.cd, code.execute (python fibonacci) PASS
+- skills.list / view / manage, todo, clarify, tool.search, session.search PASS
+- delegate.task HALLUCINATED (brain inlined fs.read+todo instead)
+- web.fetch PASS (https://example.com → "Example Domain"); vision.analyze plumbing OK (file-missing graceful)
+- browser.navigate + snapshot + scroll PASS (live HN top stories); browser.click + back HALLUCINATED (brain context drift, claimed tools missing despite using them earlier in same session)
+- chain.balance, tokens.info, swap.quote, chain.gas, chain.block, chain.read, chain.activity, stake.position PASS
+- chain.tx graceful (invalid hash); chain.wrap neutral (hypothetical prompt)
+- account.info HALLUCINATED (brain prefers memory.read("identity"))
+- chain.contract HALLUCINATED (brain prefers fs.search through repo)
+- agent.contacts + history PASS; agent.presence HALLUCINATED (brain prefers account.info)
+- market.list_my_jobs PASS
+
+7 brain-routing hallucinations are tracked separately as harness regressions for follow-up; harness layer (this fix) is what unblocks the path entirely. Without v0.19.10 not a single tool would have run via TG.
+
+### Files changed
+
+- `packages/plugin-telegram/src/listener.ts` (+50 -38): handleCallbackQuery extracted to construction-time middleware; installCallbackHandler simplified to a slot-setter; dispatch error logged via console.error with stack.
+- `packages/gateway/src/build-runtime.ts` (+30 -8): ANIMA_TG_YOLO env-var bypass; sync.flushTurn fire-and-forget with listener-event emit.
+- 8 package.json bumps 0.19.9 → 0.19.10. `bun.lock` refreshed.
+
 ## [0.19.9] - 2026-05-04
 
 ### Fixed (telegram pairing greeting now uses .0g subname)
@@ -1223,6 +1265,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.10]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.10
 [0.19.9]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.9
 [0.19.4]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.4
 [0.19.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.3

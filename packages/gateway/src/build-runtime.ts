@@ -666,7 +666,11 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
           prompter: (req: PermissionRequest) => Promise<PermissionDecision>
         }
       ).prompter
-      const send = telegramApprovalBridge?.sendApproval.current
+      // Honor ANIMA_TG_YOLO=1 to skip the approval dance for end-to-end test
+      // matrices and trusted-operator scenarios. The flag is read on each turn
+      // so it can be flipped without restarting.
+      const tgYolo = process.env.ANIMA_TG_YOLO === '1'
+      const send = !tgYolo ? telegramApprovalBridge?.sendApproval.current : undefined
       if (send) {
         permission.setPrompter(async req => {
           const approvalId = idFactory()
@@ -727,14 +731,27 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
           chatId: input.chatId,
           length: response.length,
         })
-        let syncTx: string | undefined
-        try {
-          const r = await sync.flushTurn()
-          if (r.txHash) syncTx = r.txHash
-        } catch {
-          /* swallow */
-        }
-        return { response: response.length === 0 ? '(no reply)' : response, syncTx }
+        // Fire-and-forget memory sync to 0G Storage. Mainnet finality can take
+        // minutes; awaiting it would block the dispatch lock and stack up
+        // queued telegram messages behind a single in-flight turn. Surfacing
+        // the resulting tx via the listener-event channel keeps observability
+        // for downstream consumers without blocking the reply.
+        void sync
+          .flushTurn()
+          .then(r => {
+            if (r.txHash) {
+              events.publish('listener-event', {
+                kind: 'sync-flush',
+                source: 'telegram',
+                chatId: input.chatId,
+                txHash: r.txHash,
+              })
+            }
+          })
+          .catch(() => {
+            /* swallow — sync errors should never block reply */
+          })
+        return { response: response.length === 0 ? '(no reply)' : response }
       } finally {
         permission.setMode(previousMode)
         if (send && previousPrompterRef) permission.setPrompter(previousPrompterRef)

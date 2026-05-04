@@ -49,6 +49,9 @@ export class TelegramListener {
   private running = false
   private tokenLock: TokenLock | null = null
   private refreshTimer: ReturnType<typeof setInterval> | null = null
+  private approvalResolver:
+    | ((approvalId: string, choice: ApprovalChoice, fromUserId: number) => void)
+    | null = null
 
   constructor(opts: TelegramListenerOpts) {
     this.opts = opts
@@ -58,10 +61,52 @@ export class TelegramListener {
       quietPeriodMs: opts.debounceMs,
     })
     this.bot.on('message', ctx => this.onMessage(ctx))
+    // Register callback_query handler at construction time. grammY rejects
+    // late `bot.on()` registration once polling starts, so any approval
+    // resolver wiring must happen via the `approvalResolver` slot, not by
+    // calling `bot.on()` again. See approvalBridge.installCallbackHandler.
+    this.bot.on('callback_query:data', ctx => this.handleCallbackQuery(ctx))
     this.bot.catch(err => {
       const msg = err instanceof Error ? err.message : String(err)
       this.log(`grammy.catch: ${msg.slice(0, 200)}`)
     })
+  }
+
+  private async handleCallbackQuery(ctx: Context): Promise<void> {
+    const q = ctx.callbackQuery
+    if (!q) return
+    const parsed = parseCallbackData(q.data)
+    if (!parsed) {
+      try {
+        await ctx.answerCallbackQuery({ text: 'malformed approval callback' })
+      } catch {
+        /* ignore */
+      }
+      return
+    }
+    if (this.opts.allowedUserIds.length > 0 && !this.opts.allowedUserIds.includes(q.from.id)) {
+      try {
+        await ctx.answerCallbackQuery({ text: '⛔ You are not authorized to approve commands.' })
+      } catch {
+        /* ignore */
+      }
+      return
+    }
+    const resolver = this.approvalResolver
+    if (!resolver) {
+      try {
+        await ctx.answerCallbackQuery({ text: 'no approval pending' })
+      } catch {
+        /* ignore */
+      }
+      return
+    }
+    resolver(parsed.approvalId, parsed.choice, q.from.id)
+    try {
+      await ctx.answerCallbackQuery({ text: `✓ ${parsed.choice}` })
+    } catch {
+      /* ignore */
+    }
   }
 
   async start(): Promise<void> {
@@ -169,44 +214,20 @@ export class TelegramListener {
   }
 
   /**
-   * Register a single callback_query dispatcher. Parses + re-validates the
-   * clicker against `allowedUserIds`, then forwards to the caller's resolver
-   * which owns the pending-approval Map. grammy doesn't expose middleware
-   * unregister, so we no-op the returned function and rely on bot.stop()
-   * for teardown.
+   * Register the caller's approval resolver. The actual `bot.on('callback_query:data', ...)`
+   * middleware is installed once in the constructor (grammY rejects late
+   * registration after polling starts, so we cannot wire the handler lazily
+   * inside a dispatch turn). This method just swaps the resolver slot the
+   * pre-installed handler reads from. Returns a no-op uninstaller for
+   * back-compat with the previous API; teardown happens via `bot.stop()`.
    */
   private installCallbackHandler(
     onResolve: (approvalId: string, choice: ApprovalChoice, fromUserId: number) => void,
   ): () => void {
-    const handler = async (ctx: Context): Promise<void> => {
-      const q = ctx.callbackQuery
-      if (!q) return
-      const parsed = parseCallbackData(q.data)
-      if (!parsed) {
-        try {
-          await ctx.answerCallbackQuery({ text: 'malformed approval callback' })
-        } catch {
-          /* ignore */
-        }
-        return
-      }
-      if (this.opts.allowedUserIds.length > 0 && !this.opts.allowedUserIds.includes(q.from.id)) {
-        try {
-          await ctx.answerCallbackQuery({ text: '⛔ You are not authorized to approve commands.' })
-        } catch {
-          /* ignore */
-        }
-        return
-      }
-      onResolve(parsed.approvalId, parsed.choice, q.from.id)
-      try {
-        await ctx.answerCallbackQuery({ text: `✓ ${parsed.choice}` })
-      } catch {
-        /* ignore */
-      }
+    this.approvalResolver = onResolve
+    return () => {
+      this.approvalResolver = null
     }
-    this.bot.on('callback_query:data', handler)
-    return () => {}
   }
 
   /**
@@ -316,7 +337,8 @@ export class TelegramListener {
     } catch (err) {
       ok = false
       const msg = err instanceof Error ? err.message : String(err)
-      this.log(`dispatch failed: ${msg.slice(0, 200)}`)
+      const stack = err instanceof Error && err.stack ? `\n${err.stack}` : ''
+      console.error(`[telegram] dispatch failed: ${msg.slice(0, 500)}${stack}`)
       void reactError(this.bot, chatId, messageId)
       try {
         await this.bot.api.sendMessage(
