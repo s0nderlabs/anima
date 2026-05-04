@@ -4,6 +4,19 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.12] - 2026-05-04
+
+### Fixed
+
+- **TG MarkdownV2 rendering: brain markdown is now translated, not literally escaped.** Latent rendering bug present since v0.19.0 (and earlier in the v0.18.x train). The listener's `sendChunked` ran `escapeMarkdownV2` on the brain's reply, which blindly backslash-escaped every reserved char including formatting markers. Result: a brain reply like `Your balance: **0.0819 0G**. Wallet ` + "`0xd56b...9683`." + ` arrived in TG as `Your balance: \*\*0\.0819 0G\*\*\. Wallet \`0xd56b\.\.\.9683\`\.` — TG's MarkdownV2 parser treated the escaped backslashes as literal text and the user saw raw asterisks and backticks instead of bold + code formatting. ALL formatting in TG replies on v0.19.0–v0.19.11 was broken in this way. Fix: port hermes' `format_message` algorithm (gateway/platforms/telegram.py:1838-1993) as `formatMarkdownV2(text)`. The translator stashes fenced code blocks, inline code, and `[text](url)` links behind NUL-bracketed placeholders, rewrites `**bold**` → `*bold*`, `*italic*` → `_italic_`, `# heading` → bold, `~~strike~~` → `~strike~`, preserves `||spoiler||` and `> blockquote`, escapes remaining MarkdownV2 reserved chars in plain text, restores placeholders, then runs a safety pass for stray `( ) { }` (preserving link parens). `escapeMarkdownV2` and `stripMarkdownV2` remain available; only `sendChunked` switched.
+
+### Files changed
+
+- `packages/plugin-telegram/src/markdown.ts` (+108 lines): `formatMarkdownV2(content)` translator + private `escapeStrayParens` / `isInsideLinkUrl` helpers.
+- `packages/plugin-telegram/src/listener.ts`: `escapeMarkdownV2` → `formatMarkdownV2` import + the single sendChunked call site.
+- `packages/plugin-telegram/src/index.ts`: export `formatMarkdownV2` for downstream callers.
+- `packages/plugin-telegram/src/markdown.test.ts`: 16 new unit tests (32 markdown-suite total) covering plain text, **bold**, _italic_, headers, inline code, fenced code (with + without lang hint), backslash inside code, links, ~~strike~~, ||spoiler||, blockquote, stray paren escaping, link-paren preservation, real brain reply with mixed formatting.
+
 ## [0.19.11] - 2026-05-04
 
 ### Fixed
@@ -1275,6 +1288,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.12]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.12
 [0.19.11]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.11
 [0.19.10]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.10
 [0.19.9]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.9

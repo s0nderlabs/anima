@@ -4,7 +4,7 @@ import { escapeChunkSuffixForMarkdownV2, splitMessage } from './chunking'
 import { DebounceBuffer, type FlushedBatch } from './debounce'
 import { formatTelegramChannel } from './format'
 import { RateLimiter } from './limits'
-import { escapeMarkdownV2, isMarkdownParseError, stripMarkdownV2 } from './markdown'
+import { formatMarkdownV2, isMarkdownParseError, stripMarkdownV2 } from './markdown'
 import { formatPairingMessage } from './pairing-flow'
 import { reactError, reactProcessing, reactSuccess } from './reactions'
 import {
@@ -368,7 +368,7 @@ export class TelegramListener {
     const chunks = splitMessage(body)
     let firstSend = true
     for (const chunk of chunks) {
-      const md = escapeChunkSuffixForMarkdownV2(escapeMarkdownV2(chunk))
+      const md = escapeChunkSuffixForMarkdownV2(formatMarkdownV2(chunk))
       try {
         await sendWithRetry(() =>
           this.bot.api.sendMessage(chatId, md, {

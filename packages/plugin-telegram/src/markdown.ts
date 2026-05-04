@@ -1,10 +1,19 @@
-// MarkdownV2 escape + plain-text fallback.
+// MarkdownV2 escape + plain-text fallback + standard-markdown translator.
 //
-// Pattern from hermes telegram.py:84. The Bot API requires every reserved
-// character in MarkdownV2 entity ranges to be escaped with backslash, even
-// inside code blocks for some characters. This module exposes a single
-// `escapeMarkdownV2` function for the safe path and `stripMarkdownV2` for
-// the plain-text fallback when parse_error fires on send.
+// The brain emits standard CommonMark (`**bold**`, `*italic*`, `` `code` ``,
+// `# heading`, `[text](url)`, lists, blockquotes). Telegram MarkdownV2 has
+// different syntax AND requires every reserved character outside formatting
+// markers to be backslash-escaped. Sending the brain's text directly with
+// `parse_mode: 'MarkdownV2'` either parse-errors or renders escape characters
+// literally.
+//
+// `formatMarkdownV2(text)` is the canonical translator: protect code blocks
+// and links behind placeholders, convert markdown structures to MarkdownV2
+// equivalents, escape remaining reserved chars, restore placeholders. Ported
+// from hermes telegram.py:format_message.
+//
+// `escapeMarkdownV2(text)` and `stripMarkdownV2(text)` remain available for
+// callers that need raw escaping or a plain-text fallback when send fails.
 
 const MARKDOWN_V2_ESCAPE_REGEX = /([_*[\]()~`>#+\-=|{}.!\\])/g
 
@@ -21,15 +30,10 @@ export function escapeMarkdownV2(text: string): string {
  */
 export function stripMarkdownV2(text: string): string {
   let out = text
-  // Drop escape backslashes that were applied by escapeMarkdownV2
   out = out.replace(/\\([_*[\]()~`>#+\-=|{}.!\\])/g, '$1')
-  // Strip ||spoiler|| (must run before * and _ since `||` shares chars)
   out = out.replace(/\|\|([^|]+)\|\|/g, '$1')
-  // Strip *bold* (greedy-safe since markdown only allows single-line *bold*)
   out = out.replace(/\*([^*]+)\*/g, '$1')
-  // Strip _italic_
   out = out.replace(/(?:^|[\s])_([^_]+)_(?=[\s]|$)/g, ' $1')
-  // Strip ~strike~
   out = out.replace(/~([^~]+)~/g, '$1')
   return out
 }
@@ -47,4 +51,112 @@ export function isMarkdownParseError(err: unknown): boolean {
     lower.includes('cannot parse entities') ||
     (lower.includes('bad request') && (lower.includes('parse') || lower.includes('entities')))
   )
+}
+
+/**
+ * Translate standard CommonMark (what the brain emits) into Telegram MarkdownV2.
+ * Ports hermes `format_message` (telegram.py:1838-1993). Strategy: stash code
+ * spans and links behind NUL-bracketed placeholders, rewrite formatting
+ * markers, then escape every reserved char in the remaining plain text and
+ * restore placeholders. The trailing safety pass catches stray `( ) { }` that
+ * survived the dance, while leaving link parens intact.
+ */
+export function formatMarkdownV2(content: string): string {
+  if (!content) return content
+
+  const placeholders: string[] = []
+  const ph = (value: string): string => {
+    const key = `\x00PH${placeholders.length}\x00`
+    placeholders.push(value)
+    return key
+  }
+
+  let text = content
+
+  text = text.replace(/```(?:[^\n]*\n)?[\s\S]*?```/g, raw => {
+    const newlineIdx = raw.indexOf('\n', 3)
+    const headerEnd = newlineIdx === -1 ? 3 : newlineIdx + 1
+    const header = raw.slice(0, headerEnd)
+    const body = raw.slice(headerEnd, raw.length - 3)
+    const escaped = body.replace(/\\/g, '\\\\').replace(/`/g, '\\`')
+    return ph(`${header}${escaped}\`\`\``)
+  })
+
+  text = text.replace(/`[^`\n]+`/g, raw => ph(raw.replace(/\\/g, '\\\\')))
+
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, display: string, url: string) => {
+    const safeDisplay = escapeMarkdownV2(display)
+    const safeUrl = url.replace(/\\/g, '\\\\').replace(/\)/g, '\\)')
+    return ph(`[${safeDisplay}](${safeUrl})`)
+  })
+
+  text = text.replace(/^(#{1,6})\s+(.+)$/gm, (_match, _hashes, inner: string) => {
+    const cleaned = inner.trim().replace(/\*\*(.+?)\*\*/g, '$1')
+    return ph(`*${escapeMarkdownV2(cleaned)}*`)
+  })
+
+  text = text.replace(/\*\*(.+?)\*\*/g, (_match, inner: string) =>
+    ph(`*${escapeMarkdownV2(inner)}*`),
+  )
+
+  text = text.replace(/\*([^*\n]+)\*/g, (_match, inner: string) =>
+    ph(`_${escapeMarkdownV2(inner)}_`),
+  )
+
+  text = text.replace(/~~(.+?)~~/g, (_match, inner: string) => ph(`~${escapeMarkdownV2(inner)}~`))
+
+  text = text.replace(/\|\|(.+?)\|\|/g, (_match, inner: string) =>
+    ph(`||${escapeMarkdownV2(inner)}||`),
+  )
+
+  text = text.replace(/^(>{1,3}) (.+)$/gm, (_match, marker: string, body: string) =>
+    ph(`${marker} ${escapeMarkdownV2(body)}`),
+  )
+
+  text = escapeMarkdownV2(text)
+
+  for (let i = placeholders.length - 1; i >= 0; i--) {
+    const value = placeholders[i] ?? ''
+    text = text.replace(`\x00PH${i}\x00`, value)
+  }
+
+  text = escapeStrayParens(text)
+
+  return text
+}
+
+/**
+ * Last-ditch pass over `( ) { }` that survived the placeholder dance. Runs
+ * outside code spans only — anything inside `` `…` `` or ``` ```…``` ``` is
+ * preserved verbatim. Mirrors hermes safety net at telegram.py:1957-1991.
+ */
+function escapeStrayParens(text: string): string {
+  const segments = text.split(/(```[\s\S]*?```|`[^`]+`)/g)
+  return segments
+    .map((seg, idx) => {
+      if (idx % 2 === 1) return seg
+      return seg.replace(/[(){}]/g, (ch, offset: number) => {
+        if (offset > 0 && seg[offset - 1] === '\\') return ch
+        if (ch === '(' && offset > 0 && seg[offset - 1] === ']') return ch
+        if (ch === ')' && isInsideLinkUrl(seg, offset)) return ch
+        return `\\${ch}`
+      })
+    })
+    .join('')
+}
+
+function isInsideLinkUrl(seg: string, closeIdx: number): boolean {
+  let depth = 0
+  for (let j = closeIdx - 1; j >= Math.max(closeIdx - 2000, 0); j--) {
+    const ch = seg[j]
+    if (ch === ')') {
+      depth += 1
+      continue
+    }
+    if (ch !== '(') continue
+    depth -= 1
+    if (depth >= 0) continue
+    return j > 0 && seg[j - 1] === ']'
+  }
+  return false
 }

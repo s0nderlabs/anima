@@ -48,7 +48,12 @@ export {
   type ParsedCallback,
   type ResolveOutcome,
 } from './approval-keyboard'
-export { escapeMarkdownV2, isMarkdownParseError, stripMarkdownV2 } from './markdown'
+export {
+  escapeMarkdownV2,
+  formatMarkdownV2,
+  isMarkdownParseError,
+  stripMarkdownV2,
+} from './markdown'
 export { escapeChunkSuffixForMarkdownV2, splitMessage, type SplitOpts } from './chunking'
 export type { TelegramApprovalBridge, ApprovalChoiceKind } from './types'
 export { DebounceBuffer } from './debounce'

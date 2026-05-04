@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test'
-import { escapeMarkdownV2, isMarkdownParseError, stripMarkdownV2 } from './markdown'
+import {
+  escapeMarkdownV2,
+  formatMarkdownV2,
+  isMarkdownParseError,
+  stripMarkdownV2,
+} from './markdown'
 
 describe('escapeMarkdownV2', () => {
   it('escapes all reserved characters', () => {
@@ -45,6 +50,98 @@ describe('stripMarkdownV2', () => {
 
   it('strips a chain of formatting on one line', () => {
     expect(stripMarkdownV2('*bold* and ~strike~ together')).toBe('bold and strike together')
+  })
+})
+
+describe('formatMarkdownV2', () => {
+  it('passes through plain text but escapes reserved chars', () => {
+    expect(formatMarkdownV2('your balance is 0.0819 0G.')).toBe('your balance is 0\\.0819 0G\\.')
+  })
+
+  it('translates **bold** into MarkdownV2 *bold*', () => {
+    expect(formatMarkdownV2('**balance**: 0.08 0G')).toBe('*balance*: 0\\.08 0G')
+  })
+
+  it('translates *italic* into MarkdownV2 _italic_', () => {
+    expect(formatMarkdownV2('see *details* below.')).toBe('see _details_ below\\.')
+  })
+
+  it('keeps ** bold-with-inner-text translated', () => {
+    expect(formatMarkdownV2('**Your balance**: 0.0819 0G')).toBe('*Your balance*: 0\\.0819 0G')
+  })
+
+  it('translates headers into bold', () => {
+    expect(formatMarkdownV2('# Title\nbody.')).toBe('*Title*\nbody\\.')
+    expect(formatMarkdownV2('## Sub Title\nmore.')).toBe('*Sub Title*\nmore\\.')
+  })
+
+  it('strips redundant bold markers inside headers', () => {
+    expect(formatMarkdownV2('# **Hello**')).toBe('*Hello*')
+  })
+
+  it('preserves inline code, escaping only backslashes inside', () => {
+    expect(formatMarkdownV2('use `0.5 0G` as the threshold')).toBe('use `0.5 0G` as the threshold')
+  })
+
+  it('preserves fenced code blocks, escaping backticks and backslashes inside', () => {
+    expect(formatMarkdownV2('```\nfoo()\nbar\n```')).toBe('```\nfoo()\nbar\n```')
+  })
+
+  it('preserves fenced code blocks with language hint', () => {
+    expect(formatMarkdownV2('```js\nconst x = 1;\n```')).toBe('```js\nconst x = 1;\n```')
+  })
+
+  it('escapes backslashes inside fenced code', () => {
+    expect(formatMarkdownV2('```\npath\\to\nfile\n```')).toBe('```\npath\\\\to\nfile\n```')
+  })
+
+  it('translates links with escaped display + URL', () => {
+    expect(formatMarkdownV2('[example](https://example.com/path)')).toBe(
+      '[example](https://example.com/path)',
+    )
+  })
+
+  it('escapes display text but not URL parens-friendly chars', () => {
+    expect(formatMarkdownV2('see [the docs](https://example.com)')).toBe(
+      'see [the docs](https://example.com)',
+    )
+  })
+
+  it('translates ~~strike~~ into MarkdownV2 ~strike~', () => {
+    expect(formatMarkdownV2('~~done~~')).toBe('~done~')
+  })
+
+  it('preserves ||spoiler||', () => {
+    expect(formatMarkdownV2('||hidden||')).toBe('||hidden||')
+  })
+
+  it('preserves blockquote markers', () => {
+    expect(formatMarkdownV2('> a quote here.')).toBe('> a quote here\\.')
+  })
+
+  it('escapes stray parens and braces in plain text', () => {
+    expect(formatMarkdownV2('foo (bar) baz')).toBe('foo \\(bar\\) baz')
+    expect(formatMarkdownV2('use {x} for substitution')).toBe('use \\{x\\} for substitution')
+  })
+
+  it('does not escape parens that belong to a translated link', () => {
+    expect(formatMarkdownV2('see [docs](https://example.com/foo)')).toBe(
+      'see [docs](https://example.com/foo)',
+    )
+  })
+
+  it('handles real brain reply with mixed formatting', () => {
+    const input = 'Your balance: **0.0819 0G**. Wallet `0xd56b...9683`.'
+    const expected = 'Your balance: *0\\.0819 0G*\\. Wallet `0xd56b...9683`\\.'
+    expect(formatMarkdownV2(input)).toBe(expected)
+  })
+
+  it('handles empty input', () => {
+    expect(formatMarkdownV2('')).toBe('')
+  })
+
+  it('escapes backslashes inside inline code', () => {
+    expect(formatMarkdownV2('see `a\\b` for the regex')).toBe('see `a\\\\b` for the regex')
   })
 })
 
