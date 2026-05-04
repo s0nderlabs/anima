@@ -124,6 +124,7 @@ export async function runResume(opts: ResumeOpts = {}): Promise<void> {
       iNFTRef: { contract: contractAddress, tokenId },
       iNFTNetwork: config.network as AnimaNetwork,
       brain: { provider: config.brain.provider as Address, model: config.brain.model ?? '' },
+      subname: config.subname,
       onProgress: msg => sBox.message(msg),
     })
     if (result.alreadyReady) {

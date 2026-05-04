@@ -220,6 +220,7 @@ export async function runUpgrade(opts: UpgradeOpts = {}): Promise<void> {
       sandboxEndpoint: config.sandbox.endpoint,
       iNFTNetwork: config.network,
       brain: { provider: config.brain.provider as Address, model: config.brain.model ?? '' },
+      subname: config.subname,
       resolved,
     })
   }
@@ -237,6 +238,8 @@ interface InPlaceUpgradeArgs {
   sandboxEndpoint: string
   iNFTNetwork: AnimaNetwork
   brain: { provider: Address; model: string }
+  /** Optional .0g subname forwarded into the harness handoff RuntimeConfig. */
+  subname?: string | null
   resolved: ResolvedRef
 }
 
@@ -425,6 +428,7 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
       iNFTRef: { contract: args.contractAddress, tokenId: args.tokenId },
       iNFTNetwork: args.iNFTNetwork,
       brain: args.brain,
+      subname: args.subname,
       telegramSecrets: telegramSecretsPlain,
       onProgress: msg => sBox.message(msg),
     })
@@ -505,6 +509,7 @@ async function runReprovisionUpgrade(args: ReprovisionUpgradeArgs): Promise<void
       iNFTNetwork: args.config.network,
       name: args.config.subname || 'anima',
       ref: args.resolved.ref,
+      subname: args.config.subname,
       onProgress: msg => sBox.message(msg),
     })
     sBox.stop(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`)

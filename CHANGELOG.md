@@ -4,6 +4,32 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.9] - 2026-05-04
+
+### Fixed (telegram pairing greeting now uses .0g subname)
+
+- **Pairing message addresses the agent by registered name, not hex slug.** Reading `~/.hermes/hermes-agent/{hermes_cli/setup.py:1720, gateway.py:1939}` confirmed hermes ports the same 8-char pairing primitive but threads the bot's friendly identity through. Anima previously hardcoded `agent-${agentId.slice(0, 8)}` in `packages/gateway/src/build-runtime.ts:413`, leaking a debug placeholder into a user-facing surface (`Hi! I'm agent-647702fe and I don't recognize you yet.`). The .0g subname is captured during `anima init` and rendered into `anima.config.ts` via `writeConfigTs(..., { subname })` but never threaded into the gateway's `RuntimeConfig`. Fixed by adding `subname?: string | null` to `RuntimeConfig`, plumbing it through `local-entrypoint.ts` (local mode) + `sandbox-provision.ts` provision envelope (sandbox mode) + every caller (`init.ts`, `deploy.ts`, `upgrade.ts`, `resume.ts`). New `resolveAgentName(subname, agentId)` helper trims whitespace and falls back cleanly. Greeting now reads `Hi! I'm specter and I don't recognize you yet.` Verified live on the running gateway daemon: `[telegram] listener.start() called for @specter`.
+
+### Changed (`anima telegram setup` UX, hermes-aligned)
+
+- **3-mode auth picker, hint @userinfobot.** Previously `anima telegram setup` walked operator from token entry directly to "Allowed Telegram user IDs (comma-separated; blank = pairing-only mode)" prompt. Hermes's `_setup_telegram` (`hermes_cli/setup.py:1720`) and gateway-setup auth-block (`hermes_cli/gateway.py:1939`) both surface a 3-way choice instead. Anima now mirrors hermes: post-token, the wizard asks "How should unauthorized DMs to the bot be handled?" via clack `select` with explicit Pair / Allowlist options. Allowlist branch validates inputs, echoes them back via `note`, hints `@userinfobot` for finding numeric IDs. Pair branch confirms default-deny + the `anima pairing approve telegram <CODE>` workflow. Same encrypt-and-save plumbing underneath; only the prompt sequence is hermes-shaped. Helper extracted to `packages/cli/src/commands/init/telegram-step.ts` so the same logic powers `anima telegram setup` AND the new init Phase E (below).
+
+### Added (Telegram bot setup folded into `anima init` Phase E)
+
+- **Single-command path: agent + bot live after `anima init` finishes.** Hermes folds messaging-platform setup into `hermes gateway setup` Section 4. Anima now mirrors that: post-Phase-D summary (after iNFT mint + subname registration + ledger funding + sandbox provision), the wizard asks "Configure a Telegram bot for this agent now? (recommended)" via `confirm`. If yes, `runTelegramStep` runs inline using the still-unlocked operator wallet (no second Touch ID prompt), reusing the same primitives standalone setup uses. Result is appended to the summary block as `bot @<username> (mode: pair|allowlist)`. Failures are non-fatal: identity / iNFT / subname state is preserved and the operator can re-run `anima telegram setup` later. Operator close happens after the optional TG branch regardless.
+
+### Internal
+
+- New `packages/gateway/src/build-runtime.ts:resolveAgentName(subname, agentId)` pure helper, exported for testability. Six unit tests cover the precedence (subname → trim → fallback) in `packages/gateway/src/build-runtime.test.ts`.
+- New `packages/cli/src/commands/init/telegram-step.ts` extracted from the old `telegram-setup.ts` body. `runTelegramStep({ signer, agentId, agentAddress, configPath, config, network })` is content-only; caller (init or telegram-setup) owns intro/outro framing.
+- 808 unit tests pass (up from 803). Lint + typecheck clean.
+
+### What does NOT change
+
+- Pairing primitive itself: 8 chars, 1h TTL, 600s rate limit, 3 max pending, alphabet `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no I/L/O/0/1).
+- Allowlist precedence: allowlist → paired → default-deny. Open-access mode (hermes's `GATEWAY_ALLOW_ALL_USERS`) intentionally not added; default-deny is the locked posture for the hackathon demo path.
+- Sandbox-mode Telegram handoff in `chat.tsx` provision envelope unchanged except for the additive `subname` field. Old gateways missing the field fall back to `agent-${slice}` as before.
+
 ## [0.19.8] - 2026-05-03
 
 ### Fixed (pairing dir mismatch between gateway daemon and CLI)
@@ -1197,6 +1223,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.9]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.9
 [0.19.4]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.4
 [0.19.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.3
 [0.19.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.2

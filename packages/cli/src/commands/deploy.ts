@@ -121,6 +121,7 @@ export async function runDeploy(): Promise<void> {
       iNFTNetwork: config.network,
       name: config.subname || 'anima',
       ref: process.env.ANIMA_BOOTSTRAP_REF ?? 'main',
+      subname: config.subname,
       onProgress: msg => sBox.message(msg),
     })
     sBox.stop(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`)

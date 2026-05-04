@@ -64,6 +64,9 @@ interface MinimalConfig {
     operator: Address
   }
   network: string
+  /** Optional .0g subname (forwarded into RuntimeConfig.subname so the TG
+   * pairing greeting can address the agent by its registered name). */
+  subname?: string | null
   [key: string]: unknown
 }
 

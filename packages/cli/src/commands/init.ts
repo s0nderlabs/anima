@@ -518,6 +518,7 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
         iNFTNetwork: network,
         name: requestedSubname || 'anima',
         ref: process.env.ANIMA_BOOTSTRAP_REF ?? 'main',
+        subname: registeredSubname,
         onProgress: msg => sBox.message(msg),
       })
       await updateWizardState(paths.dir, draft => {
@@ -604,6 +605,45 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     subname: registeredSubname,
   })
 
+  // ─── Phase E: optional Telegram bot setup ───────────────────────────────
+  //
+  // Hermes folds messaging-platform setup into `hermes gateway setup` (Section
+  // 4 of the wizard, post-identity). We mirror that: fold it into init's tail
+  // so `anima init` produces a working agent + working bot in one shot,
+  // reusing the still-unlocked operator wallet (no second Touch ID prompt).
+
+  let telegramConfigured: { botUsername: string; mode: string } | null = null
+  if (mintedTokenId !== null && contractAddress) {
+    const tgChoice = await confirm({
+      message: 'Configure a Telegram bot for this agent now? (recommended)',
+      initialValue: true,
+    })
+    if (!isCancel(tgChoice) && tgChoice === true) {
+      try {
+        const { runTelegramStep } = await import('./init/telegram-step')
+        const tgResult = await runTelegramStep({
+          signer: operator,
+          agentId: finalAgentId,
+          agentAddress: agent.address as Address,
+          configPath,
+          config: cfg,
+          network,
+        })
+        if (tgResult.configured && tgResult.botUsername && tgResult.modeUsed) {
+          telegramConfigured = {
+            botUsername: tgResult.botUsername,
+            mode: tgResult.modeUsed,
+          }
+        }
+      } catch (e) {
+        note(
+          `Telegram step failed: ${(e as Error).message.slice(0, 200)}\nIdentity + iNFT + subname are safe. Re-run \`anima telegram setup\` later.`,
+          'non-fatal',
+        )
+      }
+    }
+  }
+
   await operator.close?.()
 
   // ─── Phase D: summary ───────────────────────────────────────────────────
@@ -625,7 +665,13 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   if (registeredSubname) lines.push(`  subname    ${registeredSubname}.anima.0g (mainnet)`)
   if (modelPick) lines.push(`  brain      ${modelPick.model ?? '?'} (${modelPick.provider})`)
   if (!skipLedger) lines.push(`  ledger     ${ledgerSize} 0G`)
-  lines.push('', 'Next: `anima` to chat · `anima status` for health · `anima topup` to add funds')
+  if (telegramConfigured) {
+    lines.push(`  bot        @${telegramConfigured.botUsername} (mode: ${telegramConfigured.mode})`)
+  }
+  const nextSteps = telegramConfigured
+    ? 'Next: `anima` to chat · DM the bot on Telegram · `anima status` for health'
+    : 'Next: `anima` to chat · `anima telegram setup` for the bot · `anima topup` to add funds'
+  lines.push('', nextSteps)
   outro(lines.join('\n'))
 }
 

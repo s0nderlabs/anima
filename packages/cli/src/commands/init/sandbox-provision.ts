@@ -53,6 +53,9 @@ export interface SandboxProvisionOpts {
   plugins?: AnimaPlugin[]
   /** Optional system-prompt append. */
   promptAppend?: string
+  /** Optional .0g subname (e.g. "specter") forwarded into RuntimeConfig so the
+   * harness's TG pairing greeting addresses the agent by registered name. */
+  subname?: string | null
   /** Network the iNFT lives on (mainnet for hybrid path 1). */
   iNFTNetwork: AnimaNetwork
   /** Sandbox name (sent to provider; surfaces in dashboards). */
@@ -272,6 +275,7 @@ export async function runSandboxProvision(
     brain: opts.brain,
     plugins: opts.plugins,
     promptAppend: opts.promptAppend,
+    subname: opts.subname,
     onProgress: progress,
   })
 
@@ -307,6 +311,9 @@ export interface HandoffAgentToGatewayOpts {
   brain: { provider: Address; model: string }
   plugins?: AnimaPlugin[]
   promptAppend?: string
+  /** Optional .0g subname (e.g. "specter") forwarded into RuntimeConfig so the
+   * harness's TG pairing greeting addresses the agent by registered name. */
+  subname?: string | null
   /**
    * Optional plaintext harness secrets (telegram bot token + allowlist) to
    * ship via a second ECIES envelope. The handoff helper ECIES-encrypts to
@@ -360,6 +367,7 @@ export async function handoffAgentToGateway(
     plugins: opts.plugins ?? ['system', 'comms', 'onchain'],
     permissions: pickPermissionMode(),
     promptAppend: opts.promptAppend,
+    subname: opts.subname,
   }
   await opts.sandboxClient.provision(
     {
@@ -624,6 +632,9 @@ export interface ResumeArchivedSandboxOpts {
   brain: { provider: Address; model: string }
   plugins?: AnimaPlugin[]
   promptAppend?: string
+  /** Optional .0g subname (e.g. "specter") forwarded into RuntimeConfig so the
+   * harness's TG pairing greeting addresses the agent by registered name. */
+  subname?: string | null
   onProgress?: (msg: string) => void
   ensureStartedOpts?: EnsureSandboxStartedOpts
 }
@@ -693,6 +704,7 @@ export async function resumeArchivedSandbox(
     brain: opts.brain,
     plugins: opts.plugins,
     promptAppend: opts.promptAppend,
+    subname: opts.subname,
     onProgress: progress,
   })
 

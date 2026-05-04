@@ -25,7 +25,7 @@
     },
     "packages/cli": {
       "name": "@s0nderlabs/anima",
-      "version": "0.19.8",
+      "version": "0.19.9",
       "bin": {
         "anima": "./bin/anima",
       },
@@ -50,7 +50,7 @@
     },
     "packages/core": {
       "name": "@s0nderlabs/anima-core",
-      "version": "0.19.8",
+      "version": "0.19.9",
       "dependencies": {
         "@0gfoundation/0g-ts-sdk": "1.2.6",
         "@0glabs/0g-serving-broker": "^0.7.5",
@@ -69,7 +69,7 @@
     },
     "packages/gateway": {
       "name": "@s0nderlabs/anima-gateway",
-      "version": "0.19.8",
+      "version": "0.19.9",
       "bin": {
         "anima-gateway": "./bin/anima-gateway",
         "anima-gateway-local": "./bin/anima-gateway-local",
@@ -86,7 +86,7 @@
     },
     "packages/plugin-comms": {
       "name": "@s0nderlabs/anima-plugin-comms",
-      "version": "0.19.8",
+      "version": "0.19.9",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "eth-crypto": "^4.0.0",
@@ -96,7 +96,7 @@
     },
     "packages/plugin-onchain": {
       "name": "@s0nderlabs/anima-plugin-onchain",
-      "version": "0.19.8",
+      "version": "0.19.9",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "viem": "^2.21.55",
@@ -105,7 +105,7 @@
     },
     "packages/plugin-system": {
       "name": "@s0nderlabs/anima-plugin-system",
-      "version": "0.19.8",
+      "version": "0.19.9",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "zod": "^3.24.1",
@@ -113,7 +113,7 @@
     },
     "packages/plugin-telegram": {
       "name": "@s0nderlabs/anima-plugin-telegram",
-      "version": "0.19.8",
+      "version": "0.19.9",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "grammy": "^1.42.0",

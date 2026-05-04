@@ -115,6 +115,17 @@ const PERMISSION_MODE_MAP: Record<NonNullable<RuntimeConfig['permissions']>, Per
   yolo: 'off',
 }
 
+/**
+ * Resolve the user-facing agent name. Sourced from `config.subname` when
+ * registered (e.g. "specter" for `specter.anima.0g`); falls back to a
+ * `agent-<8 hex>` slug. Used by the TG pairing greeting so unknown DM users
+ * see "Hi! I'm specter and I don't recognize you yet." instead of the slug.
+ */
+export function resolveAgentName(subname: string | null | undefined, agentId: string): string {
+  const trimmed = typeof subname === 'string' ? subname.trim() : ''
+  return trimmed.length > 0 ? trimmed : `agent-${agentId.slice(0, 8)}`
+}
+
 function describePermissionCheck(call: { name: string; args: unknown }): PermissionRequest | null {
   const a = (call.args ?? {}) as Record<string, unknown>
   const str = (v: unknown): string => (typeof v === 'string' ? v : '')
@@ -410,7 +421,7 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
     telegram = {
       botToken: tg.botToken,
       allowedUserIds: tg.allowedUserIds,
-      agentName: `agent-${agentId.slice(0, 8)}`,
+      agentName: resolveAgentName(config.subname, agentId),
       pairingStore,
       dispatchUserMessage: async input => {
         const cb = telegramDispatchSlot?.current

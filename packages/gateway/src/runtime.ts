@@ -25,6 +25,13 @@ export interface RuntimeConfig {
   permissions?: 'off' | 'prompt' | 'strict' | 'yolo'
   /** Optional system-prompt append from the operator. */
   promptAppend?: string
+  /**
+   * Optional .0g subname (e.g. "specter" for `specter.anima.0g`). Used by the
+   * telegram pairing greeting to address the agent by its registered name
+   * instead of the hex-slug fallback. Sourced from `config.subname` in the
+   * loaded anima.config.ts.
+   */
+  subname?: string | null
 }
 
 export interface ChatTurnInput {
