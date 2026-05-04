@@ -81,11 +81,13 @@ const DEFAULT_APT_PACKAGES: readonly string[] = [
   'unzip',
   'ca-certificates',
   'git',
-  'xvfb',
-  'chromium',
   // psmisc provides `fuser` which the harness launch step uses to free port
   // 8080 if Daytona's snapshot ships a default service squatting on it.
   'psmisc',
+  // xvfb retained as headed-browser fallback insurance; agent-browser's
+  // installed Chrome-for-Testing runs headless natively but xvfb is cheap
+  // (~5MB) and keeps the door open for visual debugging.
+  'xvfb',
 ] as const
 
 const PROGRESS_LOG = '/tmp/anima-bootstrap-progress.log'
@@ -145,6 +147,17 @@ export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBoots
     `retry 'git clone' git_clone_one || { echo "git-clone-failed" > ${FAIL_MARKER}; exit 14; }`,
     `cd "$ANIMA_DIR" && git remote set-url origin ${shQuote(repoUrl)}`,
     `retry 'bun deps' bun install --frozen-lockfile || { echo "bun-install-failed" > ${FAIL_MARKER}; exit 17; }`,
+    '',
+    // Install Chromium for browser.* tools. `agent-browser install` downloads
+    // a Chrome-for-Testing build + Linux system libs (`--with-deps`).
+    // `doctor` exits 0 only when the install state is healthy, so re-runs are
+    // no-ops on container restarts that share a persisted volume.
+    'echo "[browser deps]"',
+    'if bunx agent-browser doctor >/dev/null 2>&1; then',
+    '  echo "[browser deps] already installed, skipping"',
+    'else',
+    `  retry 'browser deps' bunx agent-browser install --with-deps || { echo "browser-install-failed" > ${FAIL_MARKER}; exit 19; }`,
+    'fi',
     '',
     'mkdir -p "$HOME/anima-logs" "$HOME/workspace"',
     '',
@@ -233,5 +246,6 @@ export const BOOTSTRAP_FAIL_KEYWORDS = [
   'apt-install-failed',
   'bun-install-failed',
   'git-clone-failed',
+  'browser-install-failed',
   'harness-died-early',
 ] as const

@@ -1,6 +1,6 @@
 {
   "name": "anima",
-  "version": "0.19.15",
+  "version": "0.19.16",
   "private": true,
   "type": "module",
   "description": "First fully on-chain sovereign agent harness on 0G",
@@ -36,6 +36,7 @@
     "typescript": "^5.7.2"
   },
   "dependencies": {
-    "@0gfoundation/0g-ts-sdk": "1.2.6"
+    "@0gfoundation/0g-ts-sdk": "1.2.6",
+    "agent-browser": "^0.26.0"
   }
 }

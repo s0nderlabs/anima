@@ -1,6 +1,6 @@
 {
   "name": "@s0nderlabs/anima-plugin-system",
-  "version": "0.19.15",
+  "version": "0.19.16",
   "type": "module",
   "description": "Filesystem + shell + browser + skills tools plugin for anima",
   "license": "MIT",
@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@s0nderlabs/anima-core": "workspace:*",
+    "agent-browser": "^0.26.0",
     "zod": "^3.24.1"
   }
 }

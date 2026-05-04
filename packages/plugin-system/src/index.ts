@@ -122,10 +122,8 @@ const plugin: NativePlugin = {
         agentDir: ctx.agentDir,
       }) as ToolDef,
     ]
-    // Browser tools require the agent-browser Rust binary AND a reachable
-    // qutebrowser instance on the host. In Linux Daytona sandbox containers
-    // neither is present, so we skip registration entirely rather than
-    // ship broken tools to the brain. See `isBrowserAvailable`.
+    // Skip browser.* registration when the agent-browser binary is absent
+    // (dev installs that skipped `bun install`).
     if (isBrowserAvailable()) {
       tools.push(
         makeBrowserNavigate({}) as ToolDef,

@@ -4,6 +4,30 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.16] - 2026-05-05
+
+### Fixed
+
+- **Browser tools work inside 0G Sandbox containers.** The `agent-browser` CLI was previously brew-only on macOS, gated off in Linux Daytona containers via an `IS_CONTAINER` short-circuit. v0.19.16 adds `agent-browser` as a workspace npm dependency (`^0.26.0`, vercel-labs/agent-browser, same tool as the brew formula) and runs `bunx agent-browser install --with-deps` during container bootstrap so headless Chrome-for-Testing is provisioned alongside the harness. The container short-circuit is gone; `isBrowserAvailable()` now returns true wherever the binary resolves. Mac host + Linux container share one code path. The first sandbox brain turn that asks "open hacker news" now actually drives a browser instead of returning "host-only" honesty.
+
+### Changed
+
+- **`findAgentBrowser` resolution order: `node_modules/.bin` first, PATH walk second, brew/system dirs third.** Mac users who had a brew install ahead of the npm dep get the npm-pinned version after `bun install` (matches the workspace's lock). Path walk preserved for legacy installs.
+- **Bootstrap apt list drops standalone `chromium`.** Playwright's `--with-deps` install pulls in its own Chrome-for-Testing build + the libwoff/libnss system libs Chromium needs. Saves ~80MB of unused apt chromium in the sandbox snapshot.
+- **`findAgentBrowser` accepts an optional `cwdOverride` test hook.** Production callers unchanged. Lets the new browser.test.ts assert the node_modules-first priority via a temp-dir stub without monkey-patching `process.cwd`.
+
+### Added
+
+- `agent-browser` ^0.26.0 dependency at workspace root + `packages/plugin-system/package.json` (declarative ownership; bun hoist puts the binary at the workspace `node_modules/.bin/`).
+- `bunx agent-browser doctor` idempotency probe in both `bootstrap.ts` and `upgrade-script.ts`. Skip the install step on subsequent upgrades when Chrome-for-Testing is already provisioned.
+- `BOOTSTRAP_FAIL_KEYWORDS` and `UPGRADE_FAIL_KEYWORDS` get a new `'browser-install-failed'` entry so the deploy/upgrade poll loops surface install failures distinctly from generic apt or bun failures.
+
+### Internal
+
+- 4 new browser test cells (node_modules-first priority, container-env-no-longer-gates, two re-grouped existing tests). Bootstrap + upgrade-script tests get new "browser deps step is doctor-guarded + ordered after bun install" assertions. Total workspace 858 (up from 854).
+- `packages/plugin-system/src/browser.ts` shrinks net ~25 lines: IS_CONTAINER constant deleted, two ternary error branches collapsed into single messages, npx fallback comment removed.
+- `packages/plugin-system/src/index.ts` browser registration comment updated to reflect the new install path.
+
 ## [0.19.15] - 2026-05-04
 
 ### Added
@@ -1344,6 +1368,8 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.16]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.16
+[0.19.15]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.15
 [0.19.14]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.14
 [0.19.13]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.13
 [0.19.12]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.12

@@ -85,6 +85,20 @@ describe('buildUpgradeScript', () => {
     )
   })
 
+  test('browser deps step uses doctor-guarded idempotent install after bun deps', () => {
+    const inner = decodeInner()
+    expect(inner).toContain('[browser deps]')
+    expect(inner).toContain('bunx agent-browser doctor')
+    expect(inner).toMatch(
+      /retry 'browser deps' bunx agent-browser install --with-deps \|\| \{ echo "browser-install-failed"/,
+    )
+    // Order: bun install runs before browser deps install.
+    const bunIdx = inner.indexOf("retry 'bun deps'")
+    const browserIdx = inner.indexOf("retry 'browser deps'")
+    expect(bunIdx).toBeGreaterThan(0)
+    expect(browserIdx).toBeGreaterThan(bunIdx)
+  })
+
   test('clears stale agent locks after killing prior harness, before relaunch', () => {
     const inner = decodeInner()
     // The kill→clear-locks→relaunch ordering is critical: we wipe locks
@@ -130,6 +144,7 @@ describe('buildUpgradeScript', () => {
     expect(inner).toContain('git-fetch-failed')
     expect(inner).toContain('git-checkout-failed')
     expect(inner).toContain('bun-install-failed')
+    expect(inner).toContain('browser-install-failed')
     expect(inner).toContain('harness-died-early')
     expect(inner).toContain(UPGRADE_FAIL_MARKER)
   })

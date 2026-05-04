@@ -87,6 +87,17 @@ export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeSc
     `retry 'git checkout' git checkout ${shQuote(opts.ref)} || { echo "git-checkout-failed" > ${FAIL_MARKER}; exit 22; }`,
     `retry 'bun deps' bun install --frozen-lockfile || { echo "bun-install-failed" > ${FAIL_MARKER}; exit 23; }`,
     '',
+    // Same browser-deps install as bootstrap. doctor probe makes upgrades
+    // a no-op on the common case (Chromium already installed in the
+    // container's persistent volume); only fresh provisions or a manual
+    // wipe trigger the slow apt + Chromium download path.
+    'echo "[browser deps]"',
+    'if bunx agent-browser doctor >/dev/null 2>&1; then',
+    '  echo "[browser deps] already installed, skipping"',
+    'else',
+    `  retry 'browser deps' bunx agent-browser install --with-deps || { echo "browser-install-failed" > ${FAIL_MARKER}; exit 25; }`,
+    'fi',
+    '',
     'echo "[restart gateway]"',
     'pkill -f anima-harness 2>/dev/null || true',
     'pkill -f anima-gateway 2>/dev/null || true',
@@ -166,5 +177,6 @@ export const UPGRADE_FAIL_KEYWORDS = [
   'git-fetch-failed',
   'git-checkout-failed',
   'bun-install-failed',
+  'browser-install-failed',
   'harness-died-early',
 ] as const

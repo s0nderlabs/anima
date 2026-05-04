@@ -42,7 +42,7 @@ describe('buildBootstrapScript', () => {
   test('inner subshell (base64-decoded) carries apt + bun + git + harness launch', () => {
     const inner = decodeInner()
     expect(inner).toContain('sudo -n apt-get update -qq')
-    expect(inner).toMatch(/sudo -n apt-get install -y -qq .*chromium/)
+    expect(inner).toMatch(/sudo -n apt-get install -y -qq .*xvfb/)
     expect(inner).toContain('curl -fsSL https://bun.sh/install')
     expect(inner).toContain('git clone --depth 1 --branch')
     expect(inner).toContain('bun install --frozen-lockfile')
@@ -151,19 +151,37 @@ describe('buildBootstrapScript', () => {
     expect(inner).toContain("export HARNESS_PORT='9090'")
   })
 
-  test('apt list defaults include chromium + xvfb + git', () => {
+  test('apt list defaults include xvfb + git + psmisc but NOT chromium (Playwright bundles its own)', () => {
     const inner = decodeInner()
-    expect(inner).toMatch(/sudo -n apt-get install .* chromium/)
     expect(inner).toMatch(/sudo -n apt-get install .* xvfb/)
     expect(inner).toMatch(/sudo -n apt-get install .* git/)
+    expect(inner).toMatch(/sudo -n apt-get install .* psmisc/)
+    // v0.19.16: standalone chromium dropped — agent-browser install pulls
+    // its own Chrome-for-Testing build.
+    expect(inner).not.toMatch(/sudo -n apt-get install -y -qq[^\n]*\bchromium\b/)
   })
 
   test('extra apt packages are appended and deduped', () => {
     const inner = decodeInner({ ...baseOpts, extraAptPackages: ['ffmpeg', 'chromium'] })
     const aptLine = inner.split('\n').find(l => l.includes('apt-get install -y -qq'))!
     expect(aptLine).toContain('ffmpeg')
+    expect(aptLine).toContain('chromium')
     const chromiumCount = (aptLine.match(/chromium/g) ?? []).length
     expect(chromiumCount).toBe(1)
+  })
+
+  test('browser deps step uses doctor-guarded idempotent install after bun deps', () => {
+    const inner = decodeInner()
+    expect(inner).toContain('[browser deps]')
+    expect(inner).toContain('bunx agent-browser doctor')
+    expect(inner).toMatch(
+      /retry 'browser deps' bunx agent-browser install --with-deps \|\| \{ echo "browser-install-failed"/,
+    )
+    // Order: bun install runs before browser deps install.
+    const bunIdx = inner.indexOf("retry 'bun deps'")
+    const browserIdx = inner.indexOf("retry 'browser deps'")
+    expect(bunIdx).toBeGreaterThan(0)
+    expect(browserIdx).toBeGreaterThan(bunIdx)
   })
 
   test('shell-quotes injection-prone fields safely', () => {

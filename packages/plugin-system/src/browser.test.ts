@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, statSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { __test, makeBrowserNavigate, makeBrowserSnapshot } from './browser'
 
 describe('browser parity (task #74)', () => {
@@ -40,13 +50,56 @@ describe('browser parity (task #74)', () => {
     const originalPath = process.env.PATH
     process.env.PATH = '/nonexistent-anima-test-path-zzz'
     try {
-      const result = __test.findAgentBrowser()
-      // On dev machines /opt/homebrew/bin/agent-browser may exist; fallthrough
-      // hits SANE_PATH dirs. Just assert it does NOT throw and returns
-      // either a string or null.
+      // cwdOverride to a path with no node_modules — otherwise dev machines
+      // pick up the workspace's node_modules/.bin/agent-browser (added in
+      // v0.19.16) and the assertion is uninformative.
+      const result = __test.findAgentBrowser(undefined, '/nonexistent-anima-test-cwd-zzz')
+      // SANE_PATH fallthrough may still find /opt/homebrew/bin/agent-browser
+      // on dev machines; assert non-throw + correct type.
       expect(['string', 'object']).toContain(typeof result)
     } finally {
       process.env.PATH = originalPath
+    }
+  })
+
+  test('findAgentBrowser checks node_modules/.bin first (v0.19.16 priority swap)', () => {
+    const tmpRoot = mkdtempSync(join(tmpdir(), 'anima-browser-test-'))
+    const localBin = join(tmpRoot, 'node_modules', '.bin')
+    mkdirSync(localBin, { recursive: true })
+    const localStub = join(localBin, 'agent-browser')
+    writeFileSync(localStub, '#!/bin/sh\necho local-bin-stub\n')
+    chmodSync(localStub, 0o755)
+
+    const originalPath = process.env.PATH
+    // Set PATH to a dir that has a different binary on it; node_modules
+    // should still win.
+    process.env.PATH = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin'
+    try {
+      const result = __test.findAgentBrowser(undefined, tmpRoot)
+      expect(result).toBe(localStub)
+    } finally {
+      process.env.PATH = originalPath
+      rmSync(tmpRoot, { recursive: true, force: true })
+    }
+  })
+
+  test('isBrowserAvailable no longer short-circuits on container env vars', () => {
+    // v0.19.16 dropped the IS_CONTAINER gate. With container env vars set,
+    // isBrowserAvailable still returns true if the binary is reachable.
+    const originalSandbox = process.env.DAYTONA_SANDBOX_ID
+    process.env.DAYTONA_SANDBOX_ID = 'fake-test-sandbox-id'
+    try {
+      // Result depends purely on findAgentBrowser; on dev machines this
+      // returns true (workspace has node_modules/.bin/agent-browser after
+      // bun install). The point is: the env var alone no longer forces false.
+      const available = __test.isBrowserAvailable()
+      expect(typeof available).toBe('boolean')
+      // If the dev machine has the binary, env var must NOT have flipped it.
+      if (__test.findAgentBrowser() !== null) {
+        expect(available).toBe(true)
+      }
+    } finally {
+      process.env.DAYTONA_SANDBOX_ID = originalSandbox
     }
   })
 
