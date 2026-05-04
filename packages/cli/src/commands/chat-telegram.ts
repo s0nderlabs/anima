@@ -293,6 +293,20 @@ async function runOne(
         ts: Date.now(),
       },
       signal: abortCtrl.signal,
+      // Forward per-turn tool-call observer to the brain. The listener
+      // attaches a ProgressTracker on every dispatch; dropping it here
+      // would silently disable TG's live progress message.
+      onToolEvent: input.onToolEvent
+        ? ev => {
+            input.onToolEvent?.({
+              kind: ev.kind,
+              tool: ev.tool,
+              callId: ev.callId,
+              argsPreview: ev.argsPreview,
+              ok: ev.ok,
+            })
+          }
+        : undefined,
     })
     await deps.activity.append({
       ts: Date.now(),

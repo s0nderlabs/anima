@@ -4,6 +4,25 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.15] - 2026-05-04
+
+### Added
+
+- **Telegram typing indicator.** The bot now shows `typing...` in the chat header for the duration of every brain turn. New `packages/plugin-telegram/src/typing.ts` exposes `startTypingLoop(bot, chatId)` which fires `sendChatAction("typing")` immediately + every 4.5s (TG action expires after ~5s). Wrapped in `try/finally` around the dispatch await in `TelegramListener.dispatchOne` so it stops cleanly on success and error paths. Errors swallowed: a rate-limit on the typing call must never block the actual reply.
+- **Telegram tool-call progress streaming (hermes-style).** The brain now surfaces what tool it's running in real time inside TG. New `ProgressTracker` class (`plugin-telegram/src/progress.ts`) sends a "scratch" message with the first tool, then edits it in place as subsequent tools fire. Throttled at 1.5s between edits to coalesce bursts. On TG flood errors (HTTP 429), `canEdit` flips off and remaining lines go as separate messages. Final assistant reply arrives as a separate message (matching hermes pattern). Wires through a new `BrainInferInput.onToolEvent` callback that the brain fires before/after each tool execution; `chat-telegram.ts` (local mode) and `build-runtime.ts` (sandbox mode) both forward the listener's per-turn observer.
+
+### Fixed
+
+- **Browser tool error message + Linux container honesty.** `agent-browser` (Rust binary, brew-only on macOS) is not present in 0G Sandbox Daytona Linux containers, but the previous error message read "agent-browser CLI vanished after resolution (PATH change?). Reinstall with `brew install agent-browser`" — implying a regression where there was none. Two fixes: (1) in containers, the error now reads "agent-browser binary unavailable in this environment. Browser tools are host-only…"; (2) browser.* tools are SKIPPED at registration when running in a Linux container (detected via `DAYTONA_SANDBOX_ID`, `SANDBOX_ID`, or `/.dockerenv` on Linux), so the brain never sees them in its prompt and won't try them. New `isBrowserAvailable()` export on `@s0nderlabs/anima-plugin-system`.
+- **Browser path resolution — drop module cache + dangling symlink safety.** `findAgentBrowser` no longer caches the resolved bin path at module load (`binResolved` flag removed). Resolution is microseconds; caching invited the dangling-symlink trap when `brew upgrade agent-browser` ran in another terminal mid-session. Path checks now use `statSync(path, {throwIfNoEntry: false})?.isFile()` (follows symlinks, returns null for broken targets) instead of `existsSync` (which returns true for dangling symlinks). The dead npx fallback (which created spurious `npx agent-browser` cached paths and was never functional since agent-browser isn't on npm) is also gone.
+- **Compute ledger insufficient-balance UX.** When the 0G provider returns HTTP 400 because the agent's per-provider sub-account is short, the dispatcher now throws a typed `LedgerInsufficientError` (parsed from the provider message) and the TUI + TG dispatchers surface an actionable message: `Compute ledger sub-account short by X 0G (provider 0x…, locked Y of Z required). Topup with: anima topup compute --amount 2`. Previously the raw provider HTTP 400 body leaked into the UI. Tracks the locked-vs-total distinction explicitly: `ledger.totalBalance` (what the statusline shows) is NOT the same as `getProvidersWithBalance` per-provider locked balance (what the brain actually consumes per request).
+
+### Internal
+
+- 16 new unit tests (5 typing + 7 progress + 4 ledger-error). Total workspace 854 (up from 838).
+- Restructure: brain types now expose `BrainToolEvent`, `previewToolArgs`, `inferToolOk` for the per-turn observer.
+- `TelegramDispatchInput` extended with optional `onToolEvent` for plumbing through both local and sandbox dispatch paths without touching the runtime context contract.
+
 ## [0.19.14] - 2026-05-04
 
 ### Fixed

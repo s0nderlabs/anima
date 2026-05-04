@@ -79,6 +79,15 @@ export interface TelegramApprovalBridge {
   }
 }
 
+/** Tool-call lifecycle event observed by the TG dispatcher for live UI rendering. */
+export interface TelegramToolEvent {
+  kind: 'start' | 'end'
+  tool: string
+  callId: string
+  argsPreview?: string
+  ok?: boolean
+}
+
 export interface TelegramDispatchInput {
   /** Composed text after debounce flush; safe to feed into brain prompt. */
   text: string
@@ -94,6 +103,14 @@ export interface TelegramDispatchInput {
   latestMessageId: number
   /** Stable session key for this chat: `agent:<name>:telegram:dm:<chatId>`. */
   sessionKey: string
+  /**
+   * Per-turn observer of tool-call lifecycle. Listener supplies this so it
+   * can stream progress to a TG message as the brain works through the turn.
+   * Dispatch implementation (chat-telegram.ts in local mode, build-runtime.ts
+   * in sandbox mode) must forward this to `brain.infer({ onToolEvent: ... })`.
+   * Errors swallowed; observer must NEVER block dispatch.
+   */
+  onToolEvent?: (ev: TelegramToolEvent) => void
 }
 
 export interface TelegramDispatchResult {

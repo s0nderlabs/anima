@@ -5,6 +5,7 @@ export type {
   BrainMessage,
   BrainProvider,
   BrainProviderOpts,
+  BrainToolEvent,
 } from './types'
 export { StubBrain } from './stub'
 export {
@@ -14,7 +15,14 @@ export {
   type FrozenPrefix,
   type EnvInfo,
 } from './frozen-prefix'
-export { OGComputeBrain, type OGComputeBrainOpts } from './og-compute'
+export {
+  OGComputeBrain,
+  type OGComputeBrainOpts,
+  LedgerInsufficientError,
+  parseLedgerInsufficientError,
+  previewToolArgs,
+  inferToolOk,
+} from './og-compute'
 export {
   openComputeLedger,
   getLedgerBalance,

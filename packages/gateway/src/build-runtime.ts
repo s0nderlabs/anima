@@ -724,6 +724,21 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
             payload: { label: 'telegram-message', data: input.text },
             ts: Date.now(),
           },
+          // Forward per-turn tool-call observer so the listener's
+          // ProgressTracker can render a live progress message in TG. The
+          // brain emits start/end events that the listener turns into
+          // edits on a single scratch message (hermes-style).
+          onToolEvent: input.onToolEvent
+            ? ev => {
+                input.onToolEvent?.({
+                  kind: ev.kind,
+                  tool: ev.tool,
+                  callId: ev.callId,
+                  argsPreview: ev.argsPreview,
+                  ok: ev.ok,
+                })
+              }
+            : undefined,
         })
         await activity.append({
           ts: Date.now(),

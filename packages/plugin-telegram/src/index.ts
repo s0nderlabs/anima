@@ -24,7 +24,9 @@ export type {
   TelegramDispatchInput,
   TelegramDispatchResult,
   TelegramInboundEvent,
+  TelegramToolEvent,
 } from './types'
+export { ProgressTracker, PROGRESS_EDIT_INTERVAL } from './progress'
 export { TelegramListener, capForTelegram } from './listener'
 export { buildSessionKey, sanitizeAgentName } from './session-key'
 export { formatTelegramChannel, formatInboundPreview } from './format'
@@ -88,6 +90,7 @@ export {
   REACTION_ERR,
 } from './reactions'
 export { TELEGRAM_GUIDANCE } from './guidance'
+export { startTypingLoop, TYPING_REFRESH_INTERVAL_MS } from './typing'
 
 const plugin: NativePlugin = {
   name: 'telegram',

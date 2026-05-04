@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  statSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
@@ -60,11 +61,22 @@ const SANE_PATH_DIRS = [
   '/sbin',
 ]
 
-let cachedBinPath: string | null = null
-let binResolved = false
 let cachedSessionName: string | null = null
 let cachedSocketDir: string | null = null
 let cleanupRegistered = false
+
+/**
+ * Set when the process is running inside a Linux container (Daytona sandbox,
+ * Docker, etc). Used to gate browser tools off in environments where the
+ * agent-browser Rust binary cannot reach the operator's host qutebrowser.
+ *
+ * Detection order: explicit env hints first (cheap), then `/.dockerenv` only
+ * on Linux (so macOS hosts skip the readlink syscall).
+ */
+const IS_CONTAINER =
+  !!process.env.DAYTONA_SANDBOX_ID ||
+  !!process.env.SANDBOX_ID ||
+  (process.platform === 'linux' && existsSync('/.dockerenv'))
 
 function discoverHomebrewNodeDirs(): string[] {
   const homebrewOpt = '/opt/homebrew/opt'
@@ -82,49 +94,53 @@ function discoverHomebrewNodeDirs(): string[] {
 function whichIn(name: string, dirs: string[]): string | null {
   for (const dir of dirs) {
     const candidate = join(dir, name)
-    if (existsSync(candidate)) return candidate
+    // Use statSync (follows symlinks) so a dangling brew symlink (target
+    // moved by `brew upgrade`) returns null instead of pointing at a path
+    // that exists but can't be exec'd. Returns null on ENOENT via the
+    // throwIfNoEntry: false flag.
+    const stat = statSync(candidate, { throwIfNoEntry: false })
+    if (stat?.isFile()) return candidate
   }
   return null
 }
 
+/**
+ * Resolve the `agent-browser` Rust binary on PATH or in known directories.
+ * NOT cached: resolution is a few syscalls (microseconds) and caching invites
+ * the dangling-symlink trap (brew upgrade in another shell mid-session).
+ *
+ * Returns null when no binary is reachable. Callers should surface a clear
+ * "tool unavailable in this environment" error rather than spawning a bogus
+ * path.
+ */
 function findAgentBrowser(override?: string): string | null {
   if (override) return override
-  if (binResolved) return cachedBinPath
 
   const pathEnv = process.env.PATH ?? ''
   const pathDirs = pathEnv.split(delimiter).filter(Boolean)
   const inPath = whichIn('agent-browser', pathDirs)
-  if (inPath) {
-    cachedBinPath = inPath
-    binResolved = true
-    return inPath
-  }
+  if (inPath) return inPath
 
   const extraDirs = [...discoverHomebrewNodeDirs(), ...SANE_PATH_DIRS].filter(d => existsSync(d))
   const inExtra = whichIn('agent-browser', extraDirs)
-  if (inExtra) {
-    cachedBinPath = inExtra
-    binResolved = true
-    return inExtra
-  }
+  if (inExtra) return inExtra
 
   const localBin = join(process.cwd(), 'node_modules', '.bin', 'agent-browser')
-  if (existsSync(localBin)) {
-    cachedBinPath = localBin
-    binResolved = true
-    return localBin
-  }
+  if (statSync(localBin, { throwIfNoEntry: false })?.isFile()) return localBin
 
-  const npxPath = whichIn('npx', pathDirs) ?? whichIn('npx', extraDirs)
-  if (npxPath) {
-    cachedBinPath = `${npxPath} agent-browser`
-    binResolved = true
-    return cachedBinPath
-  }
-
-  binResolved = true
-  cachedBinPath = null
   return null
+}
+
+/**
+ * True when the agent-browser binary is reachable on this machine. Used by
+ * the plugin loader to gate browser.* tool registration: in Linux containers
+ * (Daytona sandbox, Docker) the binary is not installed AND cannot reach the
+ * operator's host qutebrowser anyway, so the tools are skipped entirely
+ * rather than registered-but-broken.
+ */
+export function isBrowserAvailable(): boolean {
+  if (IS_CONTAINER) return false
+  return findAgentBrowser() !== null
 }
 
 function socketSafeTmpdir(): string {
@@ -158,16 +174,15 @@ function registerCleanup(): void {
   cleanupRegistered = true
   const cleanup = () => {
     try {
-      const bin = cachedBinPath
+      const bin = findAgentBrowser()
       const sess = cachedSessionName
       if (bin && sess && !process.env.ANIMA_BROWSER_CDP_URL) {
-        const parts = bin.startsWith('npx ') ? ['npx', 'agent-browser'] : [bin]
         try {
           // spawnSync so the daemon actually receives `close` before we exit.
           // Async + detached drops the message: the parent exits before the
           // child IPC connects to the daemon socket. 5s cap prevents hangs
           // on a frozen daemon.
-          spawnSync(parts[0]!, [...parts.slice(1), '--session', sess, 'close'], {
+          spawnSync(bin, ['--session', sess, 'close'], {
             stdio: 'ignore',
             env: cachedSocketDir
               ? { ...process.env, AGENT_BROWSER_SOCKET_DIR: cachedSocketDir }
@@ -254,11 +269,16 @@ async function runAgentBrowserOnce(
   if (!bin) {
     return {
       ok: false,
-      error:
-        'agent-browser CLI not found on PATH or in Homebrew/local dirs. Install with `brew install agent-browser` (or `npm i -g agent-browser`), or set ANIMA_AGENT_BROWSER_BIN.',
+      error: IS_CONTAINER
+        ? 'agent-browser binary unavailable in this environment. Browser tools are host-only (require macOS host with `brew install agent-browser` + qutebrowser); Linux/Daytona sandbox containers do not support them.'
+        : 'agent-browser CLI not found on PATH or in Homebrew/local dirs. Install with `brew install agent-browser`, or set ANIMA_AGENT_BROWSER_BIN.',
     }
   }
-  const cmdParts = bin.startsWith('npx ') ? bin.split(' ') : [bin]
+  // Path may contain a space if a user-supplied override was passed; preserve
+  // it as a single argv0 since spawn() doesn't shell-tokenize. The previous
+  // npx fallback that injected `${npxPath} agent-browser` here is now gone
+  // (agent-browser is not on npm; it's a brew-only Rust binary).
+  const cmdParts = [bin]
 
   const cdpOverride = process.env.ANIMA_BROWSER_CDP_URL
   const backendArgs = cdpOverride ? ['--cdp', cdpOverride] : ['--session', getSessionName()]
@@ -334,8 +354,9 @@ async function runAgentBrowserOnce(
       if (code === 'ENOENT') {
         resolve({
           ok: false,
-          error:
-            'agent-browser CLI vanished after resolution (PATH change?). Reinstall with `brew install agent-browser`.',
+          error: IS_CONTAINER
+            ? 'agent-browser binary unavailable in this environment. Browser tools are host-only (require macOS host with `brew install agent-browser` + qutebrowser); Linux/Daytona sandbox containers do not support them.'
+            : 'agent-browser binary not executable at resolved path. The brew install may be partially unlinked. Retry `brew reinstall agent-browser`.',
         })
         return
       }
@@ -616,8 +637,6 @@ export const ALL_BROWSER_TOOL_FACTORIES = [
 // test can stub PATH or override the platform without leaking state.
 export const __test = {
   reset(): void {
-    cachedBinPath = null
-    binResolved = false
     cachedSessionName = null
     if (cachedSocketDir) {
       try {
@@ -628,6 +647,7 @@ export const __test = {
     cleanupRegistered = false
   },
   findAgentBrowser,
+  isBrowserAvailable,
   socketSafeTmpdir,
   getSessionName,
   getSocketDir,

@@ -193,7 +193,31 @@ export class OGComputeBrain implements Brain {
           })
           continue
         }
+        if (input.onToolEvent) {
+          try {
+            input.onToolEvent({
+              kind: 'start',
+              tool: call.name,
+              callId: call.id,
+              argsPreview: previewToolArgs(call.args),
+            })
+          } catch {
+            /* observer errors must never block tool execution */
+          }
+        }
         const toolMsg = await this.opts.onToolCall(call)
+        if (input.onToolEvent) {
+          try {
+            input.onToolEvent({
+              kind: 'end',
+              tool: call.name,
+              callId: call.id,
+              ok: inferToolOk(toolMsg.content ?? ''),
+            })
+          } catch {
+            /* swallow */
+          }
+        }
         messages.push({ ...toolMsg, toolCallId: call.id })
       }
     }
@@ -251,7 +275,15 @@ export class OGComputeBrain implements Brain {
       signal,
     })
     if (!resp.ok) {
-      throw new Error(`Brain HTTP ${resp.status}: ${await resp.text()}`)
+      const body = await resp.text()
+      // Translate the 0G provider's "insufficient balance" HTTP 400 into a
+      // typed error so dispatchers (TUI + TG) can render an actionable
+      // message ("topup compute --provider <addr> --amount X") instead of
+      // the raw HTTP body. Pattern matches the message format from
+      // `feedback-compute-ledger-total-vs-provider.md`.
+      const ledgerErr = parseLedgerInsufficientError(body, this.opts.providerAddress)
+      if (ledgerErr) throw ledgerErr
+      throw new Error(`Brain HTTP ${resp.status}: ${body}`)
     }
     const json = (await resp.json()) as {
       choices: Array<{
@@ -325,4 +357,120 @@ function findLastAssistantContent(messages: BrainMessage[]): string {
     if (m && m.role === 'assistant') return m.content
   }
   return ''
+}
+
+/**
+ * Format a compact preview of tool args for the per-turn observer. Keeps the
+ * essence of "what the brain is doing" without dumping the full payload to a
+ * UI surface (TG progress message especially).
+ *
+ * - String: pass through, truncated.
+ * - Object: top-level keys joined; first scalar value preview if short.
+ * - Array: count + first element preview.
+ * - Other: best-effort JSON stringify.
+ */
+export function previewToolArgs(args: unknown): string {
+  if (args == null) return ''
+  if (typeof args === 'string') return truncatePreview(args)
+  if (Array.isArray(args)) return `[${args.length}]`
+  if (typeof args === 'object') {
+    const o = args as Record<string, unknown>
+    const keys = Object.keys(o)
+    if (keys.length === 0) return ''
+    // Prefer a single short scalar field if present.
+    for (const k of ['url', 'path', 'command', 'query', 'name', 'address']) {
+      const v = o[k]
+      if (typeof v === 'string' && v.length > 0) return truncatePreview(`${k}=${v}`)
+    }
+    return truncatePreview(keys.join(','))
+  }
+  try {
+    return truncatePreview(String(args))
+  } catch {
+    return ''
+  }
+}
+
+function truncatePreview(s: string): string {
+  const max = 60
+  if (s.length <= max) return s
+  return `${s.slice(0, max - 1)}…`
+}
+
+/**
+ * Thrown when the 0G provider rejects the request with HTTP 400 because the
+ * agent's compute ledger sub-account for that provider is below the minimum
+ * locked balance. Caught by TUI + TG dispatchers to render a topup hint
+ * instead of the raw HTTP body.
+ *
+ * The provider error message pattern (May 2026):
+ *   "Provider proxy: handle proxied service, validate request:
+ *    insufficient balance: your locked balance is X 0G, but the required
+ *    minimum is Y 0G (breakdown: minimum reserve A 0G + unsettled fees
+ *    B 0G + current request fee C 0G). Please add more"
+ */
+export class LedgerInsufficientError extends Error {
+  /** Locked balance in the provider sub-account, in 0G (string for precision). */
+  readonly availableOg: string
+  /** Required minimum, in 0G. */
+  readonly requiredOg: string
+  /** required − available, in 0G. */
+  readonly shortfallOg: string
+  /** Provider EOA the agent's brain is configured to use. */
+  readonly providerAddress: string
+
+  constructor(opts: {
+    availableOg: string
+    requiredOg: string
+    shortfallOg: string
+    providerAddress: string
+  }) {
+    super(
+      `Compute ledger sub-account short by ${opts.shortfallOg} 0G (provider ${opts.providerAddress.slice(0, 10)}…, locked ${opts.availableOg} of ${opts.requiredOg} required). Topup with: anima topup compute --amount 2`,
+    )
+    this.name = 'LedgerInsufficientError'
+    this.availableOg = opts.availableOg
+    this.requiredOg = opts.requiredOg
+    this.shortfallOg = opts.shortfallOg
+    this.providerAddress = opts.providerAddress
+  }
+}
+
+const LEDGER_ERROR_RE =
+  /insufficient balance: your locked balance is ([\d.]+)\s*0G, but the required minimum is ([\d.]+)\s*0G/i
+
+export function parseLedgerInsufficientError(
+  body: string,
+  providerAddress: string,
+): LedgerInsufficientError | null {
+  if (!body) return null
+  const m = body.match(LEDGER_ERROR_RE)
+  if (!m || !m[1] || !m[2]) return null
+  const available = Number.parseFloat(m[1])
+  const required = Number.parseFloat(m[2])
+  if (!Number.isFinite(available) || !Number.isFinite(required)) return null
+  const shortfall = Math.max(0, required - available)
+  return new LedgerInsufficientError({
+    availableOg: m[1],
+    requiredOg: m[2],
+    shortfallOg: shortfall.toFixed(6),
+    providerAddress,
+  })
+}
+
+/**
+ * Heuristic ok-detection for the per-turn observer. Tools return JSON content
+ * with `{ok, error, ...}` shape; a missing `ok` AND missing `error` is
+ * considered a soft success (rare).
+ */
+export function inferToolOk(content: string): boolean {
+  if (!content) return true
+  try {
+    const o = JSON.parse(content) as Record<string, unknown>
+    if (typeof o.ok === 'boolean') return o.ok
+    if (typeof o.error === 'string' && o.error.length > 0) return false
+    return true
+  } catch {
+    return !content.toLowerCase().includes('error')
+  }
 }

@@ -16,6 +16,27 @@ export interface BrainMessage {
   toolCalls?: Array<{ id: string; name: string; args: unknown }>
 }
 
+/**
+ * Per-tool-call lifecycle event surfaced to the dispatcher for UI rendering.
+ * Distinct from the brain-construction `onToolCall` (which actually EXECUTES
+ * the tool); this is fire-and-forget for "show what the agent is doing right
+ * now" surfaces (TG progress message, future TUI bridge, etc.).
+ *
+ * Errors thrown by the observer are swallowed by the brain.
+ */
+export interface BrainToolEvent {
+  /** 'start' fires BEFORE tool execution; 'end' fires AFTER. */
+  kind: 'start' | 'end'
+  /** Fully-qualified tool name, e.g. `shell.run`. */
+  tool: string
+  /** Tool-call id; correlates start ↔ end pair within the same turn. */
+  callId: string
+  /** Short stringified args preview (≤ ~80 chars). Present on 'start'. */
+  argsPreview?: string
+  /** Tool execution success. Heuristic from result content. Present on 'end'. */
+  ok?: boolean
+}
+
 export interface BrainInferInput {
   /** The event that woke the brain. */
   event: AnimaEvent
@@ -31,6 +52,13 @@ export interface BrainInferInput {
    * a clean operator-driven cancel, not an error.
    */
   signal?: AbortSignal
+  /**
+   * Per-turn observer of tool-call lifecycle. Fired by the brain before and
+   * after each tool execution. Use for UI streaming (TG progress message,
+   * TUI bridge) without bothering the brain-construction onToolCall (which
+   * is the actual tool executor). Errors swallowed by the brain.
+   */
+  onToolEvent?: (ev: BrainToolEvent) => void
 }
 
 export interface BrainTurn {

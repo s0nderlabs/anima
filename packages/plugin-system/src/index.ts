@@ -9,6 +9,7 @@
 
 import { LocalBackend, type NativePlugin, type ToolDef } from '@s0nderlabs/anima-core'
 import {
+  isBrowserAvailable,
   makeBrowserBack,
   makeBrowserClick,
   makeBrowserConsole,
@@ -73,6 +74,7 @@ export {
 }
 export { WorkingDirState, resolveCwd } from './cwd-state'
 export { killAllProcesses } from './shell-process'
+export { isBrowserAvailable } from './browser'
 
 const plugin: NativePlugin = {
   name: 'system',
@@ -119,17 +121,25 @@ const plugin: NativePlugin = {
         visionInfer: ctx.visionInfer ?? null,
         agentDir: ctx.agentDir,
       }) as ToolDef,
-      makeBrowserNavigate({}) as ToolDef,
-      makeBrowserSnapshot({}) as ToolDef,
-      makeBrowserClick({}) as ToolDef,
-      makeBrowserType({}) as ToolDef,
-      makeBrowserScroll({}) as ToolDef,
-      makeBrowserBack({}) as ToolDef,
-      makeBrowserPress({}) as ToolDef,
-      makeBrowserGetImages({}) as ToolDef,
-      makeBrowserConsole({}) as ToolDef,
-      makeBrowserVision({ visionInfer: ctx.visionInfer ?? null }) as ToolDef,
     ]
+    // Browser tools require the agent-browser Rust binary AND a reachable
+    // qutebrowser instance on the host. In Linux Daytona sandbox containers
+    // neither is present, so we skip registration entirely rather than
+    // ship broken tools to the brain. See `isBrowserAvailable`.
+    if (isBrowserAvailable()) {
+      tools.push(
+        makeBrowserNavigate({}) as ToolDef,
+        makeBrowserSnapshot({}) as ToolDef,
+        makeBrowserClick({}) as ToolDef,
+        makeBrowserType({}) as ToolDef,
+        makeBrowserScroll({}) as ToolDef,
+        makeBrowserBack({}) as ToolDef,
+        makeBrowserPress({}) as ToolDef,
+        makeBrowserGetImages({}) as ToolDef,
+        makeBrowserConsole({}) as ToolDef,
+        makeBrowserVision({ visionInfer: ctx.visionInfer ?? null }) as ToolDef,
+      )
+    }
     if (ctx.delegateFactory) {
       tools.push(
         makeDelegateTask({

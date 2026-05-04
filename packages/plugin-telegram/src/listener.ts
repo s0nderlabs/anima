@@ -6,6 +6,7 @@ import { formatTelegramChannel } from './format'
 import { RateLimiter } from './limits'
 import { formatMarkdownV2, isMarkdownParseError, stripMarkdownV2 } from './markdown'
 import { formatPairingMessage } from './pairing-flow'
+import { ProgressTracker } from './progress'
 import { reactError, reactProcessing, reactSuccess } from './reactions'
 import {
   BotTokenLockedError,
@@ -19,6 +20,7 @@ import { DELIVERY_FAILURE_NOTICE, sendWithRetry } from './retry'
 import { sanitizeInbound } from './sanitize'
 import { buildSessionKey } from './session-key'
 import type { TelegramDispatchInput, TelegramRuntimeContext } from './types'
+import { startTypingLoop } from './typing'
 
 /**
  * Long-poll Telegram bot. Inbound DMs from allowedUserIds are debounced and
@@ -355,6 +357,17 @@ export class TelegramListener {
         /* never block on hook failures */
       }
     }
+    // Show "typing..." in the chat header for the duration of the brain turn.
+    // TG's chat action expires after ~5s, so the loop refreshes on a 4.5s
+    // interval. Cancel via try/finally so it stops in both happy and error
+    // paths. See `typing.ts` for the cancel-fn pattern.
+    const stopTyping = startTypingLoop(this.bot, chatId)
+    // Tool-call progress message: hermes-style scratch message that gets
+    // edited as the brain progresses through tools. See `progress.ts`.
+    // Always created; the tracker only sends a message when the brain
+    // actually fires a tool event, so prompts that go straight to a
+    // text answer don't get a noisy progress preamble.
+    const tracker = new ProgressTracker(this.bot, chatId)
     let ok = true
     try {
       const input: TelegramDispatchInput = {
@@ -365,6 +378,9 @@ export class TelegramListener {
         displayName: batch.displayName,
         latestMessageId: messageId,
         sessionKey: buildSessionKey({ agentName: this.opts.agentName, chatId }),
+        onToolEvent: ev => {
+          void tracker.push(ev)
+        },
       }
       const channelText = formatTelegramChannel({
         chatId,
@@ -384,15 +400,26 @@ export class TelegramListener {
       const stack = err instanceof Error && err.stack ? `\n${err.stack}` : ''
       console.error(`[telegram] dispatch failed: ${msg.slice(0, 500)}${stack}`)
       void reactError(this.bot, chatId, messageId)
+      // Translate LedgerInsufficientError into an actionable topup hint
+      // instead of the generic "something went wrong" reply. Detect by
+      // name (avoids requiring the plugin to import core's typed class).
+      const isLedger = err instanceof Error && err.name === 'LedgerInsufficientError'
+      const replyText = isLedger
+        ? `⚠️ I need a top-up to keep working.\n\n${msg}`
+        : 'sorry, something went wrong on my side. try again in a moment.'
       try {
-        await this.bot.api.sendMessage(
-          chatId,
-          'sorry, something went wrong on my side. try again in a moment.',
-          { reply_parameters: { message_id: messageId, allow_sending_without_reply: true } },
-        )
+        await this.bot.api.sendMessage(chatId, replyText, {
+          reply_parameters: { message_id: messageId, allow_sending_without_reply: true },
+        })
       } catch {
         /* swallow */
       }
+    } finally {
+      // Flush any pending throttled progress edit before clearing the
+      // typing loop. finalize() is idempotent, swallows errors, and is safe
+      // even if the tracker never rendered anything.
+      await tracker.finalize().catch(() => {})
+      stopTyping()
     }
     if (this.opts.onProcessingEnd) {
       try {
