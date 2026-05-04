@@ -152,11 +152,16 @@ export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBoots
     // a Chrome-for-Testing build + Linux system libs (`--with-deps`).
     // `doctor` exits 0 only when the install state is healthy, so re-runs are
     // no-ops on container restarts that share a persisted volume.
+    //
+    // Invoked via `node_modules/.bin/agent-browser` directly (not `bunx`)
+    // because Daytona's `curl bun.sh/install` install path doesn't always
+    // ship a `bunx` symlink. The npm-shipped binary uses `#!/usr/bin/env node`
+    // which Daytona already provides (Node v22.x in the slim sandbox image).
     'echo "[browser deps]"',
-    'if bunx agent-browser doctor >/dev/null 2>&1; then',
+    'if node_modules/.bin/agent-browser doctor >/dev/null 2>&1; then',
     '  echo "[browser deps] already installed, skipping"',
     'else',
-    `  retry 'browser deps' bunx agent-browser install --with-deps || { echo "browser-install-failed" > ${FAIL_MARKER}; exit 19; }`,
+    `  retry 'browser deps' node_modules/.bin/agent-browser install --with-deps || { echo "browser-install-failed" > ${FAIL_MARKER}; exit 19; }`,
     'fi',
     '',
     'mkdir -p "$HOME/anima-logs" "$HOME/workspace"',

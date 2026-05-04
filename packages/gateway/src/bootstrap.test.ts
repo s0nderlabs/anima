@@ -173,9 +173,12 @@ describe('buildBootstrapScript', () => {
   test('browser deps step uses doctor-guarded idempotent install after bun deps', () => {
     const inner = decodeInner()
     expect(inner).toContain('[browser deps]')
-    expect(inner).toContain('bunx agent-browser doctor')
+    // Direct invocation, not `bunx`, because Daytona's bun.sh/install path
+    // doesn't always ship a bunx symlink. node_modules/.bin/agent-browser
+    // uses #!/usr/bin/env node which Daytona's image already provides.
+    expect(inner).toContain('node_modules/.bin/agent-browser doctor')
     expect(inner).toMatch(
-      /retry 'browser deps' bunx agent-browser install --with-deps \|\| \{ echo "browser-install-failed"/,
+      /retry 'browser deps' node_modules\/\.bin\/agent-browser install --with-deps \|\| \{ echo "browser-install-failed"/,
     )
     // Order: bun install runs before browser deps install.
     const bunIdx = inner.indexOf("retry 'bun deps'")

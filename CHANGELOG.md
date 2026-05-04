@@ -4,6 +4,16 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.17] - 2026-05-05
+
+### Fixed
+
+- **`anima upgrade` browser-deps step failed with `bunx: command not found` on Daytona sandbox.** v0.19.16 invoked `bunx agent-browser doctor` / `bunx agent-browser install --with-deps`, but Daytona's `curl bun.sh/install | bash` install path doesn't always ship a `bunx` symlink. The 3-attempt retry exhausted and `browser-install-failed` propagated to the user. Caught on the v0.19.16 enigma canary. Hotfix: invoke `node_modules/.bin/agent-browser` directly (uses `#!/usr/bin/env node` shebang; Daytona's `daytonaio/sandbox:0.5.0-slim` already provides Node v22.14.0, no bun runtime needed for the install probe). Same wrapper bash pattern, same retry, same exit codes; only the binary path changed.
+
+### Internal
+
+- Updated bootstrap.ts + upgrade-script.ts + 2 tests to assert the new invocation. Workspace 858 unit tests still green.
+
 ## [0.19.16] - 2026-05-05
 
 ### Fixed
@@ -1368,6 +1378,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.17]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.17
 [0.19.16]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.16
 [0.19.15]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.15
 [0.19.14]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.14

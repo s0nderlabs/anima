@@ -91,11 +91,14 @@ export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeSc
     // a no-op on the common case (Chromium already installed in the
     // container's persistent volume); only fresh provisions or a manual
     // wipe trigger the slow apt + Chromium download path.
+    //
+    // Invoked via `node_modules/.bin/agent-browser` directly (not `bunx`).
+    // See bootstrap.ts comment for the rationale.
     'echo "[browser deps]"',
-    'if bunx agent-browser doctor >/dev/null 2>&1; then',
+    'if node_modules/.bin/agent-browser doctor >/dev/null 2>&1; then',
     '  echo "[browser deps] already installed, skipping"',
     'else',
-    `  retry 'browser deps' bunx agent-browser install --with-deps || { echo "browser-install-failed" > ${FAIL_MARKER}; exit 25; }`,
+    `  retry 'browser deps' node_modules/.bin/agent-browser install --with-deps || { echo "browser-install-failed" > ${FAIL_MARKER}; exit 25; }`,
     'fi',
     '',
     'echo "[restart gateway]"',
