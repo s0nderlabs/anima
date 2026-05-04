@@ -1,5 +1,6 @@
 import { mkdir, readFile } from 'node:fs/promises'
 import {
+  ANIMA_AGENT_NFT_ADDRESS,
   ANIMA_INBOX_ADDRESS,
   ANIMA_MARKET_ADDRESS,
   ActivityLog,
@@ -24,6 +25,7 @@ import {
   VISION_PROVIDER_DEFAULTS,
   type VisionInferFn,
   buildFrozenPrefix,
+  derivePubkeyHex,
   iNFTAgentId,
   loadPlugins,
   makeMemoryReadTool,
@@ -385,6 +387,15 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
       iNFT: { contract: contractAddress, tokenId },
       brainProvider: config.brain.provider,
       brainModel: config.brain.model,
+      subname: config.subname ?? null,
+      // derivePubkeyHex emits SEC1 uncompressed `0x04 || x32 || y32`; strip the
+      // 4-char `0x04` prefix to match the body form used in .anima.0g records.
+      agentPubkey: derivePubkeyHex(agentPrivkey).slice(4),
+      singletons: {
+        inbox: ANIMA_INBOX_ADDRESS[network],
+        market: ANIMA_MARKET_ADDRESS[network],
+        agentNFT: ANIMA_AGENT_NFT_ADDRESS[network],
+      },
     }
   }
 

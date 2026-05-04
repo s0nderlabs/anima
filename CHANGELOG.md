@@ -4,6 +4,20 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.13] - 2026-05-04
+
+### Fixed
+
+- **Brain now knows about anima's deployed singletons + its own pubkey.** Latent harness regression surfaced during the Task #275 enigma TG investigation. When asked "tell me the metadata for the AnimaInbox contract", the brain went `memory.read` (not found) then `shell.run "find /home/daytona/anima -name '*.json' -o -name '*.ts'"` (codebase grep, blocked by approval modal) instead of `chain.contract` against the deployed address. Same defect for "tell me about your A2A presence and pubkey on chain" — no tool returned the agent's pubkey, so the brain composed handwavy text. Root cause: `OnchainRuntimeContext` never carried the singleton addresses (AnimaInbox, AnimaMarket, AnimaAgentNFT) or the agent's own pubkey, so `account.info` couldn't surface them and the brain had no anchor for chain-introspection routing. Fix: extend `OnchainRuntimeContext` with `subname`, `agentPubkey`, `singletons` fields, populate them in `gateway/build-runtime.ts` from `config.subname` + `derivePubkeyHex(agentPrivkey).slice(4)` + `ANIMA_*_ADDRESS[network]`, and surface them in `account.info`'s return data. `ONCHAIN_GUIDANCE` adds a dedicated "Anima singletons" block listing the three CREATE2-deterministic addresses with their roles + the explicit rule "use `chain.contract` on these, NOT `shell.run` to grep, NOT `memory.read`". Ground-truth verified: `cast code 0xcd92844cc0ec6Be0607B330D4BaCC707339f2589 --rpc-url https://evmrpc.0g.ai` returns exactly 560 bytes — matching the brain's earlier reply that was originally suspected as fabrication. The data was always real; the brain just had no reliable way to fetch it.
+
+### Files changed
+
+- `packages/plugin-onchain/src/types.ts`: added `subname?: string | null`, `agentPubkey?: string`, `singletons?: { inbox; market; agentNFT }` to `OnchainRuntimeContext`.
+- `packages/plugin-onchain/src/tools/account.ts`: `account.info` return data now includes `subname`, `pubkey`, `singletons` (each defaults to `null` if ctx omits them).
+- `packages/plugin-onchain/src/guidance.ts`: rewrote the `account.info` line (reframes it as the canonical identity probe) and added a 4-line "Anima singletons" block hardcoding the three addresses with phase + role descriptions.
+- `packages/gateway/src/build-runtime.ts`: imports `ANIMA_AGENT_NFT_ADDRESS` + `derivePubkeyHex` from core, populates the three new context fields when the onchain plugin loads.
+- `packages/plugin-onchain/src/tools/account.test.ts` (new): 2 tests covering the populated-ctx path and the omitted-ctx fallback (everything `null`).
+
 ## [0.19.12] - 2026-05-04
 
 ### Fixed
@@ -1288,6 +1302,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.13]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.13
 [0.19.12]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.12
 [0.19.11]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.11
 [0.19.10]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.10

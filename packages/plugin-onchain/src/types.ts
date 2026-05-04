@@ -22,6 +22,16 @@ export interface OnchainRuntimeContext {
   brainModel?: string | null
   /** Optional: live compute ledger balance reader. */
   brokerLedger?: { balance0G: () => Promise<number | null> }
+  /** Agent's `.anima.0g` subname when registered. Surfaces in account.info. */
+  subname?: string | null
+  /** Agent's uncompressed secp256k1 pubkey hex (no 0x04 prefix). Used for A2A. */
+  agentPubkey?: string
+  /** Anima singleton deployments on the active network. Brain uses these with chain.contract. */
+  singletons?: {
+    inbox: Address
+    market: Address
+    agentNFT: Address
+  }
 }
 
 export interface TokenInfo {

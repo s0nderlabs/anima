@@ -35,6 +35,8 @@ export function makeAccountInfo(ctx: OnchainRuntimeContext): ToolDef<Args> {
           ok: true,
           data: {
             agentEoa: ctx.agentEoa,
+            subname: ctx.subname ?? null,
+            pubkey: ctx.agentPubkey ?? null,
             iNFT: ctx.iNFT
               ? {
                   contract: ctx.iNFT.contract,
@@ -42,6 +44,7 @@ export function makeAccountInfo(ctx: OnchainRuntimeContext): ToolDef<Args> {
                 }
               : null,
             network: ctx.network,
+            singletons: ctx.singletons ?? null,
             brain: { provider: ctx.brainProvider ?? null, model: ctx.brainModel ?? null },
             wallet: {
               native: snap.native,
