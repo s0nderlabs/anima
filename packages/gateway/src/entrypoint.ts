@@ -80,21 +80,35 @@ server.listen(port, host, () => {
   log(`heartbeat target=${heartbeat.targetUrl()} intervalMs=${heartbeatIntervalMs}`)
 })
 
-const shutdown = (signal: string): void => {
+let shuttingDown = false
+const shutdown = async (signal: string): Promise<void> => {
+  if (shuttingDown) return
+  shuttingDown = true
   log(`signal=${signal} shutting down`)
   transitionToShuttingDown(session)
   heartbeat?.stop()
   approvals.stop()
-  Promise.resolve(runtime.stop()).catch(() => {})
-  server.close(() => {
-    log('server closed')
-    process.exit(0)
-  })
-  setTimeout(() => {
+  // Backstop in case runtime.stop hangs (e.g. grammy bot.stop deadlock).
+  const forceExit = setTimeout(() => {
     log('shutdown timeout, forcing exit')
     process.exit(1)
-  }, 10_000).unref()
+  }, 10_000)
+  forceExit.unref()
+  // Plugin listeners (Telegram in particular) release their bot-token
+  // scoped lock during runtime.stop teardown. If we exit before this
+  // resolves, the next harness boot sees a stale lock with the dying PID
+  // and silently refuses to start the listener (zombie-lock).
+  try {
+    await runtime.stop()
+  } catch {
+    /* best-effort */
+  }
+  server.close(() => {
+    log('server closed')
+    clearTimeout(forceExit)
+    process.exit(0)
+  })
 }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'))
-process.on('SIGINT', () => shutdown('SIGINT'))
+process.on('SIGTERM', () => void shutdown('SIGTERM'))
+process.on('SIGINT', () => void shutdown('SIGINT'))

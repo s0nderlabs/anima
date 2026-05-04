@@ -85,6 +85,19 @@ describe('buildUpgradeScript', () => {
     )
   })
 
+  test('clears stale agent locks after killing prior harness, before relaunch', () => {
+    const inner = decodeInner()
+    // The kill→clear-locks→relaunch ordering is critical: we wipe locks
+    // ONLY after the prior harness is dead so we never race a live writer.
+    const killIdx = inner.indexOf('pkill -f anima-gateway')
+    const lockIdx = inner.indexOf('rm -f "$HOME/.anima/locks/"*.lock')
+    const launchIdx = inner.indexOf('nohup bun "$HOME/anima/packages/gateway/bin/anima-gateway"')
+    expect(killIdx).toBeGreaterThan(0)
+    expect(lockIdx).toBeGreaterThan(killIdx)
+    expect(launchIdx).toBeGreaterThan(lockIdx)
+    expect(inner).toContain('[clear stale agent locks]')
+  })
+
   test('frees port 8080 via fuser before AND on each launch attempt', () => {
     const inner = decodeInner()
     // Pre-launch + per-attempt port kill (defensive against zombie bun on rebind)

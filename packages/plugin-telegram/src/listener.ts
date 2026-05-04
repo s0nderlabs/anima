@@ -9,6 +9,7 @@ import { formatPairingMessage } from './pairing-flow'
 import { reactError, reactProcessing, reactSuccess } from './reactions'
 import {
   BotTokenLockedError,
+  TELEGRAM_TOKEN_LOCK_SCOPE,
   type TokenLock,
   acquireTelegramTokenLock,
   classifyStartFailure,
@@ -29,6 +30,12 @@ import type { TelegramDispatchInput, TelegramRuntimeContext } from './types'
  * webhook, then boots grammy in long-poll mode. `stop()` releases the lock
  * and stops the bot. Both are idempotent.
  */
+/** Retry cadence + cap when the TG bot-token lock is held by a (possibly
+ *  zombie) prior holder. 12 × 30s = 6 minutes, comfortably past the 5-minute
+ *  lock TTL so a stale-but-tenable lock auto-evicts. */
+const RETRY_INTERVAL_MS = 30_000
+const MAX_LOCK_RETRY_ATTEMPTS = 12
+
 export interface TelegramListenerOpts extends TelegramRuntimeContext {
   /** Optional override of the Telegram Bot API root. Used by the mock-bot test. */
   apiRoot?: string
@@ -49,6 +56,9 @@ export class TelegramListener {
   private running = false
   private tokenLock: TokenLock | null = null
   private refreshTimer: ReturnType<typeof setInterval> | null = null
+  private retryTimer: ReturnType<typeof setTimeout> | null = null
+  private retryAttempts = 0
+  private stopped = false
   private approvalResolver:
     | ((approvalId: string, choice: ApprovalChoice, fromUserId: number) => void)
     | null = null
@@ -110,7 +120,7 @@ export class TelegramListener {
   }
 
   async start(): Promise<void> {
-    if (this.running) return
+    if (this.running || this.stopped) return
 
     try {
       this.tokenLock = acquireTelegramTokenLock(this.opts.botToken, {
@@ -118,12 +128,24 @@ export class TelegramListener {
         rootDir: this.opts.lockRootDir,
       })
     } catch (err) {
+      // Lock contention is recoverable: the prior holder may be a zombie or
+      // a stale lockfile from an ungraceful exit (see
+      // feedback-tg-token-lock-zombie-after-upgrade.md). Retry every 30s up
+      // to 12 attempts (6 minutes, past the 5-minute lock TTL) so we
+      // eventually reclaim once the existing entry expires. Without this,
+      // a single failed lock acquisition silenced the bot for the entire
+      // harness lifetime.
       if (err instanceof BotTokenLockedError) {
-        console.warn(`[telegram] cannot start listener: ${err.message}`)
+        console.warn(
+          `[telegram] cannot start listener: ${err.message}; will retry in ${RETRY_INTERVAL_MS / 1000}s`,
+        )
+        this.scheduleStartRetry()
+        return
       }
       throw err
     }
 
+    this.retryAttempts = 0
     this.running = true
     console.log(`[telegram] listener.start() called for @${this.opts.agentName}`)
 
@@ -169,6 +191,11 @@ export class TelegramListener {
   }
 
   async stop(): Promise<void> {
+    this.stopped = true
+    if (this.retryTimer) {
+      clearTimeout(this.retryTimer)
+      this.retryTimer = null
+    }
     if (!this.running) {
       this.releaseLock()
       return
@@ -186,6 +213,23 @@ export class TelegramListener {
     }
     await Promise.allSettled([...this.inflight.values()])
     this.releaseLock()
+  }
+
+  private scheduleStartRetry(): void {
+    if (this.stopped) return
+    if (this.retryAttempts >= MAX_LOCK_RETRY_ATTEMPTS) {
+      console.error(
+        `[telegram] gave up acquiring bot-token lock after ${this.retryAttempts} attempts; manual intervention required (rm ~/.anima/locks/${TELEGRAM_TOKEN_LOCK_SCOPE}-*.lock)`,
+      )
+      return
+    }
+    if (this.retryTimer) clearTimeout(this.retryTimer)
+    this.retryAttempts += 1
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      void this.start()
+    }, RETRY_INTERVAL_MS)
+    this.retryTimer.unref?.()
   }
 
   private releaseLock(): void {

@@ -4,6 +4,29 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.14] - 2026-05-04
+
+### Fixed
+
+- **TG bot zombie-lock after upgrade — bot stops replying silently.** Root cause caught when elpabl0's enigma stopped responding to two messages on May 4 ~08:15 UTC. The harness shutdown path in `gateway/local-entrypoint.ts` and `gateway/entrypoint.ts` did `Promise.resolve(runtime.stop()).catch(() => {})` (fire-and-forget), then proceeded to `lockHandle.releaseFn()` and `server.close(() => process.exit(0))`. The TG bot-token lock release lives inside `runtime.stop() → dispose() → listener.stop() → releaseLock()`, so on SIGTERM the process exited BEFORE `releaseLock()` ran. The lockfile at `~/.anima/locks/telegram-bot-token-*.lock` persisted with the dying PID. The next harness boot (e.g. via `anima upgrade`) booted within the lock's 5-min TTL, saw `kill(pid, 0)` succeed against the now-zombie or PID-recycled holder, and `acquireScopedLock` returned the existing-holder branch. `TelegramListener.start()` threw `BotTokenLockedError`, the build-runtime `void l.start().catch(...)` swallowed the error, and the listener never tried again. The bot was permanently silent on the new harness. Recovery required manual `rm` of the stale lockfile or container restart.
+- Multi-layer fix:
+  1. **`gateway/local-entrypoint.ts shutdown()`** is now async and awaits `runtime.stop()` (with the existing 10s force-exit backstop) before releasing the gateway lock and exiting. Plugin listeners now finish their teardown, including `releaseLock()`, before `process.exit(0)`. Single-shot `shuttingDown` guard prevents a second SIGTERM from re-entering.
+  2. **`gateway/entrypoint.ts`** (sandbox harness, what enigma runs) gets the same shutdown shape. This was the actual code path that left the v0.19.12-era enigma harness's lock leaked.
+  3. **`plugin-telegram/listener.ts`** now retries on `BotTokenLockedError` instead of giving up. Internal `setTimeout` ladder: 12 attempts × 30s = 6 minutes, comfortably past the 5-minute lock TTL so a stale-but-tenable lock auto-evicts. `stop()` cancels the retry timer.
+  4. **`core/locks.ts:isStale`** detects zombie processes on Linux. After `process.kill(pid, 0)` succeeds it reads `/proc/<pid>/status` and returns stale=true if `State: Z`. New `isZombieLinux(pid)` helper. Closes Task #277.
+  5. **`gateway/upgrade-script.ts`** wipes `$HOME/.anima/locks/*.lock` after killing the prior harness and before relaunching, as insurance against older harness versions whose shutdown didn't release the TG lock cleanly. Without this, the v0.19.13 → v0.19.14 upgrade wouldn't rescue enigma's already-leaked lock.
+
+### Files changed
+
+- `packages/gateway/src/local-entrypoint.ts`: async shutdown, `await runtime.stop()`, single-shot guard, force-exit timer cleared on graceful close.
+- `packages/gateway/src/entrypoint.ts`: same shutdown pattern as local mode (sandbox harness).
+- `packages/plugin-telegram/src/listener.ts`: retry-on-locked timer ladder, `stopped` guard, retry counter resets on successful acquisition.
+- `packages/core/src/locks.ts`: zombie-aware `isStale` on Linux + new exported `isZombieLinux`.
+- `packages/gateway/src/upgrade-script.ts`: `rm -f ~/.anima/locks/*.lock` step inserted between `pkill -f anima-gateway` and the relaunch.
+- `packages/core/src/locks.test.ts`: zombie-detection smoke + dead-pid eviction tests.
+- `packages/gateway/src/upgrade-script.test.ts`: ordering assertion (kill, clear-locks, relaunch).
+- `packages/plugin-telegram/src/listener-retry.test.ts` (new, 3 tests): `start()` no-throw on locked, `stop()` cancels pending retry, lockfile released cleanly after retry+stop.
+
 ## [0.19.13] - 2026-05-04
 
 ### Fixed
@@ -1302,6 +1325,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.14]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.14
 [0.19.13]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.13
 [0.19.12]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.12
 [0.19.11]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.11

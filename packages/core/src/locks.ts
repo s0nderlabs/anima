@@ -60,17 +60,33 @@ function readLock(path: string): LockRecord | null {
   }
 }
 
+// process.kill(pid, 0) succeeds against zombie (defunct) processes on Linux
+// because the kernel keeps the PID slot until the parent reaps it. A zombie
+// can never refresh its lock or service work, so we treat it as gone. See
+// feedback-tg-token-lock-zombie-after-upgrade.md. Exported for tests; not
+// public API.
+export function isZombieLinux(pid: number): boolean {
+  try {
+    const status = readFileSync(`/proc/${pid}/status`, 'utf8')
+    const m = status.match(/^State:\s+(\S)/m)
+    return m?.[1] === 'Z'
+  } catch {
+    return false
+  }
+}
+
 function isStale(record: LockRecord, now: number): boolean {
   if (now - record.updatedAt > record.ttl) return true
   if (record.pid === process.pid) return false
   try {
     process.kill(record.pid, 0)
-    return false
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code
     if (code === 'EPERM') return false
     return true
   }
+  if (process.platform === 'linux' && isZombieLinux(record.pid)) return true
+  return false
 }
 
 function attemptOnce(

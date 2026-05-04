@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DEFAULT_LOCK_TTL_SECONDS, acquireScopedLock } from './locks'
+import { DEFAULT_LOCK_TTL_SECONDS, acquireScopedLock, isZombieLinux } from './locks'
 
 let testDir: string
 
@@ -132,6 +132,46 @@ describe('acquireScopedLock', () => {
 
   it('respects custom rootDir', () => {
     const r = acquireScopedLock({ scope: 'test', identity: 'token-a', rootDir: testDir })
+    expect(r.acquired).toBe(true)
+    r.handle?.releaseFn()
+  })
+})
+
+describe('isZombieLinux', () => {
+  it('returns false on non-linux platforms', () => {
+    if (process.platform === 'linux') return // platform-specific guard
+    expect(isZombieLinux(process.pid)).toBe(false)
+  })
+
+  it('returns false for the live current process on linux', () => {
+    if (process.platform !== 'linux') return
+    expect(isZombieLinux(process.pid)).toBe(false)
+  })
+
+  it('returns false when /proc/<pid>/status is unreadable', () => {
+    // pid 999999 vanishingly unlikely to exist; readFile will throw.
+    expect(isZombieLinux(999_999)).toBe(false)
+  })
+})
+
+describe('acquireScopedLock evicts dead-pid lock', () => {
+  it('reclaims when the lockfile records a pid that no longer exists', () => {
+    // Take the lock, write a tampered record claiming a vanishingly-unlikely
+    // pid is the holder, then re-acquire. The stale-detection path
+    // (process.kill(pid, 0) → ESRCH) should treat it as gone and reclaim.
+    const path = findLockFile(testDir, 'test', 'dead-pid')
+    writeFileSync(
+      path,
+      JSON.stringify({
+        pid: 999_998, // unlikely to exist on the test host
+        scope: 'test',
+        identityHash: 'whatever',
+        startedAt: Math.floor(Date.now() / 1000),
+        updatedAt: Math.floor(Date.now() / 1000),
+        ttl: 300,
+      }),
+    )
+    const r = acquireScopedLock({ scope: 'test', identity: 'dead-pid', rootDir: testDir })
     expect(r.acquired).toBe(true)
     r.handle?.releaseFn()
   })

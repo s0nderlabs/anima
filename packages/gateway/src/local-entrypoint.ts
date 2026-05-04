@@ -262,12 +262,30 @@ async function main(): Promise<void> {
     log(`expecting operator=${operatorAddress}`)
   })
 
-  const shutdown = (signal: string): void => {
+  let shuttingDown = false
+  const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) return
+    shuttingDown = true
     log(`signal=${signal} shutting down`)
     transitionToShuttingDown(sess)
     clearInterval(lockRefresh)
     approvals.stop()
-    Promise.resolve(runtime.stop()).catch(() => {})
+    // Backstop in case runtime.stop hangs (e.g. grammy bot.stop deadlock).
+    const forceExit = setTimeout(() => {
+      log('shutdown timeout, forcing exit')
+      process.exit(1)
+    }, 10_000)
+    forceExit.unref()
+    // Plugin listeners (Telegram especially) release their bot-token lock
+    // during runtime.stop teardown. Exiting before this resolves leaves a
+    // stale lock with the dying PID; the next boot then sees kill(pid, 0)
+    // succeed against the zombie and silently refuses to start the
+    // listener. See feedback-tg-token-lock-zombie-after-upgrade.md.
+    try {
+      await runtime.stop()
+    } catch {
+      /* best-effort */
+    }
     try {
       lockHandle.releaseFn()
     } catch {
@@ -280,16 +298,13 @@ async function main(): Promise<void> {
     }
     server.close(() => {
       log('server closed')
+      clearTimeout(forceExit)
       process.exit(0)
     })
-    setTimeout(() => {
-      log('shutdown timeout, forcing exit')
-      process.exit(1)
-    }, 10_000).unref()
   }
 
-  process.on('SIGTERM', () => shutdown('SIGTERM'))
-  process.on('SIGINT', () => shutdown('SIGINT'))
+  process.on('SIGTERM', () => void shutdown('SIGTERM'))
+  process.on('SIGINT', () => void shutdown('SIGINT'))
 }
 
 main().catch(err => {

@@ -93,6 +93,13 @@ export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeSc
     `fuser -k ${port}/tcp 2>/dev/null || true`,
     'sleep 3',
     '',
+    // Wipe agent-scoped locks after the prior harness is dead so the new
+    // instance starts clean. Insurance for older harness versions whose
+    // shutdown didn't await listener teardown and could leak a stale TG
+    // bot-token lockfile. See feedback-tg-token-lock-zombie-after-upgrade.md.
+    'echo "[clear stale agent locks]"',
+    'rm -f "$HOME/.anima/locks/"*.lock 2>/dev/null || true',
+    '',
     `export SANDBOX_ID=${shQuote(opts.sandboxId)}`,
     `export ANIMA_OPERATOR_ADDRESS=${shQuote(opts.operatorAddress)}`,
     `export HARNESS_PORT=${shQuote(String(port))}`,
