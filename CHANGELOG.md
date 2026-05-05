@@ -4,6 +4,21 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.19] - 2026-05-05
+
+### Fixed
+
+- **TG approval modal now visually resolves after click.** v0.19.18 fixed callback_query routing so the click reached the runtime resolver, but the message itself stayed in TG with all four buttons because `listener.handleCallbackQuery` only called `answerCallbackQuery` (popup ack), never `editMessageText`. Operators saw a phantom "modal that should be done." Listener now edits the message body to append a resolution suffix (`✅ Allowed once (by 12345)`, `❌ Denied (by 12345)`, etc.) and removes the inline keyboard. Falls back to `editMessageReplyMarkup` (keyboard-only removal) when the original text isn't available. Best-effort: the underlying approval is already resolved at the runtime level, so any edit failure is swallowed.
+
+### Added
+
+- `formatApprovalResolution(choice, byUserId)` exported from `@s0nderlabs/anima-plugin-telegram` — single source of truth for the post-click suffix.
+- `approval-resolution.test.ts` (2 cases) pinning the suffix wording for each `ApprovalChoice`.
+
+### Tests
+
+- Workspace 862 → 864 unit tests (+2). lint + typecheck clean.
+
 ## [0.19.18] - 2026-05-05
 
 ### Fixed
@@ -1398,6 +1413,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.19]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.19
 [0.19.18]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.18
 [0.19.17]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.17
 [0.19.16]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.16

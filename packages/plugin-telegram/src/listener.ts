@@ -39,6 +39,23 @@ const RETRY_INTERVAL_MS = 30_000
 const MAX_LOCK_RETRY_ATTEMPTS = 12
 
 /**
+ * Map an `ApprovalChoice` to the human-readable resolution label appended
+ * to the approval message after a click. Mirrors the keyboard labels so
+ * operators see the same wording in the resolved message that they tapped.
+ */
+export function formatApprovalResolution(choice: ApprovalChoice, byUserId: number): string {
+  const label =
+    choice === 'once'
+      ? '✅ Allowed once'
+      : choice === 'session'
+        ? '✅ Allowed for session'
+        : choice === 'always'
+          ? '✅ Always allowed'
+          : '❌ Denied'
+  return `${label} (by ${byUserId})`
+}
+
+/**
  * Update kinds we ask Telegram to deliver via long-poll.
  *
  * `'message'` covers inbound DMs we dispatch to the brain. `'callback_query'`
@@ -135,6 +152,24 @@ export class TelegramListener {
       await ctx.answerCallbackQuery({ text: `✓ ${parsed.choice}` })
     } catch {
       /* ignore */
+    }
+    // Resolve the modal visually: append the choice + drop the inline
+    // keyboard. Without this, every clicked approval message stays on
+    // screen with all four buttons, leaving operators unsure whether
+    // their tap registered. Best-effort — if the edit fails (rate
+    // limit, message age, deleted), the underlying approval is still
+    // resolved at the runtime level, so we swallow the error.
+    const originalText =
+      typeof q.message?.text === 'string' && q.message.text.length > 0 ? q.message.text : null
+    const suffix = formatApprovalResolution(parsed.choice, q.from.id)
+    try {
+      if (originalText) {
+        await ctx.editMessageText(`${originalText}\n\n${suffix}`, { reply_markup: undefined })
+      } else {
+        await ctx.editMessageReplyMarkup({ reply_markup: undefined })
+      }
+    } catch {
+      /* ignore — modal was clicked, runtime already resolved; keyboard cleanup is cosmetic */
     }
   }
 
