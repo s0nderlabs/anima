@@ -27,7 +27,7 @@ export type {
   TelegramToolEvent,
 } from './types'
 export { ProgressTracker, PROGRESS_EDIT_INTERVAL } from './progress'
-export { TelegramListener, capForTelegram } from './listener'
+export { TelegramListener, TELEGRAM_ALLOWED_UPDATES, capForTelegram } from './listener'
 export { buildSessionKey, sanitizeAgentName } from './session-key'
 export { formatTelegramChannel, formatInboundPreview } from './format'
 export { RateLimiter } from './limits'

@@ -37,6 +37,7 @@ import { type Address, type Hex, formatEther, hexToBytes, parseEther } from 'vie
 import type { LocalAccount } from 'viem/accounts'
 import { SandboxClient } from '../../sandbox/client'
 import { withSilencedConsole } from '../../util/silence-console'
+import type { TelegramHandoffSecrets } from '../../util/telegram-secrets'
 
 export interface SandboxProvisionOpts {
   /** OperatorSigner. Used for both Galileo settlement txs AND provision sig. */
@@ -320,7 +321,7 @@ export interface HandoffAgentToGatewayOpts {
    * the bootstrap pubkey same as agentPrivkey. v0.18.2+ harness expects this
    * field; older harnesses ignore it.
    */
-  telegramSecrets?: { botToken: string; allowedUserIds: number[]; pairingApproved?: number[] }
+  telegramSecrets?: TelegramHandoffSecrets
   /** Default 60_000. */
   pubkeyTimeoutMs?: number
   /** Default 180_000. */
@@ -635,6 +636,16 @@ export interface ResumeArchivedSandboxOpts {
   /** Optional .0g subname (e.g. "specter") forwarded into RuntimeConfig so the
    * harness's TG pairing greeting addresses the agent by registered name. */
   subname?: string | null
+  /**
+   * Optional plaintext Telegram secrets (bot token + allowlist) shipped via
+   * a secondary ECIES envelope so the resumed harness can re-attach the
+   * grammY listener. Without this, every pause→resume cycle silently strips
+   * the TG bot — the gateway daemon comes back up with `plugins: ['telegram']`
+   * but no token, and `build-runtime.ts` skips listener registration. The
+   * `runResume` CLI loads this from `loadTelegramSecrets`; programmatic
+   * callers may pass `undefined` to keep the harness TG-less.
+   */
+  telegramSecrets?: TelegramHandoffSecrets
   onProgress?: (msg: string) => void
   ensureStartedOpts?: EnsureSandboxStartedOpts
 }
@@ -705,6 +716,7 @@ export async function resumeArchivedSandbox(
     plugins: opts.plugins,
     promptAppend: opts.promptAppend,
     subname: opts.subname,
+    telegramSecrets: opts.telegramSecrets,
     onProgress: progress,
   })
 

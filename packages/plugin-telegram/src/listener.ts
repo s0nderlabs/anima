@@ -38,6 +38,23 @@ import { startTypingLoop } from './typing'
 const RETRY_INTERVAL_MS = 30_000
 const MAX_LOCK_RETRY_ATTEMPTS = 12
 
+/**
+ * Update kinds we ask Telegram to deliver via long-poll.
+ *
+ * `'message'` covers inbound DMs we dispatch to the brain. `'callback_query'`
+ * covers inline-keyboard taps (the [Allow Once / Session / Always / Deny]
+ * buttons rendered for tool approvals). Without `'callback_query'` here,
+ * Telegram silently filters the click events out of `getUpdates`, the
+ * `bot.on('callback_query:data', ...)` handler never fires, and operator
+ * taps register on the device but never reach the harness — the modal
+ * appears stuck and the brain's tool call hangs until timeout.
+ *
+ * Latent bug from v0.18.0 (the introduction of inline-keyboard approvals);
+ * v0.19.10 fixed handler registration but not the polling spec, which is
+ * why no live drive caught it before v0.19.18.
+ */
+export const TELEGRAM_ALLOWED_UPDATES = ['message', 'callback_query'] as const
+
 export interface TelegramListenerOpts extends TelegramRuntimeContext {
   /** Optional override of the Telegram Bot API root. Used by the mock-bot test. */
   apiRoot?: string
@@ -182,7 +199,7 @@ export class TelegramListener {
       .start({
         onStart: info => console.log(`[telegram] listener active @${info.username}`),
         drop_pending_updates: true,
-        allowed_updates: ['message'],
+        allowed_updates: [...TELEGRAM_ALLOWED_UPDATES],
       })
       .catch(err => {
         const verdict = classifyStartFailure(err)

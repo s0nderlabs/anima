@@ -41,6 +41,21 @@ export interface TelegramSecretsPlaintext {
   allowedUserIds: number[]
 }
 
+/**
+ * Subset of `TelegramSecretsPlaintext` that the CLI ships into the harness
+ * provision envelope on init / upgrade / resume. The harness doesn't need
+ * the operator-side metadata (`botUsername`, `botId`); it only needs the
+ * token + allowlist + optional pairing list. Centralising this as a named
+ * type avoids drift between the four CLI handoff sites that previously
+ * inlined the literal shape (init wizard, upgrade, resume, the
+ * `HandoffAgentToGateway` + `ResumeArchivedSandbox` interfaces).
+ */
+export interface TelegramHandoffSecrets {
+  botToken: string
+  allowedUserIds: number[]
+  pairingApproved?: number[]
+}
+
 export function telegramSecretsPath(agentId: string): string {
   return join(agentPaths.agent(agentId).dir, 'telegram-secrets.encrypted')
 }

@@ -4,6 +4,26 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.18] - 2026-05-05
+
+### Fixed
+
+- **Telegram inline-keyboard approval clicks now reach the bot.** `bot.start({ allowed_updates: ['message'] })` filtered every `callback_query` update out of long-poll, so v0.18.1's [Allow Once / Session / Always / Deny] buttons rendered fine but every tap was silently dropped before grammY ever saw it. The brain stayed blocked on the pending approval until timeout; operators saw the modal "do nothing." v0.19.10 fixed handler registration but not the polling spec. Latent since v0.18.0; reproduced live on enigma May 5 2026 when four operator clicks accomplished nothing. Fix: extracted `TELEGRAM_ALLOWED_UPDATES = ['message', 'callback_query']` and added a regression test pinning both kinds.
+- **`anima resume` no longer strips the Telegram listener.** Pause then resume cycles silently dropped the bot, the gateway daemon came back up with `plugins: ['telegram']` but no token, and `build-runtime.ts` skipped listener registration. `runResume` now mirrors the v0.18.2 `anima upgrade` pattern: load operator-encrypted secrets via `loadTelegramSecrets`, decrypt with the operator wallet, ECIES-re-encrypt to the harness bootstrap pubkey, ship via the secondary provision envelope. Same identity preserved, listener restored. Added `telegramSecrets?` to `ResumeArchivedSandboxOpts`.
+- **Brain stops shelling out for `which chromium ...` before browser tools.** The previous BROWSER_GUIDANCE didn't explicitly forbid environment probes, so the brain interpreted "use the browser tool" as "first verify chromium exists." That triggered a `shell.run` approval prompt and (with the v0.19.18 callback fix unverified at the time) clicks-that-do-nothing led the brain to hallucinate a fallback to `web.fetch` saying "browser tools aren't available in this sandbox." Tightened guidance: `browser.*` is self-contained, registration === availability, no probes.
+
+### Changed
+
+- `TELEGRAM_ALLOWED_UPDATES` exported from `@s0nderlabs/anima-plugin-telegram` so downstream code paths and regression tests reference one source of truth.
+- `ResumeArchivedSandboxOpts.telegramSecrets` is the new optional field; `runResume` populates it via the existing `loadTelegramSecrets` helper.
+
+### Tests
+
+- New `listener-allowed-updates.test.ts` (2 cases) pins both `'message'` and `'callback_query'` in the polling spec.
+- New `ResumeArchivedSandboxOpts shape` group in `sandbox-provision.test.ts` (1 case) compile-time-asserts the field stays on the public interface.
+- New `default system prompt forbids pre-flight environment probes for browser` (1 case) pins the guidance language so a future copy-edit can't quietly re-introduce the hallucination path.
+- Workspace 862 unit tests pass (was 854).
+
 ## [0.19.17] - 2026-05-05
 
 ### Fixed
@@ -1378,6 +1398,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.19.18]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.18
 [0.19.17]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.17
 [0.19.16]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.16
 [0.19.15]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.15

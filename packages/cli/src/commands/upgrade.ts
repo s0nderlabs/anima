@@ -27,6 +27,7 @@ import {
   formatResolvedRef,
   resolveAnimaRef,
 } from '../util/ref-resolver'
+import type { TelegramHandoffSecrets } from '../util/telegram-secrets'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 import {
   ensureSandboxStarted,
@@ -401,9 +402,7 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
   // Phase 12 / B6: ship telegram secrets via secondary envelope if present.
   // Operator decrypts the local blob; ECIES-encrypts to bootstrap pubkey
   // happens inside handoffAgentToGateway.
-  let telegramSecretsPlain:
-    | { botToken: string; allowedUserIds: number[]; pairingApproved?: number[] }
-    | undefined
+  let telegramSecretsPlain: TelegramHandoffSecrets | undefined
   try {
     const { iNFTAgentId } = await import('@s0nderlabs/anima-core')
     const { telegramSecretsExist, loadTelegramSecrets } = await import('../util/telegram-secrets')

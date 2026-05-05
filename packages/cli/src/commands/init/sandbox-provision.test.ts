@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 import type { SandboxRecord } from '@s0nderlabs/anima-core'
 import {
+  type ResumeArchivedSandboxOpts,
   createSandboxWithOrphanRetry,
   ensureSandboxArchived,
   ensureSandboxStarted,
@@ -340,5 +341,22 @@ describe('ensureSandboxArchived', () => {
     await expect(
       ensureSandboxArchived(provider as never, 'sb-a9', { intervalMs: 1 }),
     ).rejects.toThrow(/error during stop/)
+  })
+})
+
+describe('ResumeArchivedSandboxOpts shape', () => {
+  // Regression guard for the v0.19.18 fix: every pause→resume cycle on
+  // anima resume must be able to ship telegram secrets to the restored
+  // gateway, otherwise the TG listener silently drops on resume. This
+  // test fails to compile if anyone removes the telegramSecrets field
+  // from the interface.
+  test('telegramSecrets field is part of the public interface', () => {
+    type WithTg = Required<Pick<ResumeArchivedSandboxOpts, 'telegramSecrets'>>
+    const sample: WithTg['telegramSecrets'] = {
+      botToken: '123:abcdef',
+      allowedUserIds: [42],
+    }
+    expect(sample.botToken).toBe('123:abcdef')
+    expect(sample.allowedUserIds).toEqual([42])
   })
 })

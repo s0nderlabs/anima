@@ -104,6 +104,18 @@ test('default system prompt includes browser guidance always-on (not conditional
   expect(rendered).toContain('agent-browser')
 })
 
+test('default system prompt forbids pre-flight environment probes for browser', () => {
+  // v0.19.18 regression guard: brain was hitting `shell.run "which chromium ..."`
+  // before browser.navigate, blocking forever on the resulting approval and
+  // then hallucinating "browser tools aren't available in this sandbox" when
+  // the probe was denied. The guidance must explicitly forbid those probes.
+  const p = buildFrozenPrefix({ memoryIndex: null, timestamp: null })
+  const rendered = renderFrozenPrefix(p)
+  expect(rendered).toContain('Do NOT pre-probe the environment')
+  expect(rendered).toContain('which chromium')
+  expect(rendered).toContain('self-contained')
+})
+
 test('default system prompt includes tool-use enforcement', () => {
   const p = buildFrozenPrefix({ memoryIndex: null, timestamp: null })
   const rendered = renderFrozenPrefix(p)
