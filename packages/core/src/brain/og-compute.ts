@@ -90,6 +90,15 @@ export class OGComputeBrain implements Brain {
   }
 
   /**
+   * v0.21.0: expose the lazily-initialized broker.ledger so AutoTopupManager
+   * can read the provider envelope balance and call deposit/transfer using
+   * the same wallet binding as the brain. Returns null until init() runs.
+   */
+  getLedger(): Broker['ledger'] | null {
+    return this.broker?.ledger ?? null
+  }
+
+  /**
    * Refresh the per-turn user-context payload from the latest local state.
    * Called by the chat loop right before every `infer()` so MEMORY.md updates
    * land in the next turn without rebuilding the system prompt (preserves

@@ -26,7 +26,7 @@
     },
     "packages/cli": {
       "name": "@s0nderlabs/anima",
-      "version": "0.20.2",
+      "version": "0.21.0",
       "bin": {
         "anima": "./bin/anima",
       },
@@ -51,7 +51,7 @@
     },
     "packages/core": {
       "name": "@s0nderlabs/anima-core",
-      "version": "0.20.2",
+      "version": "0.21.0",
       "dependencies": {
         "@0gfoundation/0g-ts-sdk": "1.2.6",
         "@0glabs/0g-serving-broker": "^0.7.5",
@@ -70,7 +70,7 @@
     },
     "packages/gateway": {
       "name": "@s0nderlabs/anima-gateway",
-      "version": "0.20.2",
+      "version": "0.21.0",
       "bin": {
         "anima-gateway": "./bin/anima-gateway",
         "anima-gateway-local": "./bin/anima-gateway-local",
@@ -87,7 +87,7 @@
     },
     "packages/plugin-comms": {
       "name": "@s0nderlabs/anima-plugin-comms",
-      "version": "0.20.2",
+      "version": "0.21.0",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "eth-crypto": "^4.0.0",
@@ -97,7 +97,7 @@
     },
     "packages/plugin-onchain": {
       "name": "@s0nderlabs/anima-plugin-onchain",
-      "version": "0.20.2",
+      "version": "0.21.0",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "viem": "^2.21.55",
@@ -106,7 +106,7 @@
     },
     "packages/plugin-system": {
       "name": "@s0nderlabs/anima-plugin-system",
-      "version": "0.20.2",
+      "version": "0.21.0",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "agent-browser": "^0.26.0",
@@ -115,7 +115,7 @@
     },
     "packages/plugin-telegram": {
       "name": "@s0nderlabs/anima-plugin-telegram",
-      "version": "0.20.2",
+      "version": "0.21.0",
       "dependencies": {
         "@s0nderlabs/anima-core": "workspace:*",
         "grammy": "^1.42.0",
@@ -1716,7 +1716,7 @@
 
     "open-jsonrpc-provider/axios": ["axios@0.27.2", "", { "dependencies": { "follow-redirects": "^1.14.9", "form-data": "^4.0.0" } }, "sha512-t+yRIyySRTp/wua5xEr+z1q60QmLq8ABsS5O9Me1AsE5dfKqgnCFzwiCZZ/cGNd1lq4/7akDWMxdhVlucjmnOQ=="],
 
-    "open-jsonrpc-provider/ws": ["ws@8.18.3", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-PEIGCY5tSlUt50cqyMXfCzX+oOPqN0vuGqWzbcJ2xvnkzkq46oOpz7dQaTDBdfICb4N14+GARUDw2XV2N4tvzg=="],
+    "open-jsonrpc-provider/ws": ["ws@8.20.0", "", { "peerDependencies": { "bufferutil": "^4.0.1", "utf-8-validate": ">=5.0.2" }, "optionalPeers": ["bufferutil", "utf-8-validate"] }, "sha512-sAt8BhgNbzCtgGbt2OxmpuryO63ZoDk/sqaB/znQm94T4fCEsy/yV+7CdC1kJhOU9lboAEU7R3kquuycDoibVA=="],
 
     "ox/@adraffy/ens-normalize": ["@adraffy/ens-normalize@1.11.1", "", {}, "sha512-nhCBV3quEgesuf7c7KYfperqSS14T8bYuvJ8PcLJp6znkZpFc0AuW4qBtr8eKVyPPe/8RSr7sglCWPU5eaxwKQ=="],
 

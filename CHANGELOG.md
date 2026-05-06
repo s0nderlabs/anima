@@ -4,6 +4,18 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.0] - 2026-05-06
+
+### Added
+
+- **Auto-topup: agent funds its own compute bills.** New `AutoTopupManager` (`packages/core/src/economy/auto-topup.ts`) polls the per-provider compute envelope every 5 minutes (configurable). When the envelope drops below `compute.lowThreshold` (default 0.5 0G), the manager calls `broker.ledger.depositFund(amount)` followed by `broker.ledger.transferFund(provider, amountWei)` signed by the agent's private key. The operator pays nothing — this is the mechanism that lets a paused-and-restarted agent keep itself running on its own balance. Hard cap: 5 successful topups per envelope per UTC day. Refuses topup when wallet would dip below `wallet.minRetainedAfterTopup` (default 0.1 0G gas buffer). Wallet-low notification fires once when the agent EOA crosses `wallet.notifyThreshold` (default 2.0 0G) downward. All actionable changes flow as `auto-topup` events on the gateway EventHub + `auto-topup` activity-log entries; TUI thin-client renders ⚡ topup / ⚠ wallet / ✗ topup system rows. Configurable via `economy.autoTopup` in `anima.config.ts`. Default-on; set `enabled: false` to disable. 9 new unit tests.
+- New `getLedger()` accessor on `OGComputeBrain` so the auto-topup manager can read the broker's ledger surface using the same wallet binding as the brain. Returns null until `init()` runs.
+- New `'auto-topup'` event kind on the gateway EventHub and `'auto-topup'` activity-log entry kind.
+
+### Changed
+
+- `BuiltRuntime` now exposes `autoTopup: AutoTopupManager | null` so the gateway shutdown path can stop the manager cleanly. The manager is constructed and started after `brain.init()` and stopped in `dispose()` before listener teardown.
+
 ## [0.20.2] - 2026-05-06
 
 ### Fixed

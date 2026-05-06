@@ -165,6 +165,31 @@ export interface AnimaConfig {
     provider?: string | null
   }
   /**
+   * v0.21.0 (May 6 2026): agent funds its own infra bills out of its EOA.
+   * The compute ledger envelope for `brain.provider` is monitored every
+   * `pollIntervalMs`; when it drops below `compute.lowThreshold`, the
+   * gateway calls `broker.ledger.depositFund` + `transferFund` signed by
+   * the agent's private key. Operator gets notified via TG and TUI when
+   * topup fires, when wallet drops below `wallet.notifyThreshold`, or
+   * when topup fails (RPC, insufficient agent balance, daily cap reached).
+   * Set `enabled: false` to disable; defaults are tuned for hackathon use.
+   */
+  economy?: {
+    autoTopup?: {
+      enabled?: boolean
+      pollIntervalMs?: number
+      compute?: {
+        lowThreshold?: number
+        topUpAmount?: number
+        maxPerDay?: number
+      }
+      wallet?: {
+        notifyThreshold?: number
+        minRetainedAfterTopup?: number
+      }
+    }
+  }
+  /**
    * Phase 11 (May 2026): where the harness physically runs.
    *
    *  - `local` (default): harness lives on this machine while `anima` chat is

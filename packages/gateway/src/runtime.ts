@@ -40,6 +40,25 @@ export interface RuntimeConfig {
    * loaded anima.config.ts.
    */
   subname?: string | null
+  /**
+   * v0.21.0: agent self-funds compute bills out of its EOA. Mirror of the
+   * `economy.autoTopup` field in the operator's anima.config.ts.
+   */
+  economy?: {
+    autoTopup?: {
+      enabled?: boolean
+      pollIntervalMs?: number
+      compute?: {
+        lowThreshold?: number
+        topUpAmount?: number
+        maxPerDay?: number
+      }
+      wallet?: {
+        notifyThreshold?: number
+        minRetainedAfterTopup?: number
+      }
+    }
+  }
 }
 
 export interface ChatTurnInput {

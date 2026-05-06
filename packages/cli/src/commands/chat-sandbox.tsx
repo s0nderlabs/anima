@@ -216,6 +216,14 @@ export async function runChatSandbox(
         })
         break
       }
+      case 'auto-topup': {
+        const message = String(d.message ?? '')
+        const kind = String(d.kind ?? '')
+        const prefix =
+          kind === 'topup-fired' ? '⚡ topup' : kind === 'wallet-low' ? '⚠ wallet' : '✗ topup'
+        state.pushRow({ role: 'system', text: `${prefix}  ${message}` })
+        break
+      }
       case 'listener-event': {
         const k = String(d.kind ?? '')
         if (k === 'a2a-delivered') {

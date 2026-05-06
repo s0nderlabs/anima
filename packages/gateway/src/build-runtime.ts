@@ -4,6 +4,8 @@ import {
   ANIMA_INBOX_ADDRESS,
   ANIMA_MARKET_ADDRESS,
   ActivityLog,
+  type AutoTopupEvent,
+  AutoTopupManager,
   type BrainMessage,
   BrokerPool,
   HookBus,
@@ -113,6 +115,8 @@ export interface BuiltRuntime {
   refreshUserContext: () => Promise<void>
   dispose: () => Promise<void>
   agentId: string
+  /** v0.21.0: optional auto-topup manager. Null when economy.autoTopup.enabled === false. */
+  autoTopup: AutoTopupManager | null
 }
 
 const PERMISSION_MODE_MAP: Record<NonNullable<RuntimeConfig['permissions']>, PermissionMode> = {
@@ -872,6 +876,13 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
   }
 
   const dispose = async (): Promise<void> => {
+    if (autoTopup) {
+      try {
+        autoTopup.stop()
+      } catch {
+        // best-effort
+      }
+    }
     for (const l of collectedListeners) {
       try {
         await l.stop?.()
@@ -879,6 +890,43 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
         // best-effort
       }
     }
+  }
+
+  // v0.21.0: agent funds its own compute bills out of its EOA. Manager polls
+  // the per-provider envelope and refills via depositFund + transferFund when
+  // it drops below threshold. Notifications flow through `events` (TUI ✂︎-style
+  // system row) and the activity log. Disabled when `economy.autoTopup.enabled
+  // === false`.
+  let autoTopup: AutoTopupManager | null = null
+  const economyEnabled = config.economy?.autoTopup?.enabled !== false
+  if (economyEnabled && config.brain?.provider) {
+    const onAutoTopupEvent = (ev: AutoTopupEvent): void => {
+      events.publish('auto-topup', ev)
+      void activity.append({ ts: ev.ts, kind: 'auto-topup', data: ev }).catch(() => {})
+    }
+    autoTopup = new AutoTopupManager(
+      {
+        enabled: true,
+        pollIntervalMs: config.economy?.autoTopup?.pollIntervalMs,
+        compute: {
+          provider: config.brain.provider as Address,
+          lowThreshold: config.economy?.autoTopup?.compute?.lowThreshold,
+          topUpAmount: config.economy?.autoTopup?.compute?.topUpAmount,
+          maxPerDay: config.economy?.autoTopup?.compute?.maxPerDay,
+        },
+        wallet: {
+          notifyThreshold: config.economy?.autoTopup?.wallet?.notifyThreshold,
+          minRetainedAfterTopup: config.economy?.autoTopup?.wallet?.minRetainedAfterTopup,
+        },
+      },
+      {
+        agentAddress,
+        publicClient: viemClients.publicClient,
+        getBrokerLedger: async () => brain.getLedger(),
+        onEvent: onAutoTopupEvent,
+      },
+    )
+    autoTopup.start()
   }
 
   return {
@@ -899,6 +947,7 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
     },
     dispose,
     agentId,
+    autoTopup,
   }
 }
 

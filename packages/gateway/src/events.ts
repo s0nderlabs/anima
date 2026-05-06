@@ -20,6 +20,12 @@ export type GatewayEventKind =
    * older history into a summary message. TUI surfaces as ✂︎ system row.
    */
   | 'context-compacted'
+  /**
+   * v0.21.0: AutoTopupManager fired or tried to fire a topup, OR the agent
+   * wallet crossed the notify threshold downward. Data shape is
+   * `AutoTopupEvent` (kind: topup-fired | topup-failed | wallet-low).
+   */
+  | 'auto-topup'
 
 export interface GatewayEvent {
   /** Monotonic per-hub id used for SSE last-event-id reconnects. */

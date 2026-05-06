@@ -417,3 +417,13 @@ export {
   type SettlementClientOpts,
   SandboxSettlementClient,
 } from './og-sandbox'
+
+export {
+  AutoTopupManager,
+  type AutoTopupOpts,
+  type AutoTopupDeps,
+  type AutoTopupEvent,
+  type AutoTopupEventKind,
+  type BrokerLedgerLike,
+  type PublicClientLike,
+} from './economy'

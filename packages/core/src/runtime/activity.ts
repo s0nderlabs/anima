@@ -3,7 +3,14 @@ import { dirname } from 'node:path'
 
 export interface ActivityEntry {
   ts: number
-  kind: 'wake' | 'tool-call' | 'tool-result' | 'brain-response' | 'error' | 'context-compacted'
+  kind:
+    | 'wake'
+    | 'tool-call'
+    | 'tool-result'
+    | 'brain-response'
+    | 'error'
+    | 'context-compacted'
+    | 'auto-topup'
   data: unknown
 }
 
