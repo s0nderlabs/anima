@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.1] - 2026-05-06
+
+### Fixed
+
+- **TUI thin-client now intercepts `/yolo`, `/perms`, `/reset` bypass commands.** v0.20.0 wired the bypass interception in `build-runtime.ts` for the TG dispatch path, but the TUI thin-client routes through `real-runtime.ts` `runChatTurn` for the gateway-local mode (post-v0.19.0 architecture), which had no bypass interception. Effect: typing `/perms strict` in the TUI sent the literal string to `brain.infer`, which produced an English-language acknowledgment ("Permission mode set to strict") without actually mutating the `PermissionService`. Status bar still showed the original mode. Fix: added `dispatchBypass(bypass, runtime)` mirror of `dispatchTelegramBypass` in `real-runtime.ts:75`, runs BEFORE `brain.infer` so bypass commands operate without burning compute. Wires `applyYolo` / `applyPerms` from `@s0nderlabs/anima-core`.
+
 ## [0.20.0] - 2026-05-06
 
 ### Added
@@ -1447,6 +1453,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.20.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.20.1
 [0.20.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.20.0
 [0.19.19]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.19
 [0.19.18]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.18

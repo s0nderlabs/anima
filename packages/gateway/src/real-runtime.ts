@@ -1,13 +1,45 @@
 import { mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { explorerTxUrl, newEventId } from '@s0nderlabs/anima-core'
+import { applyPerms, applyYolo, explorerTxUrl, newEventId } from '@s0nderlabs/anima-core'
+import { type ParsedBypass, parseBypassCommand } from '@s0nderlabs/anima-plugin-telegram'
 import type { Hex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import type { ApprovalRelay } from './approval-relay'
 import { type BuiltRuntime, buildAnimaRuntime } from './build-runtime'
 import type { EventHub } from './events'
 import type { ChatTurnInput, ChatTurnResult, RuntimeAdapter, RuntimeConfig } from './runtime'
+
+/**
+ * Mirror of dispatchTelegramBypass for the TUI /chat HTTP path. Runs BEFORE
+ * brain.infer so /yolo /perms /reset operate without burning compute.
+ */
+async function dispatchBypass(bypass: ParsedBypass, r: BuiltRuntime): Promise<string> {
+  switch (bypass.command) {
+    case '/stop':
+      return 'no active turn to stop here.'
+    case '/new':
+    case '/reset':
+      try {
+        await r.brain.clearChannel('tui:stdin')
+        return 'conversation reset (TUI channel cleared).'
+      } catch (err) {
+        return `reset failed: ${(err as Error).message?.slice(0, 200) ?? 'unknown'}`
+      }
+    case '/status':
+      return 'idle.'
+    case '/approve':
+    case '/deny':
+      return 'inline-keyboard approval is the supported path; click the buttons in the modal.'
+    case '/yolo':
+      return applyYolo(r.permission).message
+    case '/perms':
+      return applyPerms(r.permission, bypass.args[0]).message
+    case '/background':
+    case '/restart':
+      return `${bypass.command} is reserved for a future bundle.`
+  }
+}
 
 export interface RealRuntimeOpts {
   approvals: ApprovalRelay
@@ -82,6 +114,19 @@ export class RealRuntime implements RuntimeAdapter {
       data: { source: 'stdin', text: input.message },
     })
     const startedAt = Date.now()
+
+    // v0.20.0: bypass commands (/yolo /perms /reset) intercept BEFORE brain.infer
+    // so the TUI thin-client gets the same control surface as TG.
+    const bypass = parseBypassCommand(input.message)
+    if (bypass) {
+      const reply = await dispatchBypass(bypass, r)
+      return {
+        response: reply,
+        toolCalls: [],
+        durationMs: Date.now() - startedAt,
+      }
+    }
+
     const turn = await r.brain.infer({
       event: {
         id: newEventId(),
