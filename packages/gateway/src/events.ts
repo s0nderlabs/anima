@@ -15,6 +15,11 @@ export type GatewayEventKind =
   | 'listener-event'
   | 'log'
   | 'state-change'
+  /**
+   * v0.20.2: brain ran auto-compaction pre-flight on a channel and folded
+   * older history into a summary message. TUI surfaces as ✂︎ system row.
+   */
+  | 'context-compacted'
 
 export interface GatewayEvent {
   /** Monotonic per-hub id used for SSE last-event-id reconnects. */

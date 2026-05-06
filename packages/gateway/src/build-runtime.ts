@@ -767,6 +767,12 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
                 })
               }
             : undefined,
+          onCompactionEvent: ev => {
+            events.publish('context-compacted', ev)
+            void activity
+              .append({ ts: Date.now(), kind: 'context-compacted', data: ev })
+              .catch(() => {})
+          },
         })
         await activity.append({
           ts: Date.now(),

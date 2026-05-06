@@ -3,7 +3,7 @@ import { dirname } from 'node:path'
 
 export interface ActivityEntry {
   ts: number
-  kind: 'wake' | 'tool-call' | 'tool-result' | 'brain-response' | 'error'
+  kind: 'wake' | 'tool-call' | 'tool-result' | 'brain-response' | 'error' | 'context-compacted'
   data: unknown
 }
 

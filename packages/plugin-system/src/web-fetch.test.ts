@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { htmlToMarkdown, makeWebFetch } from './web-fetch'
+import { detectBlock, htmlToMarkdown, makeWebFetch } from './web-fetch'
 
 describe('web.fetch host-allowlist', () => {
   const tool = makeWebFetch()
@@ -96,5 +96,66 @@ describe('htmlToMarkdown', () => {
 
   it('strips HTML comments', () => {
     expect(htmlToMarkdown('<!-- secret --><p>visible</p>')).toBe('visible')
+  })
+})
+
+describe('detectBlock (v0.20.2 anti-bot signal)', () => {
+  it('detects Cloudflare interstitial', () => {
+    const html = '<html><body><h1>Just a moment...</h1></body></html>'
+    expect(detectBlock(html, 200, 'https://example.com')?.reason).toBe('cloudflare')
+  })
+
+  it('detects Google bot block by body phrase', () => {
+    const html = 'Our systems have detected unusual traffic from your computer network'
+    expect(detectBlock(html, 200, 'https://www.google.com/search?q=anything')?.reason).toBe(
+      'google-bot-block',
+    )
+  })
+
+  it('detects DDG anomaly page', () => {
+    const html = '<html><body>anomaly detected, please complete the captcha</body></html>'
+    expect(detectBlock(html, 200, 'https://duckduckgo.com/')?.reason).toBe('ddg-anomaly')
+  })
+
+  it('detects rate-limit by status', () => {
+    expect(detectBlock('any body', 429, 'https://api.example.com')?.reason).toBe('rate-limit')
+    expect(detectBlock('any body', 451, 'https://api.example.com')?.reason).toBe('rate-limit')
+  })
+
+  it('detects bot-block on 403 from search engines', () => {
+    expect(detectBlock('forbidden', 403, 'https://www.google.com/search')?.reason).toBe('bot-block')
+    expect(detectBlock('forbidden', 403, 'https://en.wikipedia.org/wiki/X')?.reason).toBe(
+      'bot-block',
+    )
+  })
+
+  it('does NOT flag plain 200 with normal HTML', () => {
+    const html =
+      '<html><body><h1>Welcome to Example.com</h1><p>Normal content here.</p></body></html>'
+    expect(detectBlock(html, 200, 'https://example.com')).toBeNull()
+  })
+
+  it('does NOT flag generic 403 from non-search domains', () => {
+    expect(detectBlock('forbidden', 403, 'https://api.private.example.com')).toBeNull()
+  })
+
+  it('detects captcha gates (g-recaptcha)', () => {
+    const html = '<form><div class="g-recaptcha" data-sitekey="..."></div></form>'
+    expect(detectBlock(html, 200, 'https://anywhere.com')?.reason).toBe('captcha')
+  })
+
+  it('detects Datadome / PerimeterX bot interstitials', () => {
+    expect(detectBlock('<body>datadome-captcha</body>', 200, 'https://x.com')?.reason).toBe(
+      'bot-block',
+    )
+    expect(detectBlock('<body>imperva incident id: abc</body>', 200, 'https://y.com')?.reason).toBe(
+      'bot-block',
+    )
+  })
+
+  it('only scans the first 4KB (so trailing harmless content does not trigger)', () => {
+    const padding = 'x'.repeat(5000)
+    const html = `${padding}<body>just a moment...</body>`
+    expect(detectBlock(html, 200, 'https://example.com')).toBeNull()
   })
 })

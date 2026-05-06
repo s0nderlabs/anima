@@ -4,6 +4,19 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.2] - 2026-05-06
+
+### Fixed
+
+- **`web.fetch` now returns a structured `blocked: true` signal** when the response body matches a known anti-bot interstitial (Cloudflare "Just a moment...", Google's "unusual traffic from your computer network", DuckDuckGo anomaly captcha, Bing verify, generic g-recaptcha/h-captcha, Akamai/Imperva/Datadome/PerimeterX bot interstitials) OR when status is 429/451 (rate-limit) OR when status is 403 from a search-engine domain. Brain has unambiguous routing data instead of trying to interpret garbage HTML markdown. Pattern check scans first 4KB of body for speed; trailing harmless content does not trigger.
+- **`browser.navigate` escalation rule added to frozen-prefix DEFAULT_SYSTEM_PROMPT.** When `web.fetch` returns `blocked: true` or an empty/near-empty body, brain MUST immediately call `browser.navigate` on the same URL or comparable source. Forbidden: answer-from-memory, "search engines are blocked, here's what I know from training", asking the operator "should I use browser instead". The browser path runs in a real headless Chromium that bypasses bot-blocks. This closes the v0.20.1 demo regression where a "browse about subquadratic" prompt resulted in 7 blocked fetches followed by a memory-derived answer.
+- **`onCompactionEvent` now flows through the gateway** (real-runtime.ts TUI path + build-runtime.ts TG path). Brain emits the event when compaction folds older history; gateway publishes to `EventHub` ("context-compacted") and to the activity log. TUI thin-client subscribes and pushes a `✂︎ context compacted N → M messages (~K tokens)` system row. Pre-fix v0.20.0 wired the brain-level event but never propagated it past the gateway, so the TUI never displayed compaction.
+
+### Added
+
+- New `'context-compacted'` event kind on the gateway `EventHub` and a corresponding `'context-compacted'` activity-log entry kind. Both carry `{ channelKey, from, to, promptTokens }`.
+- 9 new `web.fetch` block-detection unit tests in `packages/plugin-system/src/web-fetch.test.ts` (16 tests total, was 7).
+
 ## [0.20.1] - 2026-05-06
 
 ### Fixed

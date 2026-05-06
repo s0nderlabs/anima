@@ -135,6 +135,12 @@ export class RealRuntime implements RuntimeAdapter {
         ts: input.ts,
       },
       channelKey: 'tui:stdin',
+      onCompactionEvent: ev => {
+        this.#events?.publish('context-compacted', ev)
+        void r.activity
+          .append({ ts: Date.now(), kind: 'context-compacted', data: ev })
+          .catch(() => {})
+      },
     })
     await r.activity.append({
       ts: Date.now(),

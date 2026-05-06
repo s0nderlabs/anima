@@ -51,8 +51,65 @@ interface FetchResult {
     body: string
     truncated: boolean
     final_url: string
+    /**
+     * v0.20.2: structured signal that the response body is a bot-block,
+     * captcha, rate-limit, or other anti-scrape interstitial — even though
+     * the HTTP status itself was 200/2xx. Brain should escalate to
+     * `browser.navigate` (frozen-prefix says so) instead of trying to read
+     * the markdown body.
+     */
+    blocked?: boolean
+    block_reason?: string
   }
   error?: string
+}
+
+const BLOCK_PATTERNS: Array<{ reason: string; re: RegExp }> = [
+  // Cloudflare anti-bot interstitial
+  {
+    reason: 'cloudflare',
+    re: /just a moment\.\.\.|attention required.*cloudflare|cf-browser-verification|challenges\.cloudflare\.com/i,
+  },
+  // Google search bot block
+  {
+    reason: 'google-bot-block',
+    re: /unusual traffic from your computer network|sending automated queries|enablejs\?sei=|please show you're not a robot/i,
+  },
+  // DuckDuckGo captcha / anomaly page
+  {
+    reason: 'ddg-anomaly',
+    re: /anomaly detected|please complete the captcha|duckassist.*captcha/i,
+  },
+  // Bing / Microsoft account verify
+  { reason: 'bing-verify', re: /verify you are not a robot|verify-bing|blockedreason=botnet/i },
+  // Wikipedia rate-limit / API throttle
+  { reason: 'rate-limit', re: /rate[- ]?limit|too many requests|hit our rate limit|throttled/i },
+  // Generic captcha / hCaptcha / reCAPTCHA gates
+  { reason: 'captcha', re: /g-recaptcha|h-captcha|recaptcha\/api\.js|hcaptcha\.com\/captcha/i },
+  // Akamai / Imperva / Datadome / PerimeterX bot interstitials
+  {
+    reason: 'bot-block',
+    re: /access denied.*reference #|datadome-captcha|perimeterx|bot detection|imperva incident id/i,
+  },
+]
+
+export function detectBlock(
+  rawHtml: string,
+  status: number,
+  finalUrl: string,
+): { reason: string } | null {
+  // Status-based: 429, 451, 503 from a search engine domain are usually bot-blocks
+  if (status === 429 || status === 451) return { reason: 'rate-limit' }
+  if (status === 403) {
+    if (/google\.com|bing\.com|duckduckgo\.com|wikipedia\.org/i.test(finalUrl))
+      return { reason: 'bot-block' }
+  }
+  // Body-based pattern match (truncated to first 4KB for speed; interstitials are always near top)
+  const head = rawHtml.slice(0, 4096)
+  for (const p of BLOCK_PATTERNS) {
+    if (p.re.test(head)) return { reason: p.reason }
+  }
+  return null
 }
 
 const PRIVATE_IP_PATTERNS: RegExp[] = [
@@ -123,17 +180,19 @@ async function fetchUrl(rawUrl: string, timeoutMs: number, maxBytes: number): Pr
     // burning bandwidth + memory long before the cap kicks in.
     const { bytes, truncated } = await collectUpToBytes(res.body, maxBytes)
     const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+    const block = detectBlock(text, res.status, res.url)
     const body = renderBody(text, contentType)
     return {
-      ok: res.ok,
+      ok: res.ok || block != null,
       data: {
         status: res.status,
         content_type: contentType,
         body,
         truncated,
         final_url: res.url,
+        ...(block ? { blocked: true, block_reason: block.reason } : {}),
       },
-      ...(res.ok ? {} : { error: `http ${res.status}` }),
+      ...(res.ok || block ? {} : { error: `http ${res.status}` }),
     }
   } catch (e) {
     const err = e as Error

@@ -205,6 +205,17 @@ export async function runChatSandbox(
         })
         break
       }
+      case 'context-compacted': {
+        const from = Number(d.from ?? 0)
+        const to = Number(d.to ?? 0)
+        const tokens = Number(d.promptTokens ?? 0)
+        const tokensHint = tokens > 0 ? ` (~${Math.round(tokens / 1000)}k tokens)` : ''
+        state.pushRow({
+          role: 'system',
+          text: `✂︎ context compacted ${from} → ${to} messages${tokensHint}`,
+        })
+        break
+      }
       case 'listener-event': {
         const k = String(d.kind ?? '')
         if (k === 'a2a-delivered') {
