@@ -4,6 +4,13 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.1] - 2026-05-06
+
+### Fixed
+
+- **Brain content fallback for Qwen reasoning_content drift.** When the 0G broker (Qwen3.6) returns `content: ""` but `reasoning_content` is non-empty (model "thinking mode" failed to transition out cleanly), the brain wrapper now falls back to `reasoning_content` after stripping any `<think>...</think>` wrappers. Pre-fix the user saw "(no reply)" on TG even though `usage.completionTokens > 0`. New `stripThinkBlocks()` + 6 unit tests.
+- **Brain malformed tool_call envelope guard.** When a tool_call comes back with empty `function.name` or truncated `function.arguments` JSON, the brain loop now injects a corrective tool-result message ("envelope was malformed, re-emit cleanly") instead of dispatching a broken call to the registry. Pre-fix the dispatch failed with `Unknown tool: `, the brain spiraled, and the user saw "sorry, something went wrong on my side". Mirrors the existing `recoveredFromSafetyBlock` pattern. New `looksLikeValidJsonString()` + 6 unit tests. Live-observed root cause: enigma activity entry ts=1778075012156 showed `{"name":"","args":"{\"query\": \"browser navigate\""}` (truncated raw JSON, missing closing brace). Non-deterministic Qwen quirk; retry usually works because random seed differs.
+
 ## [0.21.0] - 2026-05-06
 
 ### Added

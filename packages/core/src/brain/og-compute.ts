@@ -291,6 +291,39 @@ export class OGComputeBrain implements Brain {
         if (signal?.aborted) {
           throw new DOMException('aborted between tool calls', 'AbortError')
         }
+        // Qwen3.6 occasionally emits a tool_call with empty `function.name`
+        // or truncated `function.arguments` JSON. Don't dispatch — inject a
+        // corrective tool-result so the brain can re-issue cleanly.
+        const isMalformed =
+          !call.name ||
+          (typeof call.args === 'string' &&
+            call.args !== '' &&
+            !looksLikeValidJsonString(call.args))
+        if (isMalformed) {
+          const toolLabel = call.name || MALFORMED_TOOL_LABEL
+          if (input.onToolEvent) {
+            try {
+              input.onToolEvent({
+                kind: 'start',
+                tool: toolLabel,
+                callId: call.id,
+                argsPreview: previewToolArgs(call.args),
+              })
+              input.onToolEvent({ kind: 'end', tool: toolLabel, callId: call.id, ok: false })
+            } catch {
+              /* swallow */
+            }
+          }
+          messages.push({
+            role: 'tool',
+            toolCallId: call.id,
+            content: JSON.stringify({
+              error:
+                'Tool call envelope was malformed (empty name or truncated arguments). Re-emit with a complete tool name and a parseable JSON args object.',
+            }),
+          })
+          continue
+        }
         if (!this.opts.onToolCall) {
           messages.push({
             role: 'tool',
@@ -520,8 +553,15 @@ export class OGComputeBrain implements Brain {
     }
     const choice = json.choices[0]!
     const msg = choice.message
+    // Qwen3.6 sometimes routes the visible response into reasoning_content
+    // instead of content when thinking mode doesn't transition out cleanly.
+    // Fall back to stripped reasoning so the operator sees the answer.
+    const rawContent = msg.content
+    const reasoning = msg.reasoning_content
+    const fallbackFromReasoning =
+      !rawContent && reasoning && reasoning.length > 0 ? stripThinkBlocks(reasoning) : null
     return {
-      content: msg.content ?? null,
+      content: rawContent ? rawContent : fallbackFromReasoning,
       toolCalls: (msg.tool_calls ?? []).map(tc => ({
         id: tc.id,
         name: tc.function.name,
@@ -551,6 +591,34 @@ function safeParseJson(raw: string): unknown {
   } catch {
     return raw
   }
+}
+
+/**
+ * Cheap probe: does this string look like complete JSON? Used to detect
+ * truncated tool_call.function.arguments where Qwen's emission cut off
+ * mid-token (e.g. `{"query": "browser navigate"` with no closing brace).
+ */
+export function looksLikeValidJsonString(raw: string): boolean {
+  if (!raw || raw.length === 0) return true
+  try {
+    JSON.parse(raw)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const THINK_BLOCK_RE = /<think>[\s\S]*?<\/think>/g
+const MALFORMED_TOOL_LABEL = '<malformed>'
+
+/**
+ * Strip `<think>...</think>` wrappers that Qwen3.x reasoning mode emits
+ * around chain-of-thought. Used as fallback when the broker routes the
+ * visible answer into reasoning_content instead of content.
+ */
+export function stripThinkBlocks(text: string): string {
+  if (!text) return text
+  return text.replace(THINK_BLOCK_RE, '').trim()
 }
 
 /**

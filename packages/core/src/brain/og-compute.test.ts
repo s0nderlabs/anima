@@ -4,6 +4,8 @@ import {
   DEFAULT_MAX_OUTPUT_TOKENS,
   OGComputeBrain,
   detectBlockedToolError,
+  looksLikeValidJsonString,
+  stripThinkBlocks,
 } from './og-compute'
 import type { BrainMessage } from './types'
 
@@ -136,5 +138,57 @@ describe('OGComputeBrain config defaults', () => {
 
   it('exposes DEFAULT_CHANNEL_KEY as "default"', () => {
     expect(DEFAULT_CHANNEL_KEY).toBe('default')
+  })
+})
+
+describe('looksLikeValidJsonString (malformed tool_call args guard)', () => {
+  it('accepts valid JSON object string', () => {
+    expect(looksLikeValidJsonString('{"query":"x"}')).toBe(true)
+  })
+
+  it('accepts valid JSON array string', () => {
+    expect(looksLikeValidJsonString('[1,2,3]')).toBe(true)
+  })
+
+  it('accepts empty string (no args)', () => {
+    expect(looksLikeValidJsonString('')).toBe(true)
+  })
+
+  it('rejects truncated object (the May 6 enigma case)', () => {
+    expect(looksLikeValidJsonString('{"query": "browser navigate"')).toBe(false)
+  })
+
+  it('rejects truncated array', () => {
+    expect(looksLikeValidJsonString('[1,2,')).toBe(false)
+  })
+
+  it('rejects unbalanced braces', () => {
+    expect(looksLikeValidJsonString('{"a":{"b":1}')).toBe(false)
+  })
+})
+
+describe('stripThinkBlocks (Qwen reasoning_content fallback)', () => {
+  it('strips a single think block', () => {
+    expect(stripThinkBlocks('<think>thinking out loud</think>actual answer')).toBe('actual answer')
+  })
+
+  it('strips multiple think blocks', () => {
+    expect(stripThinkBlocks('<think>a</think>x<think>b</think>y')).toBe('xy')
+  })
+
+  it('strips multiline think blocks', () => {
+    expect(stripThinkBlocks('<think>\nline1\nline2\n</think>\nanswer here')).toBe('answer here')
+  })
+
+  it('returns plain text untouched', () => {
+    expect(stripThinkBlocks('plain text answer')).toBe('plain text answer')
+  })
+
+  it('handles empty input', () => {
+    expect(stripThinkBlocks('')).toBe('')
+  })
+
+  it('strips even when nothing follows the think block', () => {
+    expect(stripThinkBlocks('<think>only thinking, no answer</think>')).toBe('')
   })
 })
