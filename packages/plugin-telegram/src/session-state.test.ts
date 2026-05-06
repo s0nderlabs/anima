@@ -7,20 +7,33 @@ describe('parseBypassCommand', () => {
     expect(parseBypassCommand('what time is it')).toBeNull()
   })
 
-  it('matches each bypass command verbatim', () => {
+  it('matches each bypass command verbatim with empty args', () => {
     for (const cmd of BYPASS_COMMANDS) {
-      expect(parseBypassCommand(cmd)).toBe(cmd)
+      const r = parseBypassCommand(cmd)
+      expect(r).toEqual({ command: cmd, args: [] })
     }
   })
 
-  it('is case-insensitive', () => {
-    expect(parseBypassCommand('/STOP')).toBe('/stop')
-    expect(parseBypassCommand('/Reset')).toBe('/reset')
+  it('is case-insensitive on the command name', () => {
+    expect(parseBypassCommand('/STOP')?.command).toBe('/stop')
+    expect(parseBypassCommand('/Reset')?.command).toBe('/reset')
   })
 
-  it('ignores args after the command', () => {
-    expect(parseBypassCommand('/stop please')).toBe('/stop')
-    expect(parseBypassCommand('/new with arg')).toBe('/new')
+  it('captures whitespace-split args after the command', () => {
+    expect(parseBypassCommand('/stop please')).toEqual({ command: '/stop', args: ['please'] })
+    expect(parseBypassCommand('/new with arg')).toEqual({
+      command: '/new',
+      args: ['with', 'arg'],
+    })
+  })
+
+  it('parses /perms with mode arg', () => {
+    expect(parseBypassCommand('/perms strict')).toEqual({ command: '/perms', args: ['strict'] })
+    expect(parseBypassCommand('/perms')).toEqual({ command: '/perms', args: [] })
+  })
+
+  it('parses /yolo with no args', () => {
+    expect(parseBypassCommand('/yolo')).toEqual({ command: '/yolo', args: [] })
   })
 
   it('returns null for unknown slash commands', () => {
@@ -34,7 +47,7 @@ describe('parseBypassCommand', () => {
   })
 
   it('strips leading whitespace', () => {
-    expect(parseBypassCommand('   /stop')).toBe('/stop')
+    expect(parseBypassCommand('   /stop')?.command).toBe('/stop')
   })
 })
 

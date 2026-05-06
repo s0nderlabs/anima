@@ -68,6 +68,30 @@ export interface AnimaConfig {
   brain: {
     provider: string | null
     model: string | null
+    /**
+     * v0.20.0: max assistant output tokens per turn. Default 4096 (was 1024).
+     */
+    maxOutputTokens?: number
+    /**
+     * v0.20.0: model context window. Used for auto-compaction trigger.
+     * Default 1_000_000 (Qwen 1M target). Override for smaller models.
+     */
+    contextWindow?: number
+    /**
+     * v0.20.0: pre-flight summarize-fold of older history when running
+     * estimate breaches `threshold * contextWindow`. Set to `null` to
+     * disable. Default: { threshold: 0.5, keepRecent: 8 }.
+     */
+    compaction?: {
+      threshold?: number
+      keepRecent?: number
+    } | null
+    /**
+     * v0.20.0: persist channel histories to JSONL under
+     * `~/.anima/agents/<id>/conversations/`. Loaded on boot, appended per
+     * turn, atomically rewritten on compaction. Default true.
+     */
+    persistConversations?: boolean
   }
   plugins: AnimaPlugin[]
   /** Glob-level tool allow/deny. Right-most match wins. */

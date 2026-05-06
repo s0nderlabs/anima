@@ -1,4 +1,5 @@
 import { useKeyboard, useTerminalDimensions } from '@opentui/solid'
+import { type SlashCommand, suggestForPrefix } from '@s0nderlabs/anima-core'
 import { For, Show, createEffect, createSignal, onCleanup } from 'solid-js'
 import { summarizeApprovalSubject } from './approval-summary'
 import { MarkdownSegments } from './markdown'
@@ -24,7 +25,16 @@ interface AppProps {
   state: ChatState
   onSubmit: (text: string) => void | Promise<void>
   onExit: () => void
+  /**
+   * v0.20.0: extra slash commands (Claude Code commands etc) appended to the
+   * autocomplete suggestions when typing `/`. Each entry is a `SlashCommand`
+   * with `surfaces:['tui']`. The bundled registry is always shown alongside.
+   */
+  extraSlashCommands?: readonly SlashCommand[]
 }
+
+/** Cap visible autocomplete rows so the popup doesn't push the input box off-screen. */
+const SLASH_MENU_MAX_ROWS = 8
 
 const PREFIX_GUTTER = '   '
 const LABEL_WIDTH = 5
@@ -204,6 +214,55 @@ function ToolResultRow(props: { text: string; failed: boolean }) {
   )
 }
 
+/**
+ * Slash-command popup. Rendered between the spinner row and the input box
+ * when input starts with `/`. Mirrors the approval-modal layout pattern
+ * (flexShrink=0 so the scrollbox compresses to make room).
+ */
+function SlashMenu(props: {
+  matches: readonly SlashCommand[]
+  selected: number
+}) {
+  const visible = () => props.matches.slice(0, SLASH_MENU_MAX_ROWS)
+  return (
+    <box
+      flexDirection="column"
+      flexShrink={0}
+      borderStyle="rounded"
+      borderColor="#67e8f9"
+      paddingLeft={2}
+      paddingRight={2}
+      marginLeft={2}
+      marginRight={2}
+      marginTop={1}
+    >
+      <text fg="#67e8f9">{'commands  (↑↓ select · tab/enter complete · esc dismiss)'}</text>
+      <For each={visible()}>
+        {(cmd, idx) => {
+          const isSelected = () => idx() === props.selected
+          return (
+            <text wrapMode="word">
+              {/* @ts-expect-error opentui SpanProps omits fg, runtime accepts it */}
+              <span fg={isSelected() ? '#86efac' : '#9ca3af'}>
+                {`${isSelected() ? '› ' : '  '}/${cmd.name}`}
+              </span>
+              <Show when={cmd.argHint}>
+                {/* @ts-expect-error opentui SpanProps omits fg, runtime accepts it */}
+                <span fg="#fbbf24">{` <${cmd.argHint}>`}</span>
+              </Show>
+              {/* @ts-expect-error opentui SpanProps omits fg, runtime accepts it */}
+              <span fg="#6b7280">{`  ${cmd.description}`}</span>
+            </text>
+          )
+        }}
+      </For>
+      <Show when={props.matches.length > SLASH_MENU_MAX_ROWS}>
+        <text fg="#6b7280">{`+ ${props.matches.length - SLASH_MENU_MAX_ROWS} more (type to filter)`}</text>
+      </Show>
+    </box>
+  )
+}
+
 function ChatRowDispatch(props: { row: TurnRow }) {
   const r = props.row
   if (r.role === 'user') return <UserRow text={r.text} />
@@ -265,6 +324,27 @@ export function ChatApp(props: AppProps) {
     })
   })
 
+  // Recompute the slash autocomplete matches whenever input starts with `/`.
+  // Cleared on submit/exit/non-slash input. Pulls registry + caller-supplied
+  // extras (Claude Code commands).
+  function refreshSlashMatches(nextInput: string): void {
+    if (!nextInput.startsWith('/')) {
+      if (props.state.slashMatches().length > 0) props.state.setSlashMatches([])
+      return
+    }
+    const builtins = suggestForPrefix('tui', nextInput)
+    const extras = (props.extraSlashCommands ?? []).filter(cmd => {
+      const stripped = nextInput.replace(/^\/+/, '').toLowerCase()
+      return stripped.length === 0 || cmd.name.startsWith(stripped)
+    })
+    const merged = [...builtins]
+    for (const e of extras) {
+      if (!merged.some(b => b.name === e.name)) merged.push(e)
+    }
+    props.state.setSlashMatches(merged)
+    if (props.state.slashIndex() >= merged.length) props.state.setSlashIndex(0)
+  }
+
   useKeyboard(evt => {
     if (evt.ctrl && evt.name === 'c') {
       evt.preventDefault()
@@ -305,14 +385,42 @@ export function ChatApp(props: AppProps) {
       scrollboxRef?.scrollBy(evt.name === 'u' ? -SCROLL_STEP : SCROLL_STEP)
       return
     }
-    // Esc mid-turn aborts the current brain.infer. Caller's handleSubmit
-    // catches AbortError and emits a clean "turn interrupted" sys row.
+    // Esc dismisses the slash menu first; only on a second press does it
+    // abort the current brain turn.
     if (evt.name === 'escape') {
+      if (props.state.slashMatches().length > 0) {
+        props.state.setSlashMatches([])
+        props.state.setSlashIndex(0)
+        return
+      }
       const abort = props.state.activeAbort()
       if (abort && !abort.signal.aborted) {
         abort.abort()
       }
       return
+    }
+    // Slash menu: ↑/↓ cycle selection, Tab completes, Enter submits the
+    // selection (when the menu is open). Only fires when matches are visible.
+    if (props.state.slashMatches().length > 0) {
+      if (evt.name === 'up') {
+        const len = props.state.slashMatches().length
+        props.state.setSlashIndex(i => (i - 1 + len) % len)
+        return
+      }
+      if (evt.name === 'down') {
+        const len = props.state.slashMatches().length
+        props.state.setSlashIndex(i => (i + 1) % len)
+        return
+      }
+      if (evt.name === 'tab') {
+        const cmd = props.state.slashMatches()[props.state.slashIndex()]
+        if (cmd) {
+          const next = `/${cmd.name}${cmd.argHint ? ' ' : ''}`
+          props.state.setInput(next)
+          refreshSlashMatches(next)
+        }
+        return
+      }
     }
     if (evt.name === 'return') {
       const text = props.state.input().trim()
@@ -327,19 +435,37 @@ export function ChatApp(props: AppProps) {
         })
         return
       }
-      props.state.pushRow({ role: 'user', text })
+      // If the slash menu is open and a single match exists with no args
+      // typed yet, complete to that command name before submitting. Otherwise
+      // submit verbatim — operator may have typed `/perms strict` in full.
+      let toSubmit = text
+      if (props.state.slashMatches().length === 1 && /^\/\S+$/.test(text)) {
+        const sole = props.state.slashMatches()[0]!
+        toSubmit = `/${sole.name}`
+      }
+      props.state.pushRow({ role: 'user', text: toSubmit })
       props.state.setInput('')
+      props.state.setSlashMatches([])
+      props.state.setSlashIndex(0)
       props.state.setStatus('thinking')
-      props.onSubmit(text)
+      props.onSubmit(toSubmit)
       return
     }
     if (evt.name === 'backspace' || evt.name === 'delete') {
-      props.state.setInput(prev => prev.slice(0, -1))
+      props.state.setInput(prev => {
+        const next = prev.slice(0, -1)
+        refreshSlashMatches(next)
+        return next
+      })
       return
     }
     if (evt.sequence && !evt.ctrl && !evt.meta && !evt.option && evt.sequence.length === 1) {
       const ch = evt.sequence
-      props.state.setInput(prev => prev + ch)
+      props.state.setInput(prev => {
+        const next = prev + ch
+        refreshSlashMatches(next)
+        return next
+      })
     }
   })
 
@@ -399,6 +525,14 @@ export function ChatApp(props: AppProps) {
             <span fg="#9ca3af">{' deny'}</span>
           </text>
         </box>
+      </Show>
+
+      {/* v0.20.0: slash autocomplete popup. Pushed between spinner row and
+          input box so the operator sees command suggestions live as they
+          type. Mirrors approval-modal layout pattern (flexShrink=0 + the
+          scrollbox compresses). */}
+      <Show when={props.state.slashMatches().length > 0}>
+        <SlashMenu matches={props.state.slashMatches()} selected={props.state.slashIndex()} />
       </Show>
 
       {/* Status hint row above input. Always rendered (no Show wrapper) so

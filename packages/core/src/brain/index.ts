@@ -1,5 +1,6 @@
 export type {
   Brain,
+  BrainCompactionEvent,
   BrainInferInput,
   BrainTurn,
   BrainMessage,
@@ -7,6 +8,21 @@ export type {
   BrainProviderOpts,
   BrainToolEvent,
 } from './types'
+export {
+  type CompactionOpts,
+  DEFAULT_COMPACTION_OPTS,
+  SUMMARY_SYSTEM_PROMPT,
+  estimateTokens,
+  shouldCompact,
+  compactHistory,
+  type SummarizeFn,
+} from './compaction'
+export {
+  type HistoryPersist,
+  type FsHistoryPersistOpts,
+  createFsHistoryPersist,
+  sanitizeChannelKey,
+} from './history-persist'
 export { StubBrain } from './stub'
 export {
   buildFrozenPrefix,

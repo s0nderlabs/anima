@@ -4,10 +4,9 @@
 // dispatch is the load-bearing detail: without it, two messages in the same
 // event-loop tick can both pass the active-check and both spawn brain turns.
 //
-// Bypass commands (verbatim from hermes base.py:1430): /approve, /deny,
-// /status, /stop, /new, /reset, /background, /restart. These are dispatched
-// inline (skipping the active-session guard) so the operator can interrupt
-// or steer a turn that's already mid-flight from their phone.
+// Bypass commands: hermes-derived (/approve, /deny, /status, /stop, /new,
+// /reset, /background, /restart) plus v0.20.0 additions (/yolo, /perms) so
+// operators can flip permission mode from their phone without restarting.
 
 export const BYPASS_COMMANDS = [
   '/stop',
@@ -18,22 +17,32 @@ export const BYPASS_COMMANDS = [
   '/deny',
   '/background',
   '/restart',
+  '/yolo',
+  '/perms',
 ] as const
 
 export type BypassCommand = (typeof BYPASS_COMMANDS)[number]
 
+export interface ParsedBypass {
+  command: BypassCommand
+  args: string[]
+}
+
 /**
  * Detect a bypass command at the start of an inbound message. Returns the
- * canonical lowercase command if matched, else null. Args after the command
- * (e.g. `/stop please`) are ignored — only the leading slash-token matters.
+ * canonical lowercase command + whitespace-split args, or null when the
+ * message isn't a bypass command. v0.20.0 changed the return shape from
+ * `BypassCommand | null` to `ParsedBypass | null` so handlers (especially
+ * `/perms <mode>`) can read the args alongside the name.
  */
-export function parseBypassCommand(text: string): BypassCommand | null {
+export function parseBypassCommand(text: string): ParsedBypass | null {
   const trimmed = text.trim()
   if (!trimmed.startsWith('/')) return null
-  const head = trimmed.split(/\s+/)[0]?.toLowerCase()
+  const parts = trimmed.split(/\s+/)
+  const head = parts[0]?.toLowerCase()
   if (!head) return null
   if ((BYPASS_COMMANDS as readonly string[]).includes(head)) {
-    return head as BypassCommand
+    return { command: head as BypassCommand, args: parts.slice(1) }
   }
   return null
 }

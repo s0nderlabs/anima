@@ -28,7 +28,7 @@ import type {
   PermissionRequest,
   PermissionService,
 } from '@s0nderlabs/anima-core'
-import { newEventId } from '@s0nderlabs/anima-core'
+import { applyPerms, applyYolo, newEventId } from '@s0nderlabs/anima-core'
 import {
   ActiveSessionTracker,
   type ApprovalChoice,
@@ -177,7 +177,7 @@ export function buildTelegramDispatch(deps: BuildDispatchDeps): TelegramDispatch
         // Bypass commands skip the queue + busy gate entirely.
         const bypass = parseBypassCommand(input.text)
         if (bypass) {
-          resolve(handleBypass(bypass, input, deps, tracker))
+          void Promise.resolve(handleBypass(bypass, input, deps, tracker)).then(resolve)
           return
         }
 
@@ -191,12 +191,13 @@ export function buildTelegramDispatch(deps: BuildDispatchDeps): TelegramDispatch
   }
 }
 
-function handleBypass(
-  cmd: BypassCommand,
+async function handleBypass(
+  bypass: { command: BypassCommand; args: string[] },
   input: TelegramDispatchInput,
   deps: BuildDispatchDeps,
   tracker: ActiveSessionTracker,
-): TelegramDispatchResult {
+): Promise<TelegramDispatchResult> {
+  const { command: cmd, args } = bypass
   switch (cmd) {
     case '/stop': {
       const aborted = tracker.abortActive(input.sessionKey)
@@ -209,7 +210,13 @@ function handleBypass(
     }
     case '/new':
     case '/reset': {
-      return { response: 'context is fresh per TG turn already.' }
+      // v0.20.0: real reset clears this channel's history. Falls back to a
+      // friendly note when the brain doesn't expose channel ops (StubBrain).
+      if (typeof deps.brain.clearChannel === 'function') {
+        await deps.brain.clearChannel(input.sessionKey)
+        return { response: "conversation reset (this chat's history cleared)." }
+      }
+      return { response: 'this brain does not support reset.' }
     }
     case '/status': {
       const busy = deps.isBusy()
@@ -223,6 +230,14 @@ function handleBypass(
       return {
         response: 'inline-keyboard approval is not yet wired in this build (B5 ships in v0.18.1).',
       }
+    }
+    case '/yolo': {
+      const r = applyYolo(deps.permission)
+      return { response: r.message }
+    }
+    case '/perms': {
+      const r = applyPerms(deps.permission, args[0])
+      return { response: r.message }
     }
     case '/background':
     case '/restart': {
@@ -292,6 +307,7 @@ async function runOne(
         payload: { label: 'telegram-message', data: input.text },
         ts: Date.now(),
       },
+      channelKey: input.sessionKey,
       signal: abortCtrl.signal,
       // Forward per-turn tool-call observer to the brain. The listener
       // attaches a ProgressTracker on every dispatch; dropping it here

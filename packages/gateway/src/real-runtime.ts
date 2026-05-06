@@ -89,6 +89,7 @@ export class RealRuntime implements RuntimeAdapter {
         payload: { label: 'user-message', data: input.message },
         ts: input.ts,
       },
+      channelKey: 'tui:stdin',
     })
     await r.activity.append({
       ts: Date.now(),
@@ -217,6 +218,7 @@ export class RealRuntime implements RuntimeAdapter {
                 payload: { label: 'inbound-message', data: channelText, peer: m.from },
                 ts: Date.now(),
               },
+              channelKey: `a2a:${m.from}`,
             })
             await r.activity.append({
               ts: Date.now(),
@@ -278,6 +280,7 @@ export class RealRuntime implements RuntimeAdapter {
                 },
                 ts: Date.now(),
               },
+              channelKey: 'marketplace',
             })
             await r.activity.append({
               ts: Date.now(),

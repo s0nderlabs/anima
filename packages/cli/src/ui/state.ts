@@ -1,4 +1,9 @@
-import type { PermissionDecision, PermissionMode, PermissionRequest } from '@s0nderlabs/anima-core'
+import type {
+  PermissionDecision,
+  PermissionMode,
+  PermissionRequest,
+  SlashCommand,
+} from '@s0nderlabs/anima-core'
 import { type JobEvent, isJobTerminalKind } from '@s0nderlabs/anima-plugin-comms'
 import { createSignal } from 'solid-js'
 
@@ -85,6 +90,13 @@ export function createChatState(opts: CreateChatStateOpts) {
   // handler reads it to wire Esc → abort.
   const [activeAbort, setActiveAbort] = createSignal<AbortController | null>(null)
 
+  // v0.20.0: slash-command autocomplete popup state. `slashMatches` is the
+  // filtered list of commands matching the current input prefix; populated
+  // when input starts with `/`, cleared otherwise. `slashIndex` tracks the
+  // selected row inside `slashMatches`. Both reset to defaults on submit.
+  const [slashMatches, setSlashMatches] = createSignal<SlashCommand[]>([])
+  const [slashIndex, setSlashIndex] = createSignal(0)
+
   // Status-change subscribers. Phase 12 telegram-dispatch hooks here so it
   // can drain its queue when the brain returns to idle from a stdin turn.
   type StatusListener = (next: 'idle' | 'thinking' | 'error') => void
@@ -142,6 +154,8 @@ export function createChatState(opts: CreateChatStateOpts) {
     turnStartedAt,
     activeAbort,
     activeJobCount,
+    slashMatches,
+    slashIndex,
     setInput,
     setStatus: setStatusTracked,
     setUsage,
@@ -151,6 +165,8 @@ export function createChatState(opts: CreateChatStateOpts) {
     setEoaBalance,
     setTurnStartedAt,
     setActiveAbort,
+    setSlashMatches,
+    setSlashIndex,
     bumpActiveJobs,
     pushRow,
     onStatusChange,

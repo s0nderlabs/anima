@@ -8,10 +8,25 @@
 import { createZGComputeNetworkBroker } from '@0glabs/0g-serving-broker'
 import { JsonRpcProvider, Wallet } from 'ethers'
 import type { ToolSchema } from '../tools/types'
+import {
+  type CompactionOpts,
+  DEFAULT_COMPACTION_OPTS,
+  SUMMARY_SYSTEM_PROMPT,
+  compactHistory,
+  estimateTokens,
+  shouldCompact,
+} from './compaction'
 import { type FrozenPrefix, renderFrozenPrefix, renderUserContext } from './frozen-prefix'
+import type { HistoryPersist } from './history-persist'
 import type { Brain, BrainInferInput, BrainMessage, BrainTurn } from './types'
 
 type Broker = Awaited<ReturnType<typeof createZGComputeNetworkBroker>>
+
+/** Channel key used when none is specified — preserves legacy single-history behavior. */
+export const DEFAULT_CHANNEL_KEY = 'default'
+
+/** Default cap on the assistant output tokens per turn. Bumped from 1024 in v0.20.0. */
+export const DEFAULT_MAX_OUTPUT_TOKENS = 4096
 
 export interface OGComputeBrainOpts {
   privkeyHex: `0x${string}`
@@ -19,8 +34,25 @@ export interface OGComputeBrainOpts {
   providerAddress: string
   tools: ToolSchema[]
   prefix: FrozenPrefix
+  /**
+   * Seed history for the legacy single-history (`'default'`) channel.
+   * Backward-compat: prior callers passed this as the entire conversation.
+   * In v0.20.0+, prefer per-channel APIs (`setChannelHistory`).
+   */
   history?: BrainMessage[]
+  /** Default 4096 (was 1024 prior to v0.20.0). */
   maxOutputTokens?: number
+  /**
+   * Pre-flight auto-compaction config. Omit to use {@link DEFAULT_COMPACTION_OPTS}.
+   * Pass `null` to disable compaction entirely.
+   */
+  compaction?: CompactionOpts | null
+  /**
+   * Optional persistence handle. When set, channel histories are seeded from
+   * disk during {@link OGComputeBrain.init} and every committed turn is
+   * appended via {@link HistoryPersist.appendTurn}.
+   */
+  persist?: HistoryPersist
   onToolCall?: (call: { id: string; name: string; args: unknown }) => Promise<BrainMessage>
 }
 
@@ -40,13 +72,17 @@ export class OGComputeBrain implements Brain {
   private broker: Broker | null = null
   private endpoint: string | null = null
   private model: string | null = null
-  private readonly history: BrainMessage[]
+  private readonly histories = new Map<string, BrainMessage[]>()
+  private readonly lastUsage = new Map<string, BrainTurn['usage']>()
   private readonly wallet: Wallet
   private readonly renderedPrefix: string
   private userContextText: string | null
+  private persistHydrated = false
 
   constructor(private readonly opts: OGComputeBrainOpts) {
-    this.history = opts.history ? [...opts.history] : []
+    if (opts.history && opts.history.length > 0) {
+      this.histories.set(DEFAULT_CHANNEL_KEY, [...opts.history])
+    }
     const provider = new JsonRpcProvider(opts.rpcUrl)
     this.wallet = new Wallet(opts.privkeyHex, provider)
     this.renderedPrefix = renderFrozenPrefix(opts.prefix)
@@ -75,6 +111,66 @@ export class OGComputeBrain implements Brain {
     } catch {
       // Already acknowledged — broker throws on repeat. Safe to ignore.
     }
+    await this.hydrateFromPersist()
+  }
+
+  private async hydrateFromPersist(): Promise<void> {
+    if (this.persistHydrated || !this.opts.persist) return
+    this.persistHydrated = true
+    try {
+      const loaded = await this.opts.persist.loadAll()
+      for (const [key, history] of loaded) {
+        // Don't clobber a constructor-seeded history if the same channel was
+        // pre-populated. This preserves legacy `opts.history` for the default
+        // channel.
+        if (this.histories.has(key) && (this.histories.get(key)?.length ?? 0) > 0) continue
+        this.histories.set(key, [...history])
+      }
+    } catch {
+      // Persist load failures must never block brain startup — chat works
+      // in-memory only and persist resumes on next clean run.
+    }
+  }
+
+  /** Snapshot of a channel's current history (read-only, defensive copy). */
+  getChannelHistory(channelKey: string = DEFAULT_CHANNEL_KEY): readonly BrainMessage[] {
+    return [...(this.histories.get(channelKey) ?? [])]
+  }
+
+  /** Wholesale replace a channel's history. Used by tests and by persist hydration. */
+  setChannelHistory(channelKey: string, history: BrainMessage[]): void {
+    this.histories.set(channelKey, [...history])
+  }
+
+  /** Clear a single channel. Best-effort persist clear. */
+  async clearChannel(channelKey: string = DEFAULT_CHANNEL_KEY): Promise<void> {
+    this.histories.set(channelKey, [])
+    this.lastUsage.delete(channelKey)
+    if (this.opts.persist) {
+      try {
+        await this.opts.persist.clearChannel(channelKey)
+      } catch {
+        // best-effort
+      }
+    }
+  }
+
+  /** Distinct channel keys with non-empty history. */
+  listChannels(): string[] {
+    const out: string[] = []
+    for (const [k, v] of this.histories) {
+      if (v.length > 0) out.push(k)
+    }
+    return out
+  }
+
+  private getOrCreateHistory(channelKey: string): BrainMessage[] {
+    let h = this.histories.get(channelKey)
+    if (!h) {
+      h = []
+      this.histories.set(channelKey, h)
+    }
+    return h
   }
 
   /** Fetch live catalog without requiring a specific provider to be pre-set. */
@@ -122,11 +218,12 @@ export class OGComputeBrain implements Brain {
     if (signal?.aborted) {
       throw new DOMException('aborted before infer started', 'AbortError')
     }
+    const channelKey = input.channelKey ?? DEFAULT_CHANNEL_KEY
+    await this.maybeCompact(channelKey, input)
+
+    const history = this.getOrCreateHistory(channelKey)
     const userText = normalizeUserContent(input)
-    const messages: BrainMessage[] = [
-      { role: 'system', content: this.renderedPrefix },
-      ...this.history,
-    ]
+    const messages: BrainMessage[] = [{ role: 'system', content: this.renderedPrefix }, ...history]
     // Per-turn user-context (MEMORY.md, etc.) injected just before the live
     // user message. Treated as a separate user turn so MEMORY.md churn doesn't
     // invalidate the system-prompt cache.
@@ -223,10 +320,118 @@ export class OGComputeBrain implements Brain {
     }
 
     const finalAssistant = findLastAssistantContent(messages)
-    this.history.push({ role: 'user', content: userText })
-    this.history.push({ role: 'assistant', content: finalAssistant })
+    const userMsg: BrainMessage = { role: 'user', content: userText }
+    const assistantMsg: BrainMessage = { role: 'assistant', content: finalAssistant }
+    history.push(userMsg)
+    history.push(assistantMsg)
+
+    if (turnResult?.usage) this.lastUsage.set(channelKey, turnResult.usage)
+
+    if (this.opts.persist) {
+      try {
+        await this.opts.persist.appendTurn(channelKey, userMsg, assistantMsg)
+      } catch {
+        // Persist failure is non-fatal for the live turn.
+      }
+    }
 
     return turnResult ?? { content: null, toolCalls: [] }
+  }
+
+  /**
+   * Pre-flight compaction check. When threshold is breached, summarize older
+   * messages (everything before the last `keepRecent * 2`) via a sub-call
+   * with no tools and replace the channel history. Caller's `onCompactionEvent`
+   * fires AFTER successful fold.
+   */
+  private async maybeCompact(channelKey: string, input: BrainInferInput): Promise<void> {
+    if (this.opts.compaction === null) return
+    const cfg = this.opts.compaction ?? DEFAULT_COMPACTION_OPTS
+    const history = this.histories.get(channelKey)
+    if (!history || history.length === 0) return
+    const lastUsage = this.lastUsage.get(channelKey)
+    const trigger = shouldCompact(history, lastUsage?.promptTokens ?? null, cfg)
+    if (trigger == null) return
+    let compacted: BrainMessage[]
+    try {
+      compacted = await compactHistory(history, cfg, async older => this.summarizeOlder(older))
+    } catch {
+      // Compaction is best-effort; failure means we proceed with the original
+      // history this turn and try again next time.
+      return
+    }
+    if (compacted.length >= history.length) return // nothing folded
+    this.histories.set(channelKey, compacted)
+    this.lastUsage.delete(channelKey) // estimate-based until next usage lands
+    if (this.opts.persist) {
+      try {
+        await this.opts.persist.rewriteChannel(channelKey, compacted)
+      } catch {
+        // best-effort; rehydration on restart will reflect the on-disk state
+      }
+    }
+    if (input.onCompactionEvent) {
+      try {
+        input.onCompactionEvent({
+          channelKey,
+          from: history.length,
+          to: compacted.length,
+          promptTokens: trigger,
+        })
+      } catch {
+        /* observer errors swallowed */
+      }
+    }
+  }
+
+  /**
+   * Summarize the older portion of a channel's history via a fresh sub-call
+   * to the same broker, with no tools, lower max_tokens, and the
+   * compaction-specific system prompt. This is the only place the brain
+   * recursively calls its own provider for housekeeping.
+   */
+  private async summarizeOlder(older: readonly BrainMessage[]): Promise<string> {
+    if (!this.broker || !this.endpoint || !this.model) {
+      throw new Error('Brain not initialized; call init() first.')
+    }
+    // Flatten tool-call metadata into a readable transcript. The sub-call
+    // doesn't need full structure — just enough text to summarize accurately.
+    const flat = older
+      .map(m => {
+        const tag = m.role.toUpperCase()
+        if (m.toolCalls && m.toolCalls.length > 0) {
+          const calls = m.toolCalls
+            .map(
+              tc =>
+                `${tc.name}(${typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args ?? {})})`,
+            )
+            .join(' | ')
+          return `${tag}: ${m.content || ''}\n[TOOL_CALLS] ${calls}`
+        }
+        return `${tag}: ${m.content || ''}`
+      })
+      .join('\n\n')
+    const headers = await this.broker.inference.getRequestHeaders(this.opts.providerAddress, flat)
+    const body = {
+      model: this.model,
+      messages: [
+        { role: 'system', content: SUMMARY_SYSTEM_PROMPT },
+        { role: 'user', content: flat },
+      ],
+      max_tokens: 1024,
+    }
+    const resp = await fetch(`${this.endpoint}/chat/completions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(body),
+    })
+    if (!resp.ok) {
+      throw new Error(`Compaction summarize HTTP ${resp.status}`)
+    }
+    const json = (await resp.json()) as {
+      choices: Array<{ message: { content?: string | null } }>
+    }
+    return (json.choices[0]?.message.content ?? '').trim()
   }
 
   private async callCompletion(messages: BrainMessage[], signal?: AbortSignal): Promise<BrainTurn> {
@@ -260,7 +465,7 @@ export class OGComputeBrain implements Brain {
         }
         return { role: m.role, content: m.content }
       }),
-      max_tokens: this.opts.maxOutputTokens ?? 1024,
+      max_tokens: this.opts.maxOutputTokens ?? DEFAULT_MAX_OUTPUT_TOKENS,
     }
     // 0G's broker (DashScope) rejects an empty tools array (`[] is too short`).
     // Only include the fields when at least one tool is in the schema list.
@@ -474,3 +679,7 @@ export function inferToolOk(content: string): boolean {
     return !content.toLowerCase().includes('error')
   }
 }
+
+// Re-export estimateTokens so callers that want to measure prompt size
+// without a full BrainTurn round-trip can use the same heuristic.
+export { estimateTokens }

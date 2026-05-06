@@ -4,6 +4,40 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-05-06
+
+### Added
+
+- **TUI slash autocomplete popup.** Typing `/` in the TUI now opens a menu of every command available on that surface, sourced from a shared registry (`@s0nderlabs/anima-core` `COMMAND_REGISTRY`). Up/Down to cycle, Tab/Enter to commit, Esc to dismiss. Mirrors the approval-modal layout pattern (flexShrink=0, scrollbox compresses to make room). Pulls Claude Code commands from the loaded `commandIndex` into the same suggestions.
+- **TG client autocomplete via `setMyCommands`.** Listener now registers the bot command list with Telegram on start (`bot.api.setMyCommands(buildTelegramCommands(), { scope: { type: 'default' } })`). Operators typing `/` in any TG client see the bundled command menu populated, no more BotFather-default empty.
+- **`/yolo` and `/perms` commands available on TG.** Operators flip approval mode from their phone: `/yolo` toggles between off and prompt; `/perms <off|prompt|strict>` sets explicitly; `/perms` no-arg shows current. Plumbing via extended `BYPASS_COMMANDS` + new `dispatchTelegramBypass` helper that runs BEFORE brain.infer in both gateway path (`build-runtime.ts`) and local-mode (`chat-telegram.ts`).
+- **`/perms` and `/reset` in TUI.** `/perms <mode>` parallels TG semantics. `/reset` calls `brain.clearChannel('tui:stdin')` and pushes a system row so the operator sees the channel cleared.
+- **Per-channel brain history.** `OGComputeBrain.history` is now a `Map<channelKey, BrainMessage[]>`. Channel keys: `'tui:stdin'`, existing TG sessionKey (`agent:<name>:telegram:dm:<chatId>` etc), `a2a:<peer>` for A2A drains, `'marketplace'` for marketplace events, `'default'` fallback. New `clearChannel`, `getChannelHistory`, `setChannelHistory`, `listChannels` methods. TUI conversations no longer interleave with TG conversations.
+- **Auto-compaction at token threshold.** Pre-flight check on every `infer()`: when running estimate (max of last-turn `usage.promptTokens` and chars/3.5 heuristic) exceeds `threshold * contextWindow`, summarize older messages via a fresh sub-call (no tools, dedicated `SUMMARY_SYSTEM_PROMPT`) and replace history with `[summary, ...keepRecent]`. Defaults: threshold 0.5, contextWindow 1_000_000 (Qwen 1M target), keepRecent 8 turns. Frozen prefix is never touched, prefix-cache stays warm.
+- **Conversation persistence** (default on). Every committed turn is appended to `~/.anima/agents/<id>/conversations/<sanitizedKey>.jsonl` with fsync. On boot, `OGComputeBrain.init()` rehydrates channel histories. Off-switch via `config.brain.persistConversations: false`. Compaction performs an atomic rewrite (write-tmp + rename) so the on-disk state mirrors the in-memory state.
+- **`BrainCompactionEvent` + `onCompactionEvent` callback** on `BrainInferInput`. TUI subscribes and pushes a system row "✂︎ context compacted (N → M messages, ~K tokens)" so the operator sees compaction fire.
+- New configurable `brain.maxOutputTokens` (default 4096, was 1024 hardcoded), `brain.contextWindow` (default 1_000_000), `brain.compaction` (`{ threshold?, keepRecent? }` or `null` to disable), `brain.persistConversations` config fields.
+- New shared command registry at `packages/core/src/commands/registry.ts` with `COMMAND_REGISTRY`, `commandsForSurface`, `findCommand`, `parseSlash`, `suggestForPrefix`. Single source of truth consumed by both the TUI menu and the TG `setMyCommands` payload.
+- New compaction module at `packages/core/src/brain/compaction.ts` with `estimateTokens`, `shouldCompact`, `compactHistory`, `SUMMARY_SYSTEM_PROMPT`, `DEFAULT_COMPACTION_OPTS`.
+- New persistence module at `packages/core/src/brain/history-persist.ts` with `createFsHistoryPersist`, `sanitizeChannelKey`, `HistoryPersist` interface (`loadAll` / `appendTurn` / `clearChannel` / `rewriteChannel`).
+
+### Changed
+
+- **`OGComputeBrain.history` is now per-channel.** Existing single-history callers continue to work via the `'default'` channel; `opts.history` constructor seed still flows there. New code should pass `BrainInferInput.channelKey` and use the channel API.
+- **Default `maxOutputTokens` bumped from 1024 to 4096.** No turn ever requested 4096 in practice; the bump removes a silent ceiling that capped agent verbosity.
+- **`parseBypassCommand` returns `{ command, args }` instead of `BypassCommand | null`.** Args are now exposed so handlers (especially `/perms <mode>`) can read the full message. Existing callers in `chat-telegram.ts` updated; the `dispatchTelegramBypass` helper in build-runtime.ts mirrors that path for the gateway dispatcher.
+- **`/reset` (TG) actually resets.** Previously replied "context is fresh per TG turn already" — a lie because the in-memory history was shared across turns. Now calls `brain.clearChannel(input.sessionKey)` and replies "conversation reset (this chat's history cleared)."
+- **All 11 `brain.infer` call sites** pass an explicit `channelKey` so each surface has its own history partition.
+
+### Fixed
+
+- **TUI ↔ TG history bleed.** Pre-v0.20.0 the same `OGComputeBrain` instance kept one shared `this.history` array. Conversations on different surfaces interleaved silently. Per-channel partitioning eliminates that.
+- **Context-window blow-up in long sessions.** Without compaction, every turn shipped the full transcript through the model; turn 100 cost ~50× turn 1 in input tokens, and the brain risked HTTP errors near the model cap. Compaction holds prompt size below 50% of contextWindow indefinitely while preserving recent turns verbatim.
+
+### Tests
+
+- Workspace 854 → 938 unit tests (+84). Lint + typecheck clean. Forge tests sanity-check (no contract changes).
+
 ## [0.19.19] - 2026-05-05
 
 ### Fixed
@@ -1413,6 +1447,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.20.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.20.0
 [0.19.19]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.19
 [0.19.18]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.18
 [0.19.17]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.17

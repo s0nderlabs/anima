@@ -12,6 +12,14 @@ export interface RuntimeConfig {
   brain: {
     provider: Address
     model: string
+    /** v0.20.0: max output tokens per turn (default 4096). */
+    maxOutputTokens?: number
+    /** v0.20.0: model context window for compaction trigger (default 1_000_000). */
+    contextWindow?: number
+    /** v0.20.0: compaction tuning. Set to null to disable. */
+    compaction?: { threshold?: number; keepRecent?: number } | null
+    /** v0.20.0: persist channel histories under `<agentDir>/conversations/`. Default true. */
+    persistConversations?: boolean
   }
   identity: {
     iNFT: { contract: Address; tokenId: string }

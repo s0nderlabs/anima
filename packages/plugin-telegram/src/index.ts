@@ -44,7 +44,9 @@ export {
   parseBypassCommand,
   type ActiveSession,
   type BypassCommand,
+  type ParsedBypass,
 } from './session-state'
+export { buildTelegramCommands, type TelegramBotCommand } from './commands'
 export {
   type ApprovalChoice,
   APPROVAL_CALLBACK_PREFIX,

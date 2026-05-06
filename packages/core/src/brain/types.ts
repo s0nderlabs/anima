@@ -37,6 +37,23 @@ export interface BrainToolEvent {
   ok?: boolean
 }
 
+/**
+ * Compaction event surfaced when the brain auto-folds older history into a
+ * summary message. Subscribers (TUI primarily) use this to push a system row
+ * so the operator knows the summary fired. Errors thrown by the observer are
+ * swallowed by the brain.
+ */
+export interface BrainCompactionEvent {
+  /** Channel whose history was compacted. */
+  channelKey: string
+  /** Number of messages BEFORE compaction (full history length). */
+  from: number
+  /** Number of messages AFTER compaction (summary + kept recent). */
+  to: number
+  /** Token estimate of the pre-compaction history. */
+  promptTokens: number
+}
+
 export interface BrainInferInput {
   /** The event that woke the brain. */
   event: AnimaEvent
@@ -44,6 +61,16 @@ export interface BrainInferInput {
   history?: BrainMessage[]
   /** Optional tool allowlist override (defaults to all registered tools). */
   toolWhitelist?: string[]
+  /**
+   * Channel partition for this turn's history. Each surface keeps its own
+   * conversation context: TUI/stdin is `'tui:stdin'`, Telegram DM is
+   * `agent:<name>:telegram:dm:<chatId>`, A2A drains use `a2a:<peer>`,
+   * marketplace uses `'marketplace'`. Missing key falls back to `'default'`.
+   *
+   * Backward-compatible: omitting the key keeps the legacy single-history
+   * behavior under the `'default'` channel.
+   */
+  channelKey?: string
   /**
    * Cancel the in-flight turn. Aborts the upstream HTTP fetch (so 0G
    * Compute stops billing the round-trip immediately) and short-circuits
@@ -59,6 +86,12 @@ export interface BrainInferInput {
    * is the actual tool executor). Errors swallowed by the brain.
    */
   onToolEvent?: (ev: BrainToolEvent) => void
+  /**
+   * Per-turn observer of compaction events. Fires when the pre-flight
+   * threshold check triggers a summarize-fold of older messages. TUI
+   * surfaces this as a system row; TG dispatchers leave it silent.
+   */
+  onCompactionEvent?: (ev: BrainCompactionEvent) => void
 }
 
 export interface BrainTurn {
@@ -76,6 +109,11 @@ export interface BrainTurn {
 
 export interface Brain {
   infer(input: BrainInferInput): Promise<BrainTurn>
+  /**
+   * v0.20.0: clear a channel's history. Optional so legacy non-OG brains
+   * (StubBrain etc) don't have to implement it.
+   */
+  clearChannel?(channelKey?: string): Promise<void> | void
 }
 
 export interface BrainProvider {

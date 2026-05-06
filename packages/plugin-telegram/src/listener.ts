@@ -1,6 +1,7 @@
 import { Bot, type Context, GrammyError, HttpError } from 'grammy'
 import { type ApprovalChoice, parseCallbackData } from './approval-keyboard'
 import { escapeChunkSuffixForMarkdownV2, splitMessage } from './chunking'
+import { buildTelegramCommands } from './commands'
 import { DebounceBuffer, type FlushedBatch } from './debounce'
 import { formatTelegramChannel } from './format'
 import { RateLimiter } from './limits'
@@ -222,6 +223,19 @@ export class TelegramListener {
     }
 
     await clearWebhookBeforePolling(this.bot)
+
+    // v0.20.0: register the bot command menu so Telegram clients show
+    // the autocomplete list when the operator types `/`. Sourced from the
+    // shared registry; safe to call repeatedly (Telegram dedupes).
+    try {
+      await this.bot.api.setMyCommands(buildTelegramCommands(), {
+        scope: { type: 'default' },
+      })
+    } catch (err) {
+      console.warn(
+        `[telegram] setMyCommands failed (non-fatal): ${(err as Error).message?.slice(0, 200) ?? 'unknown'}`,
+      )
+    }
 
     this.refreshTimer = setInterval(() => {
       if (this.tokenLock && !this.tokenLock.refresh()) {

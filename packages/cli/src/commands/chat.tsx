@@ -32,7 +32,10 @@ import {
   VISION_PROVIDER_DEFAULTS,
   type VisionInferFn,
   agentPaths,
+  applyPerms,
+  applyYolo,
   buildFrozenPrefix,
+  createFsHistoryPersist,
   discoverClaudeExtras,
   discoverMcpServers,
   explorerTxUrl,
@@ -712,12 +715,25 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
 
   const bootSpinner = spinner()
   bootSpinner.start(`Connecting to 0G Compute (${shortAddr(config.brain.provider!)})`)
+  const persistConversations = config.brain?.persistConversations !== false
   const brain = new OGComputeBrain({
     privkeyHex: agentPrivkey,
     rpcUrl: NETWORK_RPC[config.network],
     providerAddress: config.brain.provider!,
     tools: tools.schemas(),
     prefix,
+    maxOutputTokens: config.brain?.maxOutputTokens,
+    compaction:
+      config.brain?.compaction === null
+        ? null
+        : {
+            threshold: config.brain?.compaction?.threshold ?? 0.5,
+            contextWindow: config.brain?.contextWindow ?? 1_000_000,
+            keepRecent: config.brain?.compaction?.keepRecent ?? 8,
+          },
+    persist: persistConversations
+      ? createFsHistoryPersist({ dir: `${paths.dir}/conversations` })
+      : undefined,
     onToolCall: async call => {
       state.pushRow({
         role: 'tool-call',
@@ -872,6 +888,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
               payload: { label: `market:${e.kind}`, data: channelText },
               ts: Date.now(),
             },
+            channelKey: 'marketplace',
             signal: abortCtrl.signal,
           })
           await activity.append({
@@ -949,6 +966,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
               payload: { label: 'inbound-message', data: channelText, peer: m.from },
               ts: Date.now(),
             },
+            channelKey: `a2a:${m.from}`,
             signal: abortCtrl.signal,
           })
           await activity.append({
@@ -1118,7 +1136,14 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
           payload: { label: 'user-message', data: text },
           ts: Date.now(),
         },
+        channelKey: 'tui:stdin',
         signal: abortCtrl.signal,
+        onCompactionEvent: ev => {
+          state.pushRow({
+            role: 'system',
+            text: `✂︎ context compacted (${ev.from} → ${ev.to} messages, ~${Math.round(ev.promptTokens / 1000)}K tokens)`,
+          })
+        },
       })
       await activity.append({
         ts: Date.now(),
@@ -1225,16 +1250,26 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       return true
     }
     if (cmd === '/yolo') {
-      const next: PermissionMode = permission.getMode() === 'off' ? 'prompt' : 'off'
-      permission.setMode(next)
-      state.setApprovalsMode(next)
-      state.pushRow({
-        role: 'system',
-        text:
-          next === 'off'
-            ? 'YOLO ON. Approval prompts disabled this session. (run /yolo again to re-enable.)'
-            : 'YOLO OFF. Dangerous commands now prompt for approval.',
-      })
+      const result = applyYolo(permission)
+      state.setApprovalsMode(result.mode)
+      state.pushRow({ role: 'system', text: result.message })
+      return true
+    }
+    if (cmd === '/perms' || cmd.startsWith('/perms ')) {
+      const arg = cmd.split(/\s+/)[1]
+      const result = applyPerms(permission, arg)
+      // Statusline doesn't render `strict`; collapse to prompt for display only.
+      state.setApprovalsMode(result.mode === 'strict' ? 'prompt' : result.mode)
+      state.pushRow({ role: 'system', text: result.message })
+      return true
+    }
+    if (cmd === '/reset') {
+      try {
+        await brain.clearChannel('tui:stdin')
+        state.pushRow({ role: 'system', text: 'conversation reset (TUI channel cleared)' })
+      } catch (e) {
+        state.pushRow({ role: 'system', text: `reset error: ${summarizeError(e)}` })
+      }
       return true
     }
     if (cmd === '/jobs') {
@@ -1276,7 +1311,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     }
     if (cmd === '/help') {
       const builtins =
-        '  /sync   force memory + activity flush to 0G\n  /jobs   list active escrow jobs\n  /model  switch brain (run anima model after exiting)\n  /yolo   toggle approval prompts off/on for this session\n  /exit   quit anima (drains 0G storage flush, releases process)\n  /help   this message'
+        "  /sync                force memory + activity flush to 0G\n  /jobs                list active escrow jobs\n  /model               switch brain (run anima model after exiting)\n  /yolo                toggle approval prompts off/on for this session\n  /perms <mode>        set permission mode (off|prompt|strict); no arg shows current\n  /reset               clear this channel's conversation history\n  /exit                quit anima (drains 0G storage flush, releases process)\n  /help                this message"
       const claudeBlock =
         commandIndex.size === 0
           ? ''
@@ -1324,6 +1359,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
             payload: { label: 'user-message', data: inlined },
             ts: Date.now(),
           },
+          channelKey: 'tui:stdin',
         })
         state.pushRow({ role: 'assistant', text: turn.content ?? '(no content)' })
         state.setStatus('idle')
@@ -1364,8 +1400,29 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     )
   }
 
+  // Map Claude Code commands into SlashCommand shape so the slash
+  // autocomplete popup lists them alongside the bundled registry.
+  const extraSlashCommands = [...new Set([...commandIndex.values()].map(c => c.name))].map(name => {
+    const c = commandIndex.get(name)!
+    return {
+      name: c.name.toLowerCase(),
+      description: c.description ?? `Claude Code command (${c.id})`,
+      surfaces: ['tui'] as ('tui' | 'tg')[],
+      scope: 'local' as const,
+      bypassesBrain: false,
+      argHint: c.argumentHint,
+    }
+  })
+
   await render(
-    () => <ChatApp state={state} onSubmit={handleSubmit} onExit={handleExit} />,
+    () => (
+      <ChatApp
+        state={state}
+        onSubmit={handleSubmit}
+        onExit={handleExit}
+        extraSlashCommands={extraSlashCommands}
+      />
+    ),
     renderer,
   )
 

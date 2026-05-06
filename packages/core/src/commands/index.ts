@@ -1,0 +1,16 @@
+export {
+  COMMAND_REGISTRY,
+  applyPerms,
+  applyYolo,
+  commandsForSurface,
+  findCommand,
+  parseSlash,
+  suggestForPrefix,
+  type ApplyResult,
+  type CommandScope,
+  type CommandSurface,
+  type ParsedSlash,
+  type PermissionApi,
+  type PermissionToggleMode,
+  type SlashCommand,
+} from './registry'

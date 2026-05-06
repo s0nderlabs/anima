@@ -24,7 +24,10 @@ import {
   ToolRegistry,
   VISION_PROVIDER_DEFAULTS,
   type VisionInferFn,
+  applyPerms,
+  applyYolo,
   buildFrozenPrefix,
+  createFsHistoryPersist,
   derivePubkeyHex,
   iNFTAgentId,
   loadPlugins,
@@ -47,6 +50,7 @@ import {
 import { ONCHAIN_GUIDANCE, type OnchainRuntimeContext } from '@s0nderlabs/anima-plugin-onchain'
 import {
   type ApprovalChoiceKind,
+  type ParsedBypass,
   TELEGRAM_GUIDANCE,
   type TelegramApprovalBridge,
   type TelegramDispatchInput,
@@ -54,6 +58,7 @@ import {
   type TelegramRuntimeContext,
   formatInboundPreview as formatTelegramInboundPreview,
   makeApprovalIdFactory,
+  parseBypassCommand,
 } from '@s0nderlabs/anima-plugin-telegram'
 import type { Address, Hex } from 'viem'
 import type { ApprovalRelay } from './approval-relay'
@@ -581,12 +586,25 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
 
   // 6. Brain. onToolCall fires tool-call-start/end events on the EventHub so
   // the operator's TUI renders ▸/↳ indicators.
+  const persistConversations = config.brain?.persistConversations !== false
   const brain = new OGComputeBrain({
     privkeyHex: agentPrivkey,
     rpcUrl: NETWORK_RPC[network],
     providerAddress: config.brain.provider,
     tools: tools.schemas(),
     prefix: initialPrefix,
+    maxOutputTokens: config.brain?.maxOutputTokens,
+    compaction:
+      config.brain?.compaction === null
+        ? null
+        : {
+            threshold: config.brain?.compaction?.threshold ?? 0.5,
+            contextWindow: config.brain?.contextWindow ?? 1_000_000,
+            keepRecent: config.brain?.compaction?.keepRecent ?? 8,
+          },
+    persist: persistConversations
+      ? createFsHistoryPersist({ dir: `${agentDir}/conversations` })
+      : undefined,
     onToolCall: async call => {
       const startedAt = Date.now()
       events.publish('tool-call-start', {
@@ -670,6 +688,15 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
           text: input.text.replace(/^<channel[^>]*>([\s\S]*)<\/channel>$/, '$1'),
         }),
       })
+
+      // v0.20.0: bypass commands intercepted BEFORE brain.infer. Mirrors the
+      // chat-telegram.ts handleBypass flow so /yolo, /perms, /reset work in
+      // sandbox + gateway-local mode, not just the legacy in-process TUI path.
+      const bypass = parseBypassCommand(input.text)
+      if (bypass) {
+        const reply = await dispatchTelegramBypass(bypass, input.sessionKey, permission, brain)
+        return { response: reply }
+      }
       // Build a TG-aware prompter for this turn (closes over input.chatId).
       const previousMode = permission.getMode()
       const previousPrompterRef = (
@@ -724,6 +751,7 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
             payload: { label: 'telegram-message', data: input.text },
             ts: Date.now(),
           },
+          channelKey: input.sessionKey,
           // Forward per-turn tool-call observer so the listener's
           // ProgressTracker can render a live progress message in TG. The
           // brain emits start/end events that the listener turns into
@@ -892,4 +920,41 @@ function summarizeToolResult(result: unknown): string {
   if (r.ok === false) return (r.error ?? 'failed').slice(0, 200)
   const path = typeof r.data?.path === 'string' ? r.data.path : null
   return path ? path : 'ok'
+}
+
+/**
+ * Mirror of chat-telegram.ts handleBypass for the gateway dispatch path.
+ * Runs BEFORE brain.infer so /yolo, /perms, /reset operate without burning
+ * compute. Returns the reply text the listener will deliver to the chat.
+ */
+async function dispatchTelegramBypass(
+  bypass: ParsedBypass,
+  sessionKey: string,
+  permission: PermissionService,
+  brain: OGComputeBrain,
+): Promise<string> {
+  switch (bypass.command) {
+    case '/stop':
+      return 'no active turn to stop in this dispatch path.'
+    case '/new':
+    case '/reset':
+      try {
+        await brain.clearChannel(sessionKey)
+        return "conversation reset (this chat's history cleared)."
+      } catch (err) {
+        return `reset failed: ${(err as Error).message?.slice(0, 200) ?? 'unknown error'}`
+      }
+    case '/status':
+      return 'idle.'
+    case '/approve':
+    case '/deny':
+      return 'inline-keyboard approval is the supported path; click the buttons in the modal.'
+    case '/yolo':
+      return applyYolo(permission).message
+    case '/perms':
+      return applyPerms(permission, bypass.args[0]).message
+    case '/background':
+    case '/restart':
+      return `${bypass.command} is reserved for a future bundle.`
+  }
 }

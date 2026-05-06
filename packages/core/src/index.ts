@@ -17,14 +17,38 @@ export type { ToolCall, ToolDef, ToolResult, ToolSchema, JSONSchema } from './to
 export { ToolRegistry, zodToJsonSchema, coerceBool, coerceInt } from './tools'
 
 export type {
+  ApplyResult,
+  CommandScope,
+  CommandSurface,
+  ParsedSlash,
+  PermissionApi,
+  PermissionToggleMode,
+  SlashCommand,
+} from './commands'
+export {
+  COMMAND_REGISTRY,
+  applyPerms,
+  applyYolo,
+  commandsForSurface,
+  findCommand,
+  parseSlash,
+  suggestForPrefix,
+} from './commands'
+
+export type {
   Brain,
+  BrainCompactionEvent,
   BrainInferInput,
   BrainTurn,
   BrainMessage,
   BrainProvider,
   BrainProviderOpts,
+  CompactionOpts,
   FrozenPrefix,
+  HistoryPersist,
+  FsHistoryPersistOpts,
   OGComputeBrainOpts,
+  SummarizeFn,
 } from './brain'
 export {
   StubBrain,
@@ -32,6 +56,13 @@ export {
   buildFrozenPrefix,
   renderFrozenPrefix,
   DEFAULT_SYSTEM_PROMPT,
+  DEFAULT_COMPACTION_OPTS,
+  SUMMARY_SYSTEM_PROMPT,
+  estimateTokens,
+  shouldCompact,
+  compactHistory,
+  createFsHistoryPersist,
+  sanitizeChannelKey,
   openComputeLedger,
   getLedgerBalance,
   getLedgerDetail,
