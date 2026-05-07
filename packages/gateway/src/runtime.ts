@@ -24,7 +24,15 @@ export interface RuntimeConfig {
   identity: {
     iNFT: { contract: Address; tokenId: string }
     agent: Address
+    /** v0.21.9: operator wallet that funds sandbox billing. Surfaced to
+     * `account.balance` brain tool so the sandbox billing reserve lookup
+     * has a recipient. Optional for backwards-compat with older provisions. */
+    operator?: Address
   }
+  /** v0.21.9: deployment target ('local' or 'sandbox'). Surfaced to
+   * `account.balance` brain tool so the sandbox billing reserve only
+   * appears for sandbox-deployed agents. Defaults to 'local' if absent. */
+  deployTarget?: 'local' | 'sandbox'
   /** Plugin names to load (mirrors the local config). */
   plugins?: string[]
   /** Optional tool toggles ("fs.*": false). */

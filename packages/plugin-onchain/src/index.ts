@@ -20,6 +20,7 @@
 
 import type { NativePlugin, ToolDef } from '@s0nderlabs/anima-core'
 import { makeAccountInfo } from './tools/account'
+import { makeAccountBalance } from './tools/account-balance'
 import { makeChainActivity, makeChainContract, makeChainTx } from './tools/analysis'
 import { makeChainBalance } from './tools/balance'
 import { makeChainBlock, makeChainGas } from './tools/blockchain'
@@ -52,6 +53,7 @@ const plugin: NativePlugin = {
     if (!onchain) return // soft-init for tests/non-onchain contexts
 
     ctx.registerTool(makeAccountInfo(onchain) as ToolDef)
+    ctx.registerTool(makeAccountBalance(onchain) as ToolDef)
     ctx.registerTool(makeChainBalance(onchain) as ToolDef)
     ctx.registerTool(makeTokensInfo(onchain) as ToolDef)
 

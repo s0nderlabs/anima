@@ -43,12 +43,14 @@ export {
   openComputeLedger,
   getLedgerBalance,
   getLedgerDetail,
+  getLedgerDetailReadOnly,
   depositToLedger,
   refundFromLedger,
   retrieveLedgerFunds,
   closeLedger,
   type OpenLedgerOpts,
   type LedgerStatus,
+  type LedgerReadResult,
   type ProviderSubAccount,
 } from './ledger'
 export {

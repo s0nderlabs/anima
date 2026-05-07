@@ -2,7 +2,13 @@ import http from 'node:http'
 import { decryptWithPrivkey } from '@s0nderlabs/anima-core'
 import { type Address, type Hex, bytesToHex, getAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
-import { type ProvisionRequest, verifyApprovalSig, verifyChatSig, verifyProvisionSig } from './auth'
+import {
+  type ProvisionRequest,
+  verifyAdminTickSig,
+  verifyApprovalSig,
+  verifyChatSig,
+  verifyProvisionSig,
+} from './auth'
 import type { EventHub, GatewayEvent } from './events'
 import type { RuntimeConfig } from './runtime'
 import { type GatewaySession, transitionToProvisioned, transitionToReady } from './state'
@@ -305,18 +311,39 @@ export function createGatewayServer(deps: ServerDeps): http.Server {
         }
       }
 
-      // v0.21.5: admin endpoint to live-fire an AutoTopupManager tick. Local
-      // mode is gated by trustLocal (unix-sock 0600 perm = auth). Sandbox
-      // mode is intentionally locked out for now — operators tune via
-      // economy.autoTopup config edit + container restart, or curl from
-      // inside the container against localhost. Adding sandbox-side EIP-191
-      // auth is post-MVP scope.
+      // v0.21.5 → v0.21.9: admin endpoint to live-fire an AutoTopupManager tick.
+      // Two auth paths:
+      //   1. Local sock (trustLocal=true via 0600 unix-sock perm): direct allow.
+      //   2. Sandbox endpoint (trustLocal=false): requires { ts, signature } body
+      //      EIP-191-signed by the operator over `adminTickHash('autotopup-tick',
+      //      ts, sandboxId)`. Replay-protected by ts window (±5min) and bound to
+      //      the sandboxId so a sig for one container can't fire on another.
       if (method === 'POST' && url === '/admin/autotopup/tick') {
         if (!trustLocal) {
-          return send(res, 401, {
-            error: 'unauthorized',
-            reason: 'admin endpoints are local-mode only in v0.21.5',
+          const operator = session.operatorAddress
+          if (!operator) {
+            return send(res, 500, { error: 'operator-not-set' })
+          }
+          const body = (await readJson(req).catch(() => null)) as {
+            ts?: number
+            signature?: Hex
+          } | null
+          if (!body || typeof body.ts !== 'number' || !body.signature) {
+            return send(res, 401, {
+              error: 'unauthorized',
+              reason: 'sandbox admin requires {ts, signature} body signed by operator',
+            })
+          }
+          const verify = await verifyAdminTickSig({
+            action: 'autotopup-tick',
+            ts: body.ts,
+            sandboxId: session.sandboxId,
+            signature: body.signature,
+            expectedOperator: operator,
           })
+          if (!verify.ok) {
+            return send(res, 401, { error: 'unauthorized', reason: verify.reason })
+          }
         }
         if (session.state !== 'Ready') {
           return send(res, 409, { error: 'not-ready', state: session.state })

@@ -4,6 +4,22 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.9] - 2026-05-07
+
+### Added
+
+- **`anima balance` CLI command — full economic position aggregator.** Operator-facing read-only command that prints EOA mainnet + EOA testnet + compute ledger total/available/locked + per-provider envelope breakdown + sandbox billing reserve (when sandbox-deployed) in one round-trip. No agent unlock required. Closes the v0.21.9 balance-under-counting incident where `account.info` returned a single `computeLedger0G` number (no available/locked split, no sandbox billing reserve) and operators were under-reporting positions by ~10x. Live-verified on specter: shows `1.158 EOA + 6.818 ledger total (0.087 available + 6.731 locked) = 7.976 0G mainnet` with auto-topup wallet-low warning when EOA below 2 0G threshold.
+- **`account.balance` brain tool.** Sibling to `account.info`. Returns the full balance picture (same shape as `anima balance` output) so the brain can answer "what's my full balance" / "show full position" / "how much do we have" without operator running CLI. Wired into `ONCHAIN_GUIDANCE` with a one-liner directing brain to call `account.balance` for top-line aggregation and `chain.balance` for per-token detail.
+- **`anima admin autotopup-tick` CLI command.** Operator-only ops endpoint that live-fires the AutoTopupManager poll cycle (skips the 5-min wait). Two paths: (1) local mode curls the gateway unix sock (trustLocal=true via 0600 perm); (2) sandbox mode signs payload with operator wallet via EIP-191 and POSTs to the sandbox HTTP endpoint. Live-verified `{ok: true}` against specter local sock; sandbox path closes Task #366.
+
+### Changed
+
+- **`POST /admin/autotopup/tick` accepts EIP-191 signed body when not trustLocal.** Sandbox endpoint (reachable via public nip.io URL) now verifies `{ ts, signature }` body via new `adminTickHash` + `verifyAdminTickSig` in `packages/gateway/src/auth.ts`. Sig is bound to action='autotopup-tick' + ts (±5min window) + sandboxId so a chat sig can't be replayed against admin and an admin sig for one container can't fire on another. Local trustLocal path unchanged. Pre-provision request returns 500 (operator-not-set) instead of 401.
+
+### Fixed
+
+- **Closes Task #366** — `anima admin autotopup-tick` now fires successfully against enigma sandbox endpoint with EIP-191 auth (verified with the new SandboxClient.triggerAutoTopupTick + signed body path).
+
 ## [0.21.8] - 2026-05-07
 
 ### Fixed
@@ -1545,6 +1561,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.21.9]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.9
 [0.21.8]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.8
 [0.21.7]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.7
 [0.21.6]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.6

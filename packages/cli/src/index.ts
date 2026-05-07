@@ -158,6 +158,13 @@ async function main(): Promise<void> {
       await runLedger({ sub: chosen, amount, all, yes })
       return
     }
+    case 'balance': {
+      const agentIdx = argv.indexOf('--agent')
+      const agent = agentIdx >= 0 ? argv[agentIdx + 1] : undefined
+      const { runBalance } = await import('./commands/balance')
+      await runBalance({ agent })
+      return
+    }
     case 'drain': {
       const toIdx = argv.indexOf('--to')
       const to = toIdx >= 0 ? argv[toIdx + 1] : undefined
@@ -184,6 +191,16 @@ async function main(): Promise<void> {
         process.exit(1)
       }
       await runPairing(parsed)
+      return
+    }
+    case 'admin': {
+      const { parseAdminArgs, runAdmin } = await import('./commands/admin')
+      const parsed = parseAdminArgs(argv.slice(1))
+      if ('error' in parsed) {
+        console.error(`anima admin: ${parsed.error}`)
+        process.exit(1)
+      }
+      await runAdmin(parsed)
       return
     }
     case 'gateway': {
@@ -280,6 +297,8 @@ function printHelp(): void {
       '                            (--provider N is a deprecated alias for --sandbox)',
       '  anima ledger [sub]        compute ledger ops  (subs: balance | refund | retrieve | close)',
       '                            flags: --amount N  --all  --yes',
+      '  anima balance             full economic position: EOA + compute ledger + sandbox billing reserve',
+      "                            flags: --agent <addr>  (defaults to active config's agent)",
       '  anima drain --to <addr>   sweep agent EOA balance to address (default: operator)',
       '  anima model               re-pick the brain model',
       '  anima sync                force flush memory + activity-log to 0G + anchor on chain',
@@ -295,6 +314,8 @@ function printHelp(): void {
       '                            usage: anima pairing approve telegram <code>',
       '  anima gateway <sub>       always-on agent gateway daemon  (subs: run | start | stop | restart | status | logs)',
       '                            run = foreground, start = bg + Touch ID, stop = SIGTERM via lock',
+      '  anima admin <sub>         operator-only ops endpoints  (subs: autotopup-tick)',
+      '                            autotopup-tick = live-fire AutoTopupManager poll cycle now',
       '  anima inspect [ref]       audit on-chain memory slots (flags: --slot, --tx, --raw, --diff, --json, --full, --out <dir>)',
       '  anima help                show this message',
       '',

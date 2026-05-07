@@ -18,12 +18,15 @@ export {
   type VerifyResult,
   type VerifyChatOpts,
   type VerifyApprovalOpts,
+  type VerifyAdminTickOpts,
   provisionMessageHash,
   verifyProvisionSig,
   chatMessageHash,
   verifyChatSig,
   approvalResponseHash,
   verifyApprovalSig,
+  adminTickHash,
+  verifyAdminTickSig,
 } from './auth'
 
 export {

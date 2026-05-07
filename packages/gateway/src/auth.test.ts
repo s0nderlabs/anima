@@ -4,9 +4,11 @@ import { type Hex, hexToBytes } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import {
   type ProvisionRequest,
+  adminTickHash,
   approvalResponseHash,
   chatMessageHash,
   provisionMessageHash,
+  verifyAdminTickSig,
   verifyApprovalSig,
   verifyChatSig,
   verifyProvisionSig,
@@ -252,6 +254,98 @@ describe('chat sig verification', () => {
       expectedOperator: operator,
     })
     expect(r.ok).toBe(false)
+  })
+})
+
+describe('admin tick sig verification (v0.21.9)', () => {
+  test('roundtrip for autotopup-tick action', async () => {
+    const operatorPriv = generatePrivateKey()
+    const operator = privateKeyToAccount(operatorPriv).address
+    const ts = Date.now()
+    const hash = adminTickHash({ action: 'autotopup-tick', ts, sandboxId: 'sbx-enigma' })
+    const sig = await sign(operatorPriv, hash)
+    const r = await verifyAdminTickSig({
+      action: 'autotopup-tick',
+      ts,
+      sandboxId: 'sbx-enigma',
+      signature: sig,
+      expectedOperator: operator,
+    })
+    expect(r.ok).toBe(true)
+  })
+
+  test('rejects sig for a different action (cross-action replay)', async () => {
+    const operatorPriv = generatePrivateKey()
+    const operator = privateKeyToAccount(operatorPriv).address
+    const ts = Date.now()
+    const sigForOther = await sign(
+      operatorPriv,
+      adminTickHash({ action: 'sync-trigger', ts, sandboxId: 'sbx-1' }),
+    )
+    const r = await verifyAdminTickSig({
+      action: 'autotopup-tick',
+      ts,
+      sandboxId: 'sbx-1',
+      signature: sigForOther,
+      expectedOperator: operator,
+    })
+    expect(r.ok).toBe(false)
+    if (r.ok) throw new Error('unreachable')
+    expect(r.reason).toBe('sig-mismatch')
+  })
+
+  test('rejects sig for a different sandbox', async () => {
+    const operatorPriv = generatePrivateKey()
+    const operator = privateKeyToAccount(operatorPriv).address
+    const ts = Date.now()
+    const sigForOther = await sign(
+      operatorPriv,
+      adminTickHash({ action: 'autotopup-tick', ts, sandboxId: 'sbx-other' }),
+    )
+    const r = await verifyAdminTickSig({
+      action: 'autotopup-tick',
+      ts,
+      sandboxId: 'sbx-real',
+      signature: sigForOther,
+      expectedOperator: operator,
+    })
+    expect(r.ok).toBe(false)
+  })
+
+  test('rejects expired ts (>5 min stale)', async () => {
+    const operatorPriv = generatePrivateKey()
+    const operator = privateKeyToAccount(operatorPriv).address
+    const ts = Date.now() - 6 * 60 * 1000
+    const hash = adminTickHash({ action: 'autotopup-tick', ts, sandboxId: 'sbx-1' })
+    const sig = await sign(operatorPriv, hash)
+    const r = await verifyAdminTickSig({
+      action: 'autotopup-tick',
+      ts,
+      sandboxId: 'sbx-1',
+      signature: sig,
+      expectedOperator: operator,
+    })
+    expect(r.ok).toBe(false)
+    if (r.ok) throw new Error('unreachable')
+    expect(r.reason).toBe('ts-stale')
+  })
+
+  test('rejects future-skewed ts (>1 min ahead)', async () => {
+    const operatorPriv = generatePrivateKey()
+    const operator = privateKeyToAccount(operatorPriv).address
+    const ts = Date.now() + 2 * 60 * 1000
+    const hash = adminTickHash({ action: 'autotopup-tick', ts, sandboxId: 'sbx-1' })
+    const sig = await sign(operatorPriv, hash)
+    const r = await verifyAdminTickSig({
+      action: 'autotopup-tick',
+      ts,
+      sandboxId: 'sbx-1',
+      signature: sig,
+      expectedOperator: operator,
+    })
+    expect(r.ok).toBe(false)
+    if (r.ok) throw new Error('unreachable')
+    expect(r.reason).toBe('ts-future')
   })
 })
 

@@ -2,6 +2,7 @@
 export const VERSION = '0.0.0'
 
 export * from './config'
+export { format0G } from './format'
 export { agentPaths, placeholderAgentId } from './paths'
 
 export type {
@@ -82,12 +83,14 @@ export {
   openComputeLedger,
   getLedgerBalance,
   getLedgerDetail,
+  getLedgerDetailReadOnly,
   depositToLedger,
   refundFromLedger,
   retrieveLedgerFunds,
   closeLedger,
   type OpenLedgerOpts,
   type LedgerStatus,
+  type LedgerReadResult,
   type ProviderSubAccount,
   BrokerPool,
   VISION_PROVIDER_DEFAULTS,
@@ -435,6 +438,7 @@ export {
   SandboxProviderClient,
   type SettlementClientOpts,
   SandboxSettlementClient,
+  getSandboxBillingReserve,
 } from './og-sandbox'
 
 export {

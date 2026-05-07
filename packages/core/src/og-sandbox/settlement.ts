@@ -1,4 +1,12 @@
-import type { Address, Hex, PublicClient, WalletClient } from 'viem'
+import {
+  http,
+  type Address,
+  type Hex,
+  type PublicClient,
+  type WalletClient,
+  createPublicClient,
+} from 'viem'
+import { NETWORK_RPC } from '../config'
 import { SANDBOX_SERVING_ABI, SANDBOX_SETTLEMENT_GALILEO } from './abi'
 
 export interface SettlementClientOpts {
@@ -108,5 +116,40 @@ export class SandboxSettlementClient {
       functionName: 'withdrawRefund',
       args: [opts.provider],
     })
+  }
+}
+
+// Galileo provider wallet that recipients deposit against. Inlined here to
+// avoid a circular import with index.ts (which re-exports settlement.ts).
+const SANDBOX_PROVIDER_GALILEO_INTERNAL =
+  '0xB831371eb2703305f1d9F8542163633D0675CEd7' as const satisfies Address
+
+/**
+ * Read the SandboxSettlement billing reserve for `recipient` against `provider`,
+ * without needing a pre-built PublicClient. Self-contained: spins its own viem
+ * client against the Galileo testnet RPC. Returns 0n if the chain reverts (e.g.
+ * recipient never deposited for that provider).
+ *
+ * Used by `anima balance` (CLI) and `account.balance` (brain tool) to surface
+ * the operator-funded sandbox runtime reserve in one read. The recipient is
+ * the OPERATOR wallet that signed `anima topup --sandbox`, not the agent EOA.
+ */
+export async function getSandboxBillingReserve(opts: {
+  recipient: Address
+  provider?: Address
+  rpcUrl?: string
+}): Promise<bigint> {
+  const provider = opts.provider ?? SANDBOX_PROVIDER_GALILEO_INTERNAL
+  const rpcUrl = opts.rpcUrl ?? NETWORK_RPC['0g-testnet']
+  const client = createPublicClient({ transport: http(rpcUrl) })
+  try {
+    return (await client.readContract({
+      address: SANDBOX_SETTLEMENT_GALILEO,
+      abi: SANDBOX_SERVING_ABI,
+      functionName: 'getBalance',
+      args: [opts.recipient, provider],
+    })) as bigint
+  } catch {
+    return 0n
   }
 }

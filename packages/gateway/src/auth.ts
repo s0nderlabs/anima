@@ -199,6 +199,65 @@ export async function verifyChatSig(opts: VerifyChatOpts): Promise<VerifyResult>
 }
 
 /**
+ * v0.21.9: hash the operator signs to authenticate an admin tick (e.g.
+ * `POST /admin/autotopup/tick`) against the sandbox endpoint. Anchored to
+ * `action` + `sandboxId` so a sig for one admin endpoint can't be replayed
+ * against another, and the `chat`/`approval` sig spaces stay isolated from
+ * admin operations. Pattern mirrors `chatMessageHash` / `approvalResponseHash`.
+ */
+export function adminTickHash(opts: {
+  action: string
+  ts: number
+  sandboxId: string
+}): Hex {
+  return keccak256(
+    encodeAbiParameters(
+      [
+        { type: 'string', name: 'action' },
+        { type: 'uint64', name: 'ts' },
+        { type: 'string', name: 'sandboxId' },
+      ],
+      [opts.action, BigInt(opts.ts), opts.sandboxId],
+    ),
+  )
+}
+
+export interface VerifyAdminTickOpts {
+  action: string
+  ts: number
+  sandboxId: string
+  signature: Hex
+  expectedOperator: Address
+  maxAgeMs?: number
+  maxFutureMs?: number
+  now?: number
+}
+
+export async function verifyAdminTickSig(opts: VerifyAdminTickOpts): Promise<VerifyResult> {
+  const now = opts.now ?? Date.now()
+  const maxAge = opts.maxAgeMs ?? 5 * 60 * 1000
+  const maxFuture = opts.maxFutureMs ?? 60 * 1000
+  if (opts.ts > now + maxFuture) return { ok: false, reason: 'ts-future' }
+  if (opts.ts < now - maxAge) return { ok: false, reason: 'ts-stale' }
+
+  const hash = adminTickHash({
+    action: opts.action,
+    ts: opts.ts,
+    sandboxId: opts.sandboxId,
+  })
+  let recovered: Address
+  try {
+    recovered = await recoverMessageAddress({ message: { raw: hash }, signature: opts.signature })
+  } catch (e) {
+    return { ok: false, reason: `sig-decode: ${(e as Error).message}` }
+  }
+  if (!isAddressEqual(recovered, opts.expectedOperator)) {
+    return { ok: false, reason: 'sig-mismatch' }
+  }
+  return { ok: true }
+}
+
+/**
  * Hash the operator signs for an approval response.
  */
 export function approvalResponseHash(opts: {

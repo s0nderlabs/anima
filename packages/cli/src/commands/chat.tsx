@@ -420,6 +420,11 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       iNFT: { contract: contractAddress, tokenId },
       brainProvider: config.brain.provider,
       brainModel: config.brain.model,
+      // v0.21.9: account.balance reads these to surface sandbox billing reserve
+      // for sandbox-deployed agents. Local mode just keeps deployTarget='local'
+      // and skips the sandbox billing reserve section.
+      deployTarget: (config.deployTarget ?? 'local') as 'local' | 'sandbox',
+      operatorAddress: config.identity.operator as Address | undefined,
     }
   }
   let comms: CommsRuntimeContext | undefined

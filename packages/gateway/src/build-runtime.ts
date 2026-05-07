@@ -407,6 +407,10 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
         market: ANIMA_MARKET_ADDRESS[network],
         agentNFT: ANIMA_AGENT_NFT_ADDRESS[network],
       },
+      // v0.21.9: surface deployTarget + operator to account.balance so the
+      // sandbox billing reserve lookup works under sandbox deployment.
+      deployTarget: config.deployTarget ?? 'local',
+      operatorAddress: config.identity.operator,
     }
   }
 

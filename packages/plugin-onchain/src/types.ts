@@ -32,6 +32,12 @@ export interface OnchainRuntimeContext {
     market: Address
     agentNFT: Address
   }
+  /** v0.21.9+: deployment target. account.balance includes sandbox billing
+   * reserve only when this is 'sandbox' and `operatorAddress` is set. */
+  deployTarget?: 'local' | 'sandbox'
+  /** v0.21.9+: operator wallet that funded sandbox billing. Required to look
+   * up the SandboxSettlement reserve via `getSandboxBillingReserve`. */
+  operatorAddress?: Address
 }
 
 export interface TokenInfo {

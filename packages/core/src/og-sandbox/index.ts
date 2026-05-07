@@ -22,6 +22,7 @@ export {
 export {
   type SettlementClientOpts,
   SandboxSettlementClient,
+  getSandboxBillingReserve,
 } from './settlement'
 
 /**

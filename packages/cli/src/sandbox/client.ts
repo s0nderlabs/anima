@@ -3,6 +3,7 @@ import {
   type GatewayEventKind,
   type ProvisionEnvelope,
   type RuntimeConfig,
+  adminTickHash,
   approvalResponseHash,
   chatMessageHash,
   provisionMessageHash,
@@ -189,6 +190,31 @@ export class SandboxClient {
     const r = await this.#fetch(`${this.endpoint}/sync`, { method: 'POST' })
     if (!r.ok) throw new Error(`sync failed (${r.status})`)
     return (await r.json()) as { tx?: string; slots: string[] }
+  }
+
+  /**
+   * v0.21.9: live-fire the AutoTopupManager to skip the 5-min poll wait.
+   * Signs `adminTickHash('autotopup-tick', ts, sandboxId)` over EIP-191 so
+   * the sandbox endpoint accepts it without trustLocal. Returns the tick
+   * result (`{ ok: true }` or `{ ok: false, reason }`).
+   */
+  async triggerAutoTopupTick(): Promise<{ ok: boolean; reason?: string }> {
+    const ts = Date.now()
+    const hash = adminTickHash({ action: 'autotopup-tick', ts, sandboxId: this.sandboxId })
+    const signature = await this.operator.signMessage({ message: { raw: hash } })
+    const r = await this.#fetch(`${this.endpoint}/admin/autotopup/tick`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ts, signature }),
+    })
+    if (r.status === 401) {
+      const detail = (await r.json().catch(() => null)) as { reason?: string } | null
+      throw new Error(`autotopup-tick auth failed: ${detail?.reason ?? '401'}`)
+    }
+    if (r.status === 501) {
+      throw new Error('autotopup-tick not supported (runtime missing triggerTopupTick)')
+    }
+    return (await r.json()) as { ok: boolean; reason?: string }
   }
 
   /**

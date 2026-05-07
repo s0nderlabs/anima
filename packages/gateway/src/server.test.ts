@@ -4,7 +4,7 @@ import { encryptToPubkey, generateBootstrapKeypair } from '@s0nderlabs/anima-cor
 import { type Address, type Hex, hexToBytes } from 'viem'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { ApprovalRelay } from './approval-relay'
-import { approvalResponseHash, chatMessageHash, provisionMessageHash } from './auth'
+import { adminTickHash, approvalResponseHash, chatMessageHash, provisionMessageHash } from './auth'
 import { EventHub } from './events'
 import type { RuntimeAdapter, RuntimeConfig } from './runtime'
 import { createGatewayServer } from './server'
@@ -403,10 +403,117 @@ describe('harness HTTP server — admin endpoints', () => {
     local.session.approvals.stop()
   })
 
-  test('POST /admin/autotopup/tick 409 when not Ready', async () => {
+  test('POST /admin/autotopup/tick 500 pre-provision (operator not set yet)', async () => {
+    // v0.21.9: sandbox path needs session.operatorAddress to verify the sig.
+    // Pre-provision the operator slot is empty → 500 with operator-not-set.
     const r = await fetch(`${fix.base}/admin/autotopup/tick`, { method: 'POST' })
-    // Without trustLocal we get 401 first; the not-Ready gate is local-mode only.
+    expect(r.status).toBe(500)
+    const body = (await r.json()) as { error?: string }
+    expect(body.error).toBe('operator-not-set')
+  })
+
+  // v0.21.9: sandbox-mode (trustLocal=false) accepts EIP-191 signed body.
+  test('POST /admin/autotopup/tick 200 with signed body (sandbox path)', async () => {
+    let tickCalls = 0
+    const sandboxFix = await setupFixture({
+      trustLocal: false,
+      sandboxId: 'sbx-tick-signed-1',
+      runtime: makeStubRuntimeWithTick(() => {
+        tickCalls++
+        return { ok: true as const }
+      }),
+    })
+    await provisionFixture(sandboxFix)
+    const ts = Date.now()
+    const hash = adminTickHash({
+      action: 'autotopup-tick',
+      ts,
+      sandboxId: 'sbx-tick-signed-1',
+    })
+    const sig = await privateKeyToAccount(sandboxFix.operatorPriv).signMessage({
+      message: { raw: hexToBytes(hash) },
+    })
+    const r = await fetch(`${sandboxFix.base}/admin/autotopup/tick`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ts, signature: sig }),
+    })
+    expect(r.status).toBe(200)
+    expect(tickCalls).toBe(1)
+    sandboxFix.server.close()
+    sandboxFix.session.approvals.stop()
+  })
+
+  test('POST /admin/autotopup/tick 401 when body missing signature', async () => {
+    const sandboxFix = await setupFixture({
+      trustLocal: false,
+      sandboxId: 'sbx-nosig',
+    })
+    await provisionFixture(sandboxFix)
+    const r = await fetch(`${sandboxFix.base}/admin/autotopup/tick`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ts: Date.now() }),
+    })
     expect(r.status).toBe(401)
+    const body = (await r.json()) as { reason?: string }
+    expect(body.reason).toMatch(/signature/)
+    sandboxFix.server.close()
+    sandboxFix.session.approvals.stop()
+  })
+
+  test('POST /admin/autotopup/tick 401 when sig is for a different sandbox', async () => {
+    const sandboxFix = await setupFixture({
+      trustLocal: false,
+      sandboxId: 'sbx-real',
+    })
+    await provisionFixture(sandboxFix)
+    const ts = Date.now()
+    // Sign over a *different* sandboxId so the recovered address still equals
+    // the operator but the hash mismatches what the server reconstructs.
+    const hashForOther = adminTickHash({
+      action: 'autotopup-tick',
+      ts,
+      sandboxId: 'sbx-other',
+    })
+    const sig = await privateKeyToAccount(sandboxFix.operatorPriv).signMessage({
+      message: { raw: hexToBytes(hashForOther) },
+    })
+    const r = await fetch(`${sandboxFix.base}/admin/autotopup/tick`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ts, signature: sig }),
+    })
+    expect(r.status).toBe(401)
+    sandboxFix.server.close()
+    sandboxFix.session.approvals.stop()
+  })
+
+  test('POST /admin/autotopup/tick 401 when ts is stale (>5min old)', async () => {
+    const sandboxFix = await setupFixture({
+      trustLocal: false,
+      sandboxId: 'sbx-stale',
+    })
+    await provisionFixture(sandboxFix)
+    const ts = Date.now() - 6 * 60 * 1000
+    const hash = adminTickHash({
+      action: 'autotopup-tick',
+      ts,
+      sandboxId: 'sbx-stale',
+    })
+    const sig = await privateKeyToAccount(sandboxFix.operatorPriv).signMessage({
+      message: { raw: hexToBytes(hash) },
+    })
+    const r = await fetch(`${sandboxFix.base}/admin/autotopup/tick`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ts, signature: sig }),
+    })
+    expect(r.status).toBe(401)
+    const body = (await r.json()) as { reason?: string }
+    expect(body.reason).toBe('ts-stale')
+    sandboxFix.server.close()
+    sandboxFix.session.approvals.stop()
   })
 })
 

@@ -1,6 +1,6 @@
 import { createZGComputeNetworkBroker } from '@0glabs/0g-serving-broker'
-import { JsonRpcProvider, Wallet } from 'ethers'
-import type { Hex } from 'viem'
+import { Contract, JsonRpcProvider, Wallet } from 'ethers'
+import type { Address, Hex } from 'viem'
 import { type AnimaNetwork, NETWORK_RPC } from '../config'
 
 /**
@@ -231,4 +231,69 @@ export async function closeLedger(opts: {
 }): Promise<void> {
   const broker = await makeBroker(opts.network, opts.privkeyHex)
   await broker.ledger.deleteLedger()
+}
+
+/**
+ * 0G Compute LedgerManager contract addresses, mirrored from the upstream
+ * `@0glabs/0g-serving-broker` constants module so we can read ledger state
+ * without instantiating a full broker (no signer, no SDK init cost).
+ *
+ * Verified Apr 7 2026 against the SDK typechain factory — struct order is
+ * (address user, uint256 availableBalance, uint256 totalBalance, string
+ * additionalInfo). Do NOT swap the order of the first two uint256 fields;
+ * the names are NOT alphabetical, they're declaration order.
+ */
+const LEDGER_MANAGER_ADDRESS: Record<AnimaNetwork, Address> = {
+  '0g-mainnet': '0x2dE54c845Cd948B72D2e32e39586fe89607074E3',
+  '0g-testnet': '0xE70830508dAc0A97e6c087c75f402f9Be669E406',
+}
+
+const LEDGER_READ_ABI = [
+  'function getLedger(address user) view returns (tuple(address user, uint256 availableBalance, uint256 totalBalance, string additionalInfo))',
+] as const
+
+export interface LedgerReadResult {
+  /** Total deposit pool (lifetime sum of addLedger + depositFund). */
+  totalBalance: bigint
+  /** Unallocated, free for transferFund into provider sub-accounts. */
+  availableBalance: bigint
+  /** Sum allocated to provider sub-accounts (totalBalance - availableBalance). */
+  lockedBalance: bigint
+}
+
+/**
+ * Read an agent's compute ledger row WITHOUT a private key. Spins a viem-free
+ * ethers JsonRpcProvider, calls the LedgerManager contract directly. Returns
+ * null if the ledger doesn't exist for that address (revert is silent).
+ *
+ * For per-provider envelope detail, the caller still needs an unlocked agent
+ * signer (SDK's `getProvidersWithBalance` requires it). Use
+ * `getLedgerDetail({ privkeyHex })` when unlock is acceptable; use
+ * `getLedgerDetailReadOnly({ agentAddress })` for operator-side aggregators
+ * like `anima balance` that want a fast read with no friction.
+ */
+export async function getLedgerDetailReadOnly(opts: {
+  network: AnimaNetwork
+  agentAddress: Address
+  rpcUrl?: string
+}): Promise<LedgerReadResult | null> {
+  const provider = new JsonRpcProvider(opts.rpcUrl ?? NETWORK_RPC[opts.network])
+  const contract = new Contract(LEDGER_MANAGER_ADDRESS[opts.network], LEDGER_READ_ABI, provider)
+  try {
+    // biome-ignore lint/suspicious/noExplicitAny: ethers ABI returns dynamically-typed Result
+    const getLedgerFn = (contract as any).getLedger as (a: Address) => Promise<{
+      totalBalance: bigint
+      availableBalance: bigint
+    }>
+    const r = await getLedgerFn(opts.agentAddress)
+    const totalBalance = r.totalBalance
+    const availableBalance = r.availableBalance
+    return {
+      totalBalance,
+      availableBalance,
+      lockedBalance: totalBalance - availableBalance,
+    }
+  } catch {
+    return null
+  }
 }

@@ -3,6 +3,7 @@ import { parseEther } from 'viem'
 import {
   closeLedger,
   getLedgerDetail,
+  getLedgerDetailReadOnly,
   refundFromLedger,
   retrieveLedgerFunds,
   setBrokerFactoryForTests,
@@ -129,5 +130,82 @@ describe('ledger helpers (broker injected)', () => {
     )
     await closeLedger({ network: '0g-mainnet', privkeyHex: PRIVKEY })
     expect(calls.delete).toBe(1)
+  })
+})
+
+// Stub RPC for getLedgerDetailReadOnly which goes ethers.Contract → eth_call.
+// ethers v6 batches requests as an array, so the handler must answer each
+// element by id with the right method shape.
+function startStubRpc(returnHex: string | null): { url: string; close: () => void } {
+  const server = Bun.serve({
+    port: 0,
+    async fetch(req) {
+      const raw = await req.json().catch(() => null)
+      if (!raw) return new Response('bad-body', { status: 400 })
+      const list = Array.isArray(raw) ? raw : [raw]
+      const out = list.map((req: { id: number; method: string }) => {
+        if (req.method === 'eth_chainId') {
+          return { jsonrpc: '2.0', id: req.id, result: '0x4115' }
+        }
+        if (req.method === 'eth_call') {
+          if (returnHex === null) {
+            return {
+              jsonrpc: '2.0',
+              id: req.id,
+              error: { code: -32000, message: 'execution reverted' },
+            }
+          }
+          return { jsonrpc: '2.0', id: req.id, result: returnHex }
+        }
+        if (req.method === 'eth_blockNumber') {
+          return { jsonrpc: '2.0', id: req.id, result: '0x1' }
+        }
+        return { jsonrpc: '2.0', id: req.id, error: { code: -32601, message: 'unsupported' } }
+      })
+      const body = Array.isArray(raw) ? out : out[0]
+      return new Response(JSON.stringify(body), {
+        headers: { 'content-type': 'application/json' },
+      })
+    },
+  })
+  return { url: `http://localhost:${server.port}`, close: () => server.stop(true) }
+}
+
+describe('getLedgerDetailReadOnly', () => {
+  const AGENT = '0x1e930c1647EaB93651FD94e760E0cbbb5F4FC99f' as const
+
+  test('parses tuple return: (user, availableBalance, totalBalance, additionalInfo)', async () => {
+    // Real specter response from May 7 2026 audit (each chunk is 64 hex / 32 bytes):
+    // [0x20 offset, user, availableBalance=0x013569b66ac74000, totalBalance=0x05e9e4f97f7b5000, 0x80, 0]
+    const pad = (h: string): string => h.padStart(64, '0')
+    const returnHex = `0x${pad('20')}${pad('1e930c1647eab93651fd94e760e0cbbb5f4fc99f')}${pad('013569b66ac74000')}${pad('05e9e4f97f7b5000')}${pad('80')}${pad('0')}`
+    const stub = startStubRpc(returnHex)
+    try {
+      const r = await getLedgerDetailReadOnly({
+        network: '0g-mainnet',
+        agentAddress: AGENT,
+        rpcUrl: stub.url,
+      })
+      expect(r).not.toBeNull()
+      expect(r?.availableBalance).toBe(0x013569b66ac74000n)
+      expect(r?.totalBalance).toBe(0x05e9e4f97f7b5000n)
+      expect(r?.lockedBalance).toBe(0x05e9e4f97f7b5000n - 0x013569b66ac74000n)
+    } finally {
+      stub.close()
+    }
+  })
+
+  test('returns null on revert (ledger does not exist)', async () => {
+    const stub = startStubRpc(null)
+    try {
+      const r = await getLedgerDetailReadOnly({
+        network: '0g-mainnet',
+        agentAddress: AGENT,
+        rpcUrl: stub.url,
+      })
+      expect(r).toBeNull()
+    } finally {
+      stub.close()
+    }
   })
 })
