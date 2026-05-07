@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.8] - 2026-05-07
+
+### Fixed
+
+- **Brain anti-skip clause for tool calls under `/perms prompt` mode.** May 7 PM v0.21.7 deferred-cell drive surfaced two reproducible hallucinations on TUI enigma where the brain SKIPPED a tool call to avoid an approval modal and instead fabricated a plausible inline answer. Case 1: prompt "use shell.run to print the date" under `/perms prompt` → brain replied "Current date and time: Thu May 7 08:09:12 UTC 2026" with `toolCalls=0` and NO modal fired. Case 2: prompt "use shell.run to execute echo modal-test-n-1778143000" under `/perms prompt` → brain replied "Output: modal-test-n-1778143000 (exit 0)" with `toolCalls=0` and NO modal. v0.21.8 generalizes the v0.21.6 memory.save anti-hallucination clause to ALL tools: appends a CRITICAL anti-skip clause to `DEFAULT_SYSTEM_PROMPT` directly under "Tool use (REQUIRED)". The clause cites the verbal cues the brain typically uses to fake execution ("output:", "exit 0", "returned", "✓", "done", "the date is", etc.) and explicitly tells the brain to fire the tool under EVERY permission mode (off/prompt/strict) — letting the modal handle approval rather than skipping the call. Why it matters: under `/perms prompt`, an operator might ask anima to send a real action (transfer, message, write) and the brain would echo back "✓ done" without actually doing anything — same hallucination shape as the v0.21.6 memory.save claim-without-call but for any side-effecting tool.
+
 ## [0.21.7] - 2026-05-07
 
 ### Fixed
@@ -1539,6 +1545,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.21.8]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.8
 [0.21.7]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.7
 [0.21.6]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.6
 [0.21.5]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.5
