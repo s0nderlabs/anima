@@ -235,11 +235,25 @@ export function createGatewayServer(deps: ServerDeps): http.Server {
           provisionedAt: session.provisionedAt,
         })
 
+        // v0.21.10: enrich the provision config with operator + deployTarget
+        // before runtime.start so account.balance can read the sandbox billing
+        // reserve (needs both fields). The provision envelope already carries
+        // operatorAddress at the top level for sig verification; we mirror it
+        // into config.identity.operator for the runtime ctx, and force
+        // deployTarget='sandbox' since the harness only ever runs in a sandbox.
+        const enrichedConfig: RuntimeConfig = {
+          ...request.config,
+          identity: {
+            ...request.config.identity,
+            operator: request.operatorAddress,
+          },
+          deployTarget: 'sandbox',
+        }
         Promise.resolve()
           .then(async () => {
             await session.runtime.start({
               agentPrivkey,
-              config: request.config,
+              config: enrichedConfig,
               events: session.events,
               secrets,
             })

@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.10] - 2026-05-07
+
+### Fixed
+
+- **Sandbox runtime config now carries `identity.operator` + `deployTarget: 'sandbox'`.** v0.21.9 verification on enigma surfaced that `account.balance` returned `sandboxBillingReserve: null` even though enigma is sandbox-deployed. Root cause: provision envelope's `runtimeConfig` from `handoffAgentToGateway` didn't include the operator address or deployTarget, so `buildAnimaRuntime` defaulted both to undefined/'local' and the brain context never met the `ctx.deployTarget === 'sandbox' && ctx.operatorAddress` precondition for the billing reserve lookup. Fix is server-side in the gateway: `/bootstrap/provision` now enriches the inbound config with `operator: request.operatorAddress` (already verified via EIP-191 sig) and forces `deployTarget: 'sandbox'` (the harness only ever runs in sandbox). Single point of fix for all current + future provision paths; no client-side change needed. Re-verified live on enigma.
+
 ## [0.21.9] - 2026-05-07
 
 ### Added
@@ -1561,6 +1567,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.21.10]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.10
 [0.21.9]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.9
 [0.21.8]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.8
 [0.21.7]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.7

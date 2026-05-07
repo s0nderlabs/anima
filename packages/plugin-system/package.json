@@ -1,6 +1,6 @@
 {
   "name": "@s0nderlabs/anima-plugin-system",
-  "version": "0.21.9",
+  "version": "0.21.10",
   "type": "module",
   "description": "Filesystem + shell + browser + skills tools plugin for anima",
   "license": "MIT",
