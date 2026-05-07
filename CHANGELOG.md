@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.3] - 2026-05-07
+
+### Changed
+
+- **Auto-escalation now covers ANY web.fetch hiccup, not just bot-blocks.** v0.21.2 escalated only when `data.blocked === true`. Live drives showed Qwen3.6 still struggled when `web.fetch` returned `ok:false` for a transient reason (HTTP 5xx, 429, timeout, DNS, connection refused, generic fetch error): brain would acknowledge the failure in the user-visible reply instead of trying the browser primitive. v0.21.3 escalates on `result.ok === false` UNLESS the error matches a permanent-failure pattern (`invalid URL`, `unsupported protocol`, `host blocked` for security). Browser routing is now active for **every** transient hiccup. New `classifyError()` helper maps the raw fetch error into a short symbolic reason (`timeout` / `http-503` / `dns` / `connection` / `aborted` / `fetch-error`) so the brain sees a clean tag in `auto_escalation.reason` instead of a stack trace. `merged.data.auto_escalation.original_error` preserves the raw fetch error for debugging. 8 new unit tests covering each transient + permanent path.
+
 ## [0.21.2] - 2026-05-07
 
 ### Fixed

@@ -63,9 +63,76 @@ test('detect: blocked + neither final_url nor args.url returns not needed', () =
   expect(detectFetchEscalation(call, result).needed).toBe(false)
 })
 
-test('detect: web.fetch with ok=false (HTTP 5xx) does NOT escalate', () => {
-  const call = fetchCall('c4', 'https://broken.example.com')
+test('detect: v0.21.3 — timeout failure DOES escalate (transient)', () => {
+  const call = fetchCall('c4', 'https://arxiv.org/search/?query=test')
+  const result: ToolResult = { ok: false, error: 'timeout after 15000ms' }
+  const out = detectFetchEscalation(call, result)
+  expect(out.needed).toBe(true)
+  expect(out.reason).toBe('timeout')
+  expect(out.escalatedCall?.args).toEqual({ url: 'https://arxiv.org/search/?query=test' })
+})
+
+test('detect: v0.21.3 — http 503 failure DOES escalate', () => {
+  const call = fetchCall('c4b', 'https://flaky.example.com')
   const result: ToolResult = { ok: false, error: 'http 503' }
+  const out = detectFetchEscalation(call, result)
+  expect(out.needed).toBe(true)
+  expect(out.reason).toBe('http-503')
+})
+
+test('detect: v0.21.3 — http 429 failure DOES escalate', () => {
+  const call = fetchCall('c4c', 'https://api.example.com')
+  const result: ToolResult = { ok: false, error: 'http 429' }
+  const out = detectFetchEscalation(call, result)
+  expect(out.needed).toBe(true)
+  expect(out.reason).toBe('http-429')
+})
+
+test('detect: v0.21.3 — DNS failure DOES escalate', () => {
+  const call = fetchCall('c4d', 'https://dns-broken.example')
+  const result: ToolResult = {
+    ok: false,
+    error: 'getaddrinfo ENOTFOUND dns-broken.example',
+  }
+  const out = detectFetchEscalation(call, result)
+  expect(out.needed).toBe(true)
+  expect(out.reason).toBe('dns')
+})
+
+test('detect: v0.21.3 — connection refused DOES escalate', () => {
+  const call = fetchCall('c4e', 'https://refused.example.com')
+  const result: ToolResult = { ok: false, error: 'connect ECONNREFUSED' }
+  const out = detectFetchEscalation(call, result)
+  expect(out.needed).toBe(true)
+  expect(out.reason).toBe('connection')
+})
+
+test('detect: v0.21.3 — generic fetch failure DOES escalate', () => {
+  const call = fetchCall('c4f', 'https://example.com')
+  const result: ToolResult = { ok: false, error: 'fetch failed' }
+  const out = detectFetchEscalation(call, result)
+  expect(out.needed).toBe(true)
+  expect(out.reason).toBe('fetch-error')
+})
+
+test('detect: v0.21.3 — invalid URL is permanent, does NOT escalate', () => {
+  const call: ToolCall = { id: 'c4g', name: 'web.fetch', args: { url: 'not a url' } }
+  const result: ToolResult = { ok: false, error: 'invalid URL' }
+  expect(detectFetchEscalation(call, result).needed).toBe(false)
+})
+
+test('detect: v0.21.3 — unsupported protocol is permanent, does NOT escalate', () => {
+  const call = fetchCall('c4h', 'file:///etc/passwd')
+  const result: ToolResult = { ok: false, error: 'unsupported protocol: file:' }
+  expect(detectFetchEscalation(call, result).needed).toBe(false)
+})
+
+test('detect: v0.21.3 — host blocked (private IP) is permanent, does NOT escalate', () => {
+  const call = fetchCall('c4i', 'http://169.254.169.254/latest/meta-data')
+  const result: ToolResult = {
+    ok: false,
+    error: 'host blocked (private/loopback/metadata): 169.254.169.254',
+  }
   expect(detectFetchEscalation(call, result).needed).toBe(false)
 })
 
@@ -84,7 +151,7 @@ test('detect: non-web.fetch tool with blocked:true returns not needed', () => {
   expect(detectFetchEscalation(call, result).needed).toBe(false)
 })
 
-test('detect: web.fetch with missing data field returns not needed', () => {
+test('detect: web.fetch with missing data field + ok=true returns not needed', () => {
   const call = fetchCall('c7', 'https://x.com')
   const result: ToolResult = { ok: true }
   expect(detectFetchEscalation(call, result).needed).toBe(false)
@@ -108,6 +175,12 @@ test('detect: tail-recursion guard refuses to escalate already-escalated calls',
     args: { url: 'https://x.com' },
   }
   const result = blockedResult('https://x.com', 'cloudflare')
+  expect(detectFetchEscalation(call, result).needed).toBe(false)
+})
+
+test('detect: v0.21.3 — failure with no URL anywhere does NOT escalate', () => {
+  const call: ToolCall = { id: 'c9', name: 'web.fetch', args: {} }
+  const result: ToolResult = { ok: false, error: 'timeout after 15000ms' }
   expect(detectFetchEscalation(call, result).needed).toBe(false)
 })
 
@@ -136,6 +209,22 @@ test('merge: ok escalation produces ok=true result with both blobs', () => {
   const aeResult = ae.result as ToolResult
   expect(aeResult.ok).toBe(true)
   expect((aeResult.data as Record<string, unknown>).title).toBe('Google')
+})
+
+test('merge: v0.21.3 — timeout escalation preserves original error', () => {
+  const original: ToolResult = { ok: false, error: 'timeout after 15000ms' }
+  const escalated: ToolResult = { ok: true, data: { currentUrl: 'https://arxiv.org/search' } }
+  const escalation = escalationFor(
+    fetchCall('cT', 'https://arxiv.org/search'),
+    'timeout',
+    'https://arxiv.org/search',
+  )
+  const merged = mergeEscalationResult(original, escalated, escalation)
+  expect(merged.ok).toBe(true)
+  const data = merged.data as Record<string, unknown>
+  const ae = data.auto_escalation as Record<string, unknown>
+  expect(ae.reason).toBe('timeout')
+  expect(ae.original_error).toBe('timeout after 15000ms')
 })
 
 test('merge: failed escalation sets ok=false with descriptive error, preserves original data', () => {
