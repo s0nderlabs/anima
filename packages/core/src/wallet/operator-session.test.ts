@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { existsSync, mkdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Hex } from 'viem'
@@ -10,9 +10,11 @@ import {
   buildOperatorSession,
   clearOperatorSession,
   getSessionKey,
+  isOperatorSessionComplete,
   isOperatorSessionFresh,
   operatorSessionPath,
   readOperatorSession,
+  requiredScopesForAgent,
   writeOperatorSession,
 } from './index'
 
@@ -228,5 +230,65 @@ describe('buildOperatorSession', () => {
     })
     expect(sess.keys.keystore).toBe(hex32(1))
     expect(sess.keys[OPERATOR_BLOB_SCOPES.TELEGRAM]).toBe(hex32(2))
+  })
+})
+
+describe('v0.21.12: requiredScopesForAgent + isOperatorSessionComplete', () => {
+  test('requiredScopesForAgent returns only keystore when no encrypted blobs exist', () => {
+    const required = requiredScopesForAgent(TEST_AGENT_ID)
+    expect(required).toEqual(['keystore'])
+  })
+
+  test('requiredScopesForAgent adds telegram scope when telegram-secrets.encrypted exists', () => {
+    const dir = join(process.env.ANIMA_ROOT ?? '', 'agents', TEST_AGENT_ID)
+    writeFileSync(join(dir, 'telegram-secrets.encrypted'), Buffer.from('placeholder'))
+    const required = requiredScopesForAgent(TEST_AGENT_ID)
+    expect(required).toEqual(['keystore', OPERATOR_BLOB_SCOPES.TELEGRAM])
+  })
+
+  test('isOperatorSessionComplete returns false when no session exists', () => {
+    expect(isOperatorSessionComplete(TEST_AGENT_ID, ['keystore'])).toBe(false)
+  })
+
+  test('isOperatorSessionComplete returns true when session has all required scopes', () => {
+    const sess = buildOperatorSession({
+      agent: '0x0000000000000000000000000000000000000010',
+      keys: { keystore: hex32(1), [OPERATOR_BLOB_SCOPES.TELEGRAM]: hex32(2) },
+    })
+    writeOperatorSession(TEST_AGENT_ID, sess)
+    expect(
+      isOperatorSessionComplete(TEST_AGENT_ID, ['keystore', OPERATOR_BLOB_SCOPES.TELEGRAM]),
+    ).toBe(true)
+  })
+
+  test('isOperatorSessionComplete returns FALSE when session is fresh but missing a required scope', () => {
+    // The exact regression we shipped v0.21.12 to close: timestamp-fresh but
+    // missing telegram scope key. isOperatorSessionFresh would return true,
+    // isOperatorSessionComplete must return false so the caller re-derives.
+    const sess = buildOperatorSession({
+      agent: '0x0000000000000000000000000000000000000011',
+      keys: { keystore: hex32(1) }, // no TELEGRAM scope
+    })
+    writeOperatorSession(TEST_AGENT_ID, sess)
+    expect(isOperatorSessionFresh(TEST_AGENT_ID)).toBe(true)
+    expect(
+      isOperatorSessionComplete(TEST_AGENT_ID, ['keystore', OPERATOR_BLOB_SCOPES.TELEGRAM]),
+    ).toBe(false)
+  })
+
+  test('isOperatorSessionComplete tolerates expired session by returning false', () => {
+    const sess = buildOperatorSession({
+      agent: '0x0000000000000000000000000000000000000012',
+      keys: { keystore: hex32(1), [OPERATOR_BLOB_SCOPES.TELEGRAM]: hex32(2) },
+      expiresInMs: 1, // immediately expired
+    })
+    writeOperatorSession(TEST_AGENT_ID, sess)
+    // Wait a tick to ensure expiry registers.
+    const expired = new Promise<void>(r => setTimeout(r, 10))
+    return expired.then(() => {
+      expect(
+        isOperatorSessionComplete(TEST_AGENT_ID, ['keystore', OPERATOR_BLOB_SCOPES.TELEGRAM]),
+      ).toBe(false)
+    })
   })
 })

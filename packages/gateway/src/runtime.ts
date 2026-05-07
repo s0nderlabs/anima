@@ -121,4 +121,12 @@ export interface RuntimeAdapter {
    * + activity-log surfaces, NOT this return value.
    */
   triggerTopupTick?(): Promise<TriggerTopupTickResult>
+  /**
+   * v0.21.12: report the high-level state of each registered listener so
+   * `/healthz` can expose `listeners.telegram` etc. without parsing logs.
+   * 'disabled' = listener not configured (e.g. no telegram-secrets blob).
+   * 'active' = listener registered + started without throwing.
+   * 'failed' = registered but start() threw OR a runtime invariant violated.
+   */
+  listenerStates?(): Record<string, 'active' | 'disabled' | 'failed'>
 }

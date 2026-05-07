@@ -108,6 +108,13 @@ export function createGatewayServer(deps: ServerDeps): http.Server {
       }
 
       if (method === 'GET' && url === '/healthz') {
+        // v0.21.12: include per-listener state so operators (and the live
+        // verification matrix) can probe whether the telegram listener is
+        // actually wired up without parsing logs. `disabled` means no
+        // telegram-secrets blob was decrypted at boot (intentional config or
+        // missing scope key). `active` = listener registered. `failed` =
+        // registered but start threw (future, once we plumb start outcomes).
+        const listeners = session.runtime.listenerStates?.() ?? { telegram: 'disabled' as const }
         return send(res, 200, {
           state: session.state,
           sandboxId: session.sandboxId,
@@ -121,6 +128,7 @@ export function createGatewayServer(deps: ServerDeps): http.Server {
           eventsLastSeq: session.events.lastSeq(),
           subscribers: session.events.size(),
           pendingApprovals: session.approvals.pendingCount(),
+          listeners,
         })
       }
 

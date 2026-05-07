@@ -153,6 +153,17 @@ describe('harness HTTP server — provision + lifecycle', () => {
     expect(body.runtimeReady).toBe(false)
   })
 
+  test('GET /healthz includes listeners block (v0.21.12)', async () => {
+    const r = await fetch(`${fix.base}/healthz`)
+    const body = (await r.json()) as { listeners?: Record<string, string> }
+    // The stub runtime in tests doesn't implement listenerStates() so the
+    // server falls back to the disabled default. Real RealRuntime sets
+    // 'active' when secrets.telegram is wired in.
+    expect(body.listeners).toBeDefined()
+    expect(body.listeners?.telegram).toBeDefined()
+    expect(['active', 'disabled', 'failed']).toContain(body.listeners?.telegram ?? '')
+  })
+
   test('POST /bootstrap/provision happy path → Provisioned then Ready', async () => {
     await provisionFixture(fix)
     expect(fix.session.state).toBe('Ready')

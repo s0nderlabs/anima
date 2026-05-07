@@ -16,12 +16,13 @@
  *    same agent address always produce the same key.
  */
 
-import { chmodSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { type Address, type Hex, bytesToHex, hexToBytes } from 'viem'
 import type { OperatorSigner } from '../operator/signer'
 import { agentPaths } from '../paths'
 import {
+  OPERATOR_BLOB_SCOPES,
   type OperatorBlobScope,
   deriveBlobKey,
   deriveKeystoreKey,
@@ -114,6 +115,60 @@ export function clearOperatorSession(agentId: string): void {
 /** True if a non-expired session exists on disk. */
 export function isOperatorSessionFresh(agentId: string): boolean {
   return readOperatorSession(agentId) !== null
+}
+
+/**
+ * Map encrypted blob filename → required scope. Extend when new blob types
+ * are added so `requiredScopesForAgent` picks them up automatically.
+ */
+const SCOPE_BLOB_FILES: ReadonlyArray<readonly [filename: string, scope: OperatorBlobScope]> = [
+  ['telegram-secrets.encrypted', OPERATOR_BLOB_SCOPES.TELEGRAM],
+] as const
+
+/**
+ * Inspect the agent dir on disk and return the set of scopes the operator
+ * session must contain to fully boot the daemon. Always includes 'keystore'
+ * (the canonical legacy slot). Adds extra scopes when their corresponding
+ * encrypted blob is present.
+ *
+ * Used by `anima gateway start` and TUI auto-spawn to decide whether the
+ * cached session is "complete enough" or whether re-derivation via Touch ID
+ * is needed.
+ */
+export function requiredScopesForAgent(agentId: string): Array<'keystore' | OperatorBlobScope> {
+  const dir = agentPaths.agent(agentId).dir
+  const required: Array<'keystore' | OperatorBlobScope> = ['keystore']
+  for (const [filename, scope] of SCOPE_BLOB_FILES) {
+    if (existsSync(join(dir, filename))) {
+      required.push(scope)
+    }
+  }
+  return required
+}
+
+/**
+ * Stricter sibling of `isOperatorSessionFresh`: true only when (a) a
+ * non-expired session exists AND (b) the session contains every scope key
+ * required by the agent's on-disk state. A session can be "fresh" by
+ * timestamp but missing a scope (e.g. written before telegram-secrets was
+ * configured), in which case this returns false so the caller knows to
+ * re-derive via Touch ID.
+ *
+ * The closing the gap on the v0.21.12 regression where `anima gateway start`
+ * skipped re-derivation because the session was timestamp-fresh, but the
+ * gateway daemon then booted without the TELEGRAM scope key and silently
+ * dropped all inbound TG messages.
+ */
+export function isOperatorSessionComplete(
+  agentId: string,
+  required: Array<'keystore' | OperatorBlobScope>,
+): boolean {
+  const sess = readOperatorSession(agentId)
+  if (!sess) return false
+  for (const scope of required) {
+    if (!sess.keys[scope]) return false
+  }
+  return true
 }
 
 /**

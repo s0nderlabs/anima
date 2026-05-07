@@ -77,6 +77,10 @@ export class RealRuntime implements RuntimeAdapter {
   #network: '0g-mainnet' | '0g-testnet' | null = null
   #events: EventHub | null = null
   #pendingFlush: Promise<void> | null = null
+  // v0.21.12: per-listener state for /healthz visibility.
+  #listenerStates: Record<string, 'active' | 'disabled' | 'failed'> = {
+    telegram: 'disabled',
+  }
 
   constructor(opts: RealRuntimeOpts) {
     this.#approvals = opts.approvals
@@ -107,7 +111,22 @@ export class RealRuntime implements RuntimeAdapter {
     this.#runtime = runtime
     this.#events = opts.events
     this.#wireDrains(opts.events)
+    // v0.21.12: surface listener state for /healthz. The telegram listener is
+    // 'active' when secrets were provided AND build-runtime registered the
+    // listener (which requires both ctx.telegram + secrets.telegram). When
+    // secrets.telegram is undefined (no encrypted blob, or missing scope key),
+    // it's 'disabled'. Real start failures will be migrated to 'failed' once
+    // we plumb startAll outcomes; right now buildAnimaRuntime swallows them.
+    if (opts.secrets?.telegram && runtime.listeners.some(l => l.name === 'telegram-bot')) {
+      this.#listenerStates.telegram = 'active'
+    } else {
+      this.#listenerStates.telegram = 'disabled'
+    }
     this.#ready = true
+  }
+
+  listenerStates(): Record<string, 'active' | 'disabled' | 'failed'> {
+    return { ...this.#listenerStates }
   }
 
   async runChatTurn(input: ChatTurnInput): Promise<ChatTurnResult> {

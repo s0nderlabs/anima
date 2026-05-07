@@ -32,6 +32,8 @@ export {
   readOperatorSession,
   clearOperatorSession,
   isOperatorSessionFresh,
+  isOperatorSessionComplete,
+  requiredScopesForAgent,
   getSessionKey,
   precomputeAllScopes,
   buildOperatorSession,

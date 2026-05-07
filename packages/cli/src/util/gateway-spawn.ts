@@ -13,9 +13,10 @@
  */
 
 import { type ChildProcess, spawn } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, mkdirSync, openSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { agentPaths } from '@s0nderlabs/anima-core'
 
 export interface SpawnGatewayDaemonOpts {
   agentId: string
@@ -23,8 +24,14 @@ export interface SpawnGatewayDaemonOpts {
   socketPath: string
   /** Max ms to wait for the unix sock to appear. Default 10_000. */
   timeoutMs?: number
-  /** Where to send daemon stdout/stderr. Default 'inherit' (so user sees boot errors). */
-  stdio?: 'inherit' | 'ignore'
+  /**
+   * Where to send daemon stdout/stderr. Default 'log-file' which redirects
+   * to `~/.anima/agents/<id>/gateway.log` (truncated on each boot) so
+   * detached daemon diagnostics survive the parent's exit. 'inherit' keeps
+   * the legacy behavior where output goes to the parent's tty (and vanishes
+   * on detach). 'ignore' drops everything.
+   */
+  stdio?: 'inherit' | 'ignore' | 'log-file'
   /** Override the bin resolution (tests). */
   binPath?: string
   /** Override env (tests). */
@@ -60,14 +67,38 @@ export async function spawnGatewayDaemon(
     ANIMA_AGENT_ID: opts.agentId,
     ANIMA_CONFIG: opts.configPath,
   }
-  const stdioMode = opts.stdio ?? 'inherit'
+  const stdioMode = opts.stdio ?? 'log-file'
+
+  // v0.21.12: when stdio is 'log-file' redirect daemon stdout+stderr to
+  // ~/.anima/agents/<id>/gateway.log (truncate-on-restart). Pre-fix this
+  // helper used 'inherit' which sent output to the parent's tty; once the
+  // parent CLI returned, those handles vanished and operators couldn't see
+  // why the daemon misbehaved. Truncation is fine because operators rarely
+  // reboot the daemon mid-session and `anima gateway logs -f` only follows
+  // the current invocation.
+  let stdioCfg: ['ignore', 'inherit' | 'ignore' | number, 'inherit' | 'ignore' | number]
+  if (stdioMode === 'log-file') {
+    const logPath = join(agentPaths.agent(opts.agentId).dir, 'gateway.log')
+    try {
+      mkdirSync(dirname(logPath), { recursive: true })
+      const fd = openSync(logPath, 'w') // truncate on each boot
+      stdioCfg = ['ignore', fd, fd]
+    } catch {
+      // If we can't open the log file (perm, disk), fall back to ignore so
+      // we still spawn cleanly. Operators lose diagnostics but the daemon
+      // boots.
+      stdioCfg = ['ignore', 'ignore', 'ignore']
+    }
+  } else {
+    stdioCfg = ['ignore', stdioMode, stdioMode]
+  }
 
   let proc: ChildProcess
   try {
     proc = spawn('bun', [bin], {
       env,
       detached: true,
-      stdio: ['ignore', stdioMode, stdioMode],
+      stdio: stdioCfg,
     })
     proc.unref()
   } catch (err) {

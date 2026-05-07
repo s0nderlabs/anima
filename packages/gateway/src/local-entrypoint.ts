@@ -99,10 +99,16 @@ async function loadLocalTelegramSecrets(opts: {
   if (!existsSync(path)) return undefined
   const blobKey = getSessionKey(opts.agentId, OPERATOR_BLOB_SCOPES.TELEGRAM)
   if (!blobKey) {
-    process.stderr.write(
-      'gateway: telegram secrets present but no telegram scope key in operator session, run `anima gateway start` to refresh\n',
+    // v0.21.12: fail loud. Pre-fix this path returned undefined silently and
+    // the daemon booted with a half-configured runtime: telegram-secrets.encrypted
+    // existed on disk but the listener never started, so all inbound TG was
+    // dropped. Operators only noticed when a phone message went unanswered —
+    // sometimes hours later. Now we exit 1 BEFORE the socket binds so the
+    // parent CLI's wait-for-socket-readable check fails, the operator sees
+    // the failure at boot, and `anima gateway start` returns non-zero.
+    die(
+      'telegram secrets present but no telegram scope key in operator session — re-run `anima gateway start` to derive scope keys via Touch ID',
     )
-    return undefined
   }
   try {
     const fileBytes = await readFile(path)

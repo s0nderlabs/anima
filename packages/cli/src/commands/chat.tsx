@@ -44,6 +44,7 @@ import {
   explorerTxUrl,
   fetchAndDecryptKeystore,
   iNFTAgentId,
+  isOperatorSessionComplete,
   isOperatorSessionFresh,
   loadPlugins,
   makeMemoryReadTool,
@@ -54,6 +55,7 @@ import {
   matchSkillTriggers,
   newEventId,
   readIndexFile,
+  requiredScopesForAgent,
   runEscalation,
   scanSkills,
 } from '@s0nderlabs/anima-core'
@@ -133,36 +135,62 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
       const { runChatSandbox } = await import('./chat-sandbox')
       return runChatSandbox(config, { unixSocketPath: _gatewaySock })
     }
-    if (!forceEmbedded && isOperatorSessionFresh(_aid)) {
-      const { spawnGatewayDaemon } = await import('../util/gateway-spawn')
-      const sBoot = spinner()
-      sBoot.start('Starting gateway daemon (auto-spawn)')
-      try {
-        const result = await spawnGatewayDaemon({
-          agentId: _aid,
-          configPath: configPath ?? '',
-          socketPath: _gatewaySock,
-          timeoutMs: 12_000,
-        })
-        if (result.ready) {
-          sBoot.stop(`gateway running pid=${result.pid}`)
-          const { runChatSandbox } = await import('./chat-sandbox')
-          return runChatSandbox(config, { unixSocketPath: _gatewaySock })
+    if (!forceEmbedded) {
+      // v0.21.12: only auto-spawn the gateway daemon when the cached session
+      // contains every scope key the daemon will need. A "fresh by ts" session
+      // missing the TELEGRAM scope causes the daemon to silently drop all
+      // inbound TG (the regression we shipped this fix to close). When
+      // incomplete, fall through to the embedded path with a hint to run
+      // `anima gateway start` interactively.
+      const required = requiredScopesForAgent(_aid)
+      if (isOperatorSessionComplete(_aid, required)) {
+        const { spawnGatewayDaemon } = await import('../util/gateway-spawn')
+        const sBoot = spinner()
+        sBoot.start('Starting gateway daemon (auto-spawn)')
+        try {
+          const result = await spawnGatewayDaemon({
+            agentId: _aid,
+            configPath: configPath ?? '',
+            socketPath: _gatewaySock,
+            timeoutMs: 12_000,
+          })
+          if (result.ready) {
+            sBoot.stop(`gateway running pid=${result.pid}`)
+            const { runChatSandbox } = await import('./chat-sandbox')
+            return runChatSandbox(config, { unixSocketPath: _gatewaySock })
+          }
+          const reason = result.reason ?? 'unknown'
+          const detail = result.error ? `: ${result.error}` : ''
+          sBoot.stop(
+            `gateway auto-spawn failed (${reason}${detail}); falling back to embedded mode`,
+          )
+        } catch (err) {
+          sBoot.stop(
+            `gateway auto-spawn errored: ${(err as Error).message?.slice(0, 160)}; falling back to embedded mode`,
+          )
         }
-        const reason = result.reason ?? 'unknown'
-        const detail = result.error ? `: ${result.error}` : ''
-        sBoot.stop(`gateway auto-spawn failed (${reason}${detail}); falling back to embedded mode`)
-      } catch (err) {
-        sBoot.stop(
-          `gateway auto-spawn errored: ${(err as Error).message?.slice(0, 160)}; falling back to embedded mode`,
+      } else if (isOperatorSessionFresh(_aid)) {
+        // Session timestamp fresh but missing a required scope key (e.g.
+        // telegram-secrets.encrypted exists on disk but the cached session
+        // was written without TELEGRAM). Auto-spawning would produce a
+        // daemon that silently drops TG. Make the operator re-run gateway
+        // start interactively for full Touch ID derivation.
+        const missing = required.filter(
+          s =>
+            !isOperatorSessionComplete(_aid, [
+              s as ReturnType<typeof requiredScopesForAgent>[number],
+            ]),
+        )
+        console.log(
+          `note: cached operator-session is missing scope key(s) [${missing.join(', ')}] — run \`anima gateway start\` to re-derive via Touch ID. Continuing in embedded mode.`,
+        )
+      } else {
+        // No session at all → operator must run `anima gateway start` for the
+        // full daemon path (Touch ID + scope-key derivation). Print a hint.
+        console.log(
+          'note: gateway daemon would unlock TG + auto-topup; run `anima gateway start` to enable. Continuing in embedded mode.',
         )
       }
-    } else if (!forceEmbedded) {
-      // Session not fresh → operator must run `anima gateway start` for the
-      // full daemon path (Touch ID + scope-key derivation). Print a hint.
-      console.log(
-        'note: gateway daemon would unlock TG + auto-topup; run `anima gateway start` to enable. Continuing in embedded mode.',
-      )
     }
   }
   const contractAddress = config.identity.iNFT.contract as Address

@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.12] - 2026-05-07
+
+### Fixed
+
+- **Gateway boot path now revalidates required scope keys before skipping Touch ID; daemon fails loud when a half-configured runtime would result.** Operator hit "specter TG isn't responding" tonight after running `anima gateway start` against a session written by a prior path that only derived the `keystore` scope. The session was timestamp-fresh so `isOperatorSessionFresh` returned true, the unlock step was skipped, and the daemon booted with no `telegram` scope key. `local-entrypoint.ts:loadLocalTelegramSecrets` then returned `undefined` silently (the only signal was a stderr line that vanished when the detached daemon's tty closed), the telegram plugin's `register()` bailed because `secrets?.telegram` was falsy, no listener was registered, and every inbound TG message was dropped. Five releases (v0.21.5 → v0.21.10) shipped quietly broken on this code path because every prior verification of `[telegram] listener active` happened via TUI auto-spawn or `anima gateway run` first-boot, never via the bare `anima gateway start` restart cycle. v0.21.5's CHANGELOG explicitly disclaimed any behavior change to `gateway start` and that disclaim turned out to leave a hole. v0.21.12 closes it across both boot paths and adds three new defenses so the same shape of bug can't form again. New `requiredScopesForAgent(agentId)` core helper inspects on-disk state (always 'keystore'; adds 'telegram' when `telegram-secrets.encrypted` exists, etc.); new `isOperatorSessionComplete(agentId, required)` returns true only when a non-expired session contains every required key. `anima gateway start` now uses these helpers to decide whether to re-derive via Touch ID, never just timestamp-freshness. The TUI auto-spawn path in `chat.tsx` mirrors the same enforcement, with a clear hint when scope keys are missing telling the operator to run `anima gateway start` interactively. The daemon's `loadLocalTelegramSecrets` exits 1 with a clear error BEFORE the socket is opened when `telegram-secrets.encrypted` exists but the session lacks the TELEGRAM scope, so `anima gateway start`'s wait-for-socket-readable check fails fast and the operator sees the failure at boot. `/healthz` now exposes `listeners.telegram: 'active' | 'disabled' | 'failed'` so operators (and the live verification matrix) can probe listener wiring without parsing logs. `spawnGatewayDaemon` now redirects daemon stdout+stderr to `~/.anima/agents/<id>/gateway.log` (truncated each boot) by default, so detached daemon diagnostics survive the parent CLI's exit (the missing piece that made tonight's debugging painful). Closes the architectural intent that any gateway boot path produces identical behavior. See `feedback-gateway-restart-must-revalidate-scopes.md` in memory for the full incident report.
+
 ## [0.21.11] - 2026-05-07
 
 ### Fixed
@@ -1613,6 +1619,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 [0.14.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.14.1
 [0.14.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.14.0
 [0.13.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.13.0
+[0.21.12]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.12
 [0.21.11]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.11
 [0.12.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.2
 [0.12.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.1

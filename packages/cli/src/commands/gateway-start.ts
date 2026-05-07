@@ -18,13 +18,13 @@ import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { spinner } from '@clack/prompts'
 import {
-  OPERATOR_BLOB_SCOPES,
   agentPaths,
   buildOperatorSession,
   iNFTAgentId,
-  isOperatorSessionFresh,
+  isOperatorSessionComplete,
   precomputeAllScopes,
   readOperatorSession,
+  requiredScopesForAgent,
   writeOperatorSession,
 } from '@s0nderlabs/anima-core'
 import { type Address, getAddress } from 'viem'
@@ -59,9 +59,18 @@ export async function runGatewayStart(opts: GatewayStartOpts): Promise<void> {
     process.exit(1)
   }
 
-  // If a fresh operator-session already exists, skip the unlock step.
-  const fresh = isOperatorSessionFresh(agentId)
-  if (!fresh) {
+  // v0.21.12: derive the set of scope keys this agent's daemon will need
+  // based on what's on disk (always 'keystore'; adds 'telegram' when
+  // telegram-secrets.encrypted is present, etc.). The cached session is only
+  // "complete enough to skip Touch ID" when it contains every required key.
+  // Pre-fix, this used the binary `isOperatorSessionFresh` which returned
+  // true for any non-expired session, even one written by a path that didn't
+  // derive TELEGRAM. The daemon then booted, found no telegram scope key,
+  // and silently dropped all inbound TG messages.
+  const required = requiredScopesForAgent(agentId)
+  const extraScopes = required.filter((s): s is Exclude<typeof s, 'keystore'> => s !== 'keystore')
+  const complete = isOperatorSessionComplete(agentId, required)
+  if (!complete) {
     const sUnlock = spinner()
     sUnlock.start('Unlocking operator wallet for session-key derivation')
     let operator: Awaited<ReturnType<typeof loadOrPickOperatorSigner>>
@@ -79,11 +88,9 @@ export async function runGatewayStart(opts: GatewayStartOpts): Promise<void> {
       process.exit(1)
     }
 
-    sUnlock.message('Deriving scope keys (keystore + telegram)')
+    sUnlock.message(`Deriving scope keys (${required.join(' + ')})`)
     try {
-      const keys = await precomputeAllScopes(operator, agentAddress, [
-        OPERATOR_BLOB_SCOPES.TELEGRAM,
-      ])
+      const keys = await precomputeAllScopes(operator, agentAddress, extraScopes)
       const sess = buildOperatorSession({ agent: agentAddress, keys })
       writeOperatorSession(agentId, sess)
       sUnlock.stop('operator-session written (24h TTL)')
@@ -94,7 +101,7 @@ export async function runGatewayStart(opts: GatewayStartOpts): Promise<void> {
     }
     await operator.close?.()
   } else {
-    console.log('operator-session already fresh; skipping Touch ID')
+    console.log(`operator-session complete (${required.join(' + ')}); skipping Touch ID`)
   }
 
   // Spawn gateway daemon detached. Inherit stdio for the first ~3s so the
@@ -107,7 +114,10 @@ export async function runGatewayStart(opts: GatewayStartOpts): Promise<void> {
     configPath: found.path ?? '',
     socketPath,
     timeoutMs: 10_000,
-    stdio: 'inherit',
+    // v0.21.12: redirect daemon stdout/stderr to gateway.log (default
+    // 'log-file' mode) so boot errors survive the parent's exit. Operators
+    // see the log via `anima gateway logs` or by tailing
+    // ~/.anima/agents/<id>/gateway.log directly.
   })
   if (result.ready) {
     sBoot.stop(`gateway running pid=${result.pid} socket=${socketPath}`)
