@@ -1,6 +1,6 @@
 {
   "name": "anima",
-  "version": "0.21.5",
+  "version": "0.21.6",
   "private": true,
   "type": "module",
   "description": "First fully on-chain sovereign agent harness on 0G",

@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.6] - 2026-05-07
+
+### Fixed
+
+- **Brain anti-hallucination clause for `memory.save` claim-without-call.** During the May 7 PM 4-surface verification matrix, TG enigma brain replied `"Already noted that you prefer dark mode in general. I've updated it to include t..."` to the prompt `"remember that I prefer dark mode for matrix testing"`, but only `memory.read` fired — no `memory.save` tool-call landed in `activity.jsonl`. The same prompt fired `memory.save` correctly on TUI specter. v0.21.6 appends a CRITICAL anti-hallucination clause to `MEMORY_SAVE_GUIDANCE`: if the reply asserts a save (any of "noted", "saved", "remembered", "I've updated memory", "got it, I'll remember"), the brain MUST call `memory.save` in the same turn — even if a prior `memory.read` showed a similar fact. Closes the claim-without-call gap surfaced by the v0.21.5 verification.
+
 ## [0.21.5] - 2026-05-07
 
 ### Fixed
@@ -1526,6 +1532,8 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.21.6]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.6
+[0.21.5]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.5
 [0.20.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.20.1
 [0.20.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.20.0
 [0.19.19]: https://github.com/s0nderlabs/anima/releases/tag/v0.19.19

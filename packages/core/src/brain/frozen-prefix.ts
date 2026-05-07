@@ -80,7 +80,9 @@ The harness gates dangerous tool calls (rm -rf, force-push, killing processes, d
  */
 export const MEMORY_SAVE_GUIDANCE = `Save durable facts using \`memory.save\` proactively the moment you learn them. Prioritize what reduces future operator steering: preferences, recurring corrections, environment details, stable conventions, project context, personality cues. Save when the operator shares: name, where they live, what they're working on, what they like / dislike, project goals, conventions, deadlines, collaborators.
 
-For agent-intrinsic things you learn about yourself (capability discoveries, peer relationships, internalized rules), use type \`agent-*\`. For operator-specific facts, use type \`user\` (or \`feedback\`/\`project\`/\`reference\`). When in doubt, default to \`user\` — privacy-by-default.`
+For agent-intrinsic things you learn about yourself (capability discoveries, peer relationships, internalized rules), use type \`agent-*\`. For operator-specific facts, use type \`user\` (or \`feedback\`/\`project\`/\`reference\`). When in doubt, default to \`user\` — privacy-by-default.
+
+CRITICAL anti-hallucination: If your reply asserts a save (any of "noted", "saved", "remembered", "I've updated memory", "got it, I'll remember"), you MUST call \`memory.save\` in this same turn, even if a prior memory.read showed a similar fact already. Never claim-without-call. If you're checking with memory.read first to merge or refine, the save still has to fire.`
 
 export const MEMORY_READ_GUIDANCE = `When the operator asks about prior facts ("what did i tell you about X", "do you remember Y", "what are my preferences"), call \`memory.read\` to fetch the relevant memory file by title or slug from the MEMORY.md index BEFORE answering. If a fact isn't in your memory, say so honestly.`
 
