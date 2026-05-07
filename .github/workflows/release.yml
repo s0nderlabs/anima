@@ -79,12 +79,49 @@ jobs:
       - name: Configure npm auth
         run: echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
 
-      # Publish in topo order. Each `bun publish` rewrites workspace:* deps to
-      # the resolved semver in the published tarball; source stays workspace:*.
-      # NO `|| true` masking: if publish fails (auth, version conflict, network)
-      # the workflow MUST fail loudly. A "version already exists" error means
-      # the tag was re-pushed against an already-published version, which is
-      # operator error and should surface clearly.
+      # Pre-publish: substitute workspace:* with concrete versions ourselves.
+      # We DO NOT trust `bun publish`'s built-in workspace:* rewriter — verified
+      # broken May 7 2026: every release v0.21.5 → v0.21.10 published broken
+      # metadata where `@s0nderlabs/anima-*` sibling deps stayed pinned at
+      # `0.21.4` (the version when the rewriter last worked). The lockfile was
+      # fresh, the source was correct; bun publish caches stale resolutions
+      # internally for reasons we can't diagnose. So we do the substitution
+      # ourselves before bun publish ever runs. See
+      # `feedback-bun-publish-workspace-dep-stale.md` in memory.
+      - name: Pin workspace deps to concrete version
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          echo "Pinning @s0nderlabs/anima-* workspace:* deps to ${PKG_VERSION}"
+          for f in packages/*/package.json; do
+            python3 - "$f" "$PKG_VERSION" <<'PYEOF'
+          import json, sys
+          path, version = sys.argv[1], sys.argv[2]
+          with open(path) as fp:
+              pkg = json.load(fp)
+          changed = False
+          for key in ("dependencies", "peerDependencies", "devDependencies"):
+              deps = pkg.get(key)
+              if not isinstance(deps, dict):
+                  continue
+              for name, value in list(deps.items()):
+                  if name.startswith("@s0nderlabs/anima-") and isinstance(value, str) and value.startswith("workspace:"):
+                      deps[name] = version
+                      changed = True
+          if changed:
+              with open(path, "w") as fp:
+                  json.dump(pkg, fp, indent=2)
+                  fp.write("\n")
+              print(f"  pinned {path}")
+          PYEOF
+          done
+
+      # Publish in topo order. After our pin step above, the on-disk
+      # package.json files no longer contain workspace:* — they carry literal
+      # versions, so what bun publish packs into the tarball is exactly what
+      # we substituted. NO `|| true` masking: if publish fails (auth, version
+      # conflict, network) the workflow MUST fail loudly. A "version already
+      # exists" error means the tag was re-pushed against an already-published
+      # version, which is operator error and should surface clearly.
       - name: Publish @s0nderlabs/anima-core
         working-directory: packages/core
         env:
@@ -126,6 +163,57 @@ jobs:
         env:
           NPM_CONFIG_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: bun publish --access=public
+
+      # Post-publish: verify what landed on the registry actually matches the
+      # version we just shipped. Belt-and-suspenders for the Pin step above:
+      # if anything went sideways (cache, network, partial substitution) we
+      # catch it here instead of consumers catching it via broken installs.
+      # Direct fetch to registry.npmjs.org bypasses npm view's cache. Retry
+      # loop tolerates registry propagation delay (typically <30s). Per-package
+      # checks run in parallel; once one is propagated the rest typically are
+      # too, so total wall time is dominated by the slowest single package
+      # rather than 7x serial worst-case.
+      - name: Verify published deps match version
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          PACKAGES=$(jq -r '.name' packages/*/package.json | tr '\n' ' ')
+          RESULTS_DIR=$(mktemp -d)
+          for pkg in $PACKAGES; do
+            (
+              for attempt in 1 2 3 4 5 6; do
+                META=$(curl -sf "https://registry.npmjs.org/${pkg}/${PKG_VERSION}" 2>/dev/null || echo "")
+                if [ -n "$META" ]; then break; fi
+                sleep 10
+              done
+              SAFE_NAME=$(echo "$pkg" | tr '/' '_')
+              if [ -z "$META" ]; then
+                echo "::error::${pkg}@${PKG_VERSION} not found on registry after 60s" > "${RESULTS_DIR}/${SAFE_NAME}.err"
+                exit 1
+              fi
+              MISMATCH=$(echo "$META" | jq -r --arg v "$PKG_VERSION" '
+                (.dependencies // {}) | to_entries[]
+                | select(.key | startswith("@s0nderlabs/anima-"))
+                | select(.value != $v)
+                | "\(.key)=\(.value)"
+              ')
+              if [ -n "$MISMATCH" ]; then
+                {
+                  echo "::error::${pkg}@${PKG_VERSION} has stale @s0nderlabs/anima-* deps (expected ${PKG_VERSION}):"
+                  echo "$MISMATCH" | sed 's/^/  /'
+                } > "${RESULTS_DIR}/${SAFE_NAME}.err"
+                exit 1
+              fi
+              echo "ok ${pkg}@${PKG_VERSION}" > "${RESULTS_DIR}/${SAFE_NAME}.ok"
+            ) &
+          done
+          wait
+          if ls "${RESULTS_DIR}"/*.err >/dev/null 2>&1; then
+            cat "${RESULTS_DIR}"/*.err >&2
+            echo "::error::Published metadata is broken. Bump to next patch and republish — npm publish-once means broken metadata stays on registry forever." >&2
+            exit 1
+          fi
+          cat "${RESULTS_DIR}"/*.ok
+          echo "All published packages have correct sibling deps pinned at ${PKG_VERSION}."
 
       - name: Create GitHub release
         env:

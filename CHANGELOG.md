@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.11] - 2026-05-07
+
+### Fixed
+
+- **CI release pipeline pre-pins workspace deps + verifies published metadata.** Operator hit `Export named 'adminTickHash' not found in module '@s0nderlabs/anima-gateway'` after `bun install -g @s0nderlabs/anima@latest` on May 7 evening. Investigation showed every release v0.21.5 → v0.21.10 published broken metadata: `npm view @s0nderlabs/anima@<version> dependencies` reported every `@s0nderlabs/anima-*` sibling pinned at `0.21.4` (the version when `bun publish`'s workspace:* rewriter last worked correctly), even though local source + lockfile + on-disk packages were all at the correct version. Five releases in a row shipped silently broken; nobody noticed because dev sessions run from workspace source, not npm. The fix stops trusting `bun publish`'s built-in workspace:* substitution: a new "Pin workspace deps" step in `.github/workflows/release.yml` walks every `packages/*/package.json` and replaces `workspace:*` cross-deps with the literal current version BEFORE any `bun publish` runs. A new "Verify published deps" step at the tail fetches each just-published tarball directly from `registry.npmjs.org/<pkg>/<version>` (bypasses npm view's cache) and asserts every `@s0nderlabs/anima-*` dep equals the just-published version. If any mismatch, CI fails loud. The `/seal` skill (`~/.claude/commands/seal.md`) gains a parallel post-CI Step 7d as belt-and-suspenders. See `feedback-bun-publish-workspace-dep-stale.md` in memory for the full incident report.
+
 ## [0.21.10] - 2026-05-07
 
 ### Fixed
@@ -1607,6 +1613,7 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 [0.14.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.14.1
 [0.14.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.14.0
 [0.13.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.13.0
+[0.21.11]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.11
 [0.12.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.2
 [0.12.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.1
 [0.12.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.12.0
