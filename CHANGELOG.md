@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.2] - 2026-05-07
+
+### Fixed
+
+- **Brain auto-escalation when web.fetch returns blocked:true (R1, deferred from v0.20.2-followup, task #346).** When `web.fetch` returns a structured bot-block signal (Cloudflare interstitial, Google search block, captcha, rate-limit, etc.), the dispatcher now AUTOMATICALLY retries via `browser.navigate` on the same URL before returning to the brain. Pre-fix the v0.20.2 frozen-prefix rule "if blocked, escalate to browser.navigate" was prose-only and Qwen3.6 ignored it in long contexts, leaving the operator with "(no reply)" on TG or a memory disclaimer on TUI. Now the brain wrapper sees a merged tool result with both the original blocked response AND the escalated browser.navigate result; it can call `browser.snapshot` next without ever having to notice the failure. Activity log gets two `tool-call` entries with the escalation tagged `autoEscalated:true`. SSE events fire for both so TG operators see the escalation chain (TUI thin-client renders ↪ / ↳ instead of ⏺ / ⎿). New shared helper `packages/core/src/tools/escalation.ts` (12 unit tests + 1 integration script `test/local/e2e-fetch-escalation.ts`); wrapper changes in `chat.tsx` (TUI direct) and `build-runtime.ts` (gateway / TG) keep activity log + SSE + brain message in sync.
+
 ## [0.21.1] - 2026-05-06
 
 ### Fixed

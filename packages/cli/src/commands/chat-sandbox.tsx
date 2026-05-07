@@ -186,6 +186,7 @@ export async function runChatSandbox(
           text: '',
           toolName: String(d.name ?? '?'),
           args: String(d.args ?? ''),
+          autoEscalated: d.autoEscalated === true,
         })
         break
       case 'tool-call-end':
@@ -193,6 +194,7 @@ export async function runChatSandbox(
           role: 'tool-result',
           text: String(d.summary ?? (d.ok ? 'ok' : 'failed')),
           failed: d.ok === false,
+          autoEscalated: d.autoEscalated === true,
         })
         break
       case 'sync-flush': {

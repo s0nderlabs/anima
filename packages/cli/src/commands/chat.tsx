@@ -36,6 +36,7 @@ import {
   applyYolo,
   buildFrozenPrefix,
   createFsHistoryPersist,
+  detectFetchEscalation,
   discoverClaudeExtras,
   discoverMcpServers,
   explorerTxUrl,
@@ -50,6 +51,7 @@ import {
   matchSkillTriggers,
   newEventId,
   readIndexFile,
+  runEscalation,
   scanSkills,
 } from '@s0nderlabs/anima-core'
 import {
@@ -768,6 +770,40 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
         text: summarizeToolResult(result),
         failed: result.ok === false,
       })
+      // v0.21.2 R1: deterministic browser.navigate retry when web.fetch hits
+      // a bot-block. Mirror block in build-runtime.ts; both share orchestration
+      // via runEscalation so any future change lands in one place. Sinks differ:
+      // TUI pushes rows here, gateway publishes SSE events.
+      const escalation = detectFetchEscalation(effectiveCall, result)
+      if (escalation.needed) {
+        const merged = await runEscalation(escalation, result, {
+          runPreCall: c => hooks.runPreToolCall({ call: c }),
+          runPostCall: (c, r) => hooks.runPostToolCall({ call: c, result: r }),
+          dispatch: c => tools.dispatch(c),
+          appendActivity: (c, r) =>
+            activity.append({
+              ts: Date.now(),
+              kind: 'tool-call',
+              data: { call: c, result: r, autoEscalated: true },
+            }),
+          onStart: c =>
+            state.pushRow({
+              role: 'tool-call',
+              text: '',
+              toolName: c.name,
+              args: summarizeArgs(c.args),
+              autoEscalated: true,
+            }),
+          onEnd: (_c, r) =>
+            state.pushRow({
+              role: 'tool-result',
+              text: summarizeToolResult(r),
+              failed: r.ok === false,
+              autoEscalated: true,
+            }),
+        })
+        return { role: 'tool', content: JSON.stringify(merged) } as BrainMessage
+      }
       return {
         role: 'tool',
         content: JSON.stringify(result),

@@ -13,8 +13,24 @@ export type {
 } from './events'
 export { EventQueue, newEventId, listeners, routeLoop } from './events'
 
-export type { ToolCall, ToolDef, ToolResult, ToolSchema, JSONSchema } from './tools'
-export { ToolRegistry, zodToJsonSchema, coerceBool, coerceInt } from './tools'
+export type {
+  ToolCall,
+  ToolDef,
+  ToolResult,
+  ToolSchema,
+  JSONSchema,
+  FetchEscalation,
+  EscalationDeps,
+} from './tools'
+export {
+  ToolRegistry,
+  zodToJsonSchema,
+  coerceBool,
+  coerceInt,
+  detectFetchEscalation,
+  mergeEscalationResult,
+  runEscalation,
+} from './tools'
 
 export type {
   ApplyResult,

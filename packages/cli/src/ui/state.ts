@@ -27,6 +27,9 @@ export interface TurnRow {
   args?: string
   // tool-result rows: failure flag drives icon + color
   failed?: boolean
+  // v0.21.2: drives the ↪ prefix so operators see the SAME logical fetch was
+  // escalated, not a fresh brain decision.
+  autoEscalated?: boolean
   // True only for the first row in an "anima block" (assistant + tool-call rows
   // that share the same speaker turn). Computed once at push time so the For
   // loop renderer doesn't re-walk neighbors on every state mutation.

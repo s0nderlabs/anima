@@ -31,6 +31,7 @@ import {
   buildFrozenPrefix,
   createFsHistoryPersist,
   derivePubkeyHex,
+  detectFetchEscalation,
   iNFTAgentId,
   loadPlugins,
   makeMemoryReadTool,
@@ -40,6 +41,7 @@ import {
   matchSkillTriggers,
   newEventId,
   readIndexFile,
+  runEscalation,
   scanSkills,
 } from '@s0nderlabs/anima-core'
 import {
@@ -649,6 +651,40 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
         durationMs,
         summary: summarizeToolResult(result),
       })
+      // v0.21.2 R1: see chat.tsx for paired logic. Gateway sinks are SSE
+      // start/end events instead of TUI state rows; orchestration shared
+      // via runEscalation.
+      const escalation = detectFetchEscalation(effectiveCall, result)
+      if (escalation.needed) {
+        const merged = await runEscalation(escalation, result, {
+          runPreCall: c => hooks.runPreToolCall({ call: c }),
+          runPostCall: (c, r) => hooks.runPostToolCall({ call: c, result: r }),
+          dispatch: c => tools.dispatch(c),
+          appendActivity: (c, r) =>
+            activity.append({
+              ts: Date.now(),
+              kind: 'tool-call',
+              data: { call: c, result: r, autoEscalated: true },
+            }),
+          onStart: c =>
+            events.publish('tool-call-start', {
+              name: c.name,
+              args: summarizeArgs(c.args),
+              callId: c.id,
+              autoEscalated: true,
+            }),
+          onEnd: (c, r, durationMs) =>
+            events.publish('tool-call-end', {
+              name: c.name,
+              ok: r.ok !== false,
+              callId: c.id,
+              durationMs,
+              summary: summarizeToolResult(r),
+              autoEscalated: true,
+            }),
+        })
+        return { role: 'tool', content: JSON.stringify(merged) } as BrainMessage
+      }
       return { role: 'tool', content: JSON.stringify(result) } as BrainMessage
     },
   })

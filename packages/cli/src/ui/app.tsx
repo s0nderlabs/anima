@@ -180,6 +180,7 @@ function ToolCallRow(props: {
   toolName: string
   args: string
   firstOfBlock: boolean
+  autoEscalated?: boolean
 }) {
   return (
     <box flexDirection="row">
@@ -188,7 +189,9 @@ function ToolCallRow(props: {
       </text>
       <text wrapMode="word" flexGrow={1}>
         {/* @ts-expect-error opentui SpanProps omits fg, runtime accepts it */}
-        <span fg="#c4b5fd">{'⏺ '}</span>
+        <span fg={props.autoEscalated ? '#fbbf24' : '#c4b5fd'}>
+          {props.autoEscalated ? '↪ ' : '⏺ '}
+        </span>
         {/* @ts-expect-error opentui SpanProps omits fg, runtime accepts it */}
         <span fg="#e5e7eb">{props.toolName}</span>
         <Show when={props.args}>
@@ -200,13 +203,15 @@ function ToolCallRow(props: {
   )
 }
 
-function ToolResultRow(props: { text: string; failed: boolean }) {
+function ToolResultRow(props: { text: string; failed: boolean; autoEscalated?: boolean }) {
   return (
     <box flexDirection="row" marginBottom={1}>
       <text flexShrink={0}>{TOOL_RESULT_INDENT}</text>
       <text wrapMode="word" flexGrow={1}>
         {/* @ts-expect-error opentui SpanProps omits fg, runtime accepts it */}
-        <span fg={props.failed ? '#fca5a5' : '#4b5563'}>{props.failed ? '✗ ' : '⎿ '}</span>
+        <span fg={props.failed ? '#fca5a5' : props.autoEscalated ? '#fbbf24' : '#4b5563'}>
+          {props.failed ? '✗ ' : props.autoEscalated ? '↳ ' : '⎿ '}
+        </span>
         {/* @ts-expect-error opentui SpanProps omits fg, runtime accepts it */}
         <span fg={props.failed ? '#fca5a5' : '#9ca3af'}>{props.text}</span>
       </text>
@@ -275,9 +280,17 @@ function ChatRowDispatch(props: { row: TurnRow }) {
         toolName={r.toolName ?? '(unknown)'}
         args={r.args ?? ''}
         firstOfBlock={r.firstOfBlock === true}
+        autoEscalated={r.autoEscalated === true}
       />
     )
-  if (r.role === 'tool-result') return <ToolResultRow text={r.text} failed={r.failed === true} />
+  if (r.role === 'tool-result')
+    return (
+      <ToolResultRow
+        text={r.text}
+        failed={r.failed === true}
+        autoEscalated={r.autoEscalated === true}
+      />
+    )
   if (r.role === 'inbox') return <InboxRow text={r.text} />
   if (r.role === 'market') return <MarketRow text={r.text} />
   if (r.role === 'inbox-tg') return <TelegramInboxRow text={r.text} />
