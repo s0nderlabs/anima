@@ -196,7 +196,7 @@ describe('AutoTopupManager', () => {
     expect(failed?.data.error as string).toContain('deposit failed')
   })
 
-  it('skips when broker is not yet available', async () => {
+  it('emits topup-skipped when broker is not yet available', async () => {
     const { events, onEvent } = captureEvents()
     const m = new AutoTopupManager(
       { compute: { provider: PROVIDER } },
@@ -208,7 +208,9 @@ describe('AutoTopupManager', () => {
       },
     )
     await m.tick()
-    expect(events).toEqual([])
+    expect(events).toHaveLength(1)
+    expect(events[0]?.kind).toBe('topup-skipped')
+    expect((events[0]?.data as { reason?: string } | undefined)?.reason).toBe('broker-not-ready')
   })
 
   it('refuses construction when compute.provider is missing', () => {

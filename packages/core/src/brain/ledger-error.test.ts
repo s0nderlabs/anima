@@ -15,7 +15,7 @@ describe('parseLedgerInsufficientError', () => {
     expect(err?.requiredOg).toBe('1.449911')
     expect(err?.shortfallOg).toBe('0.006339')
     expect(err?.providerAddress).toBe(PROVIDER)
-    expect(err?.message).toContain('topup compute')
+    expect(err?.message).toContain('topup --compute')
   })
 
   it('returns null on unrelated error bodies', () => {

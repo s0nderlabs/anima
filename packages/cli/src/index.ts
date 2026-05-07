@@ -62,9 +62,23 @@ async function main(): Promise<void> {
       const agentIdx = argv.indexOf('--agent')
       const computeIdx = argv.indexOf('--compute')
       const providerIdx = argv.indexOf('--provider')
-      const agent = agentIdx >= 0 ? Number(argv[agentIdx + 1]) : undefined
-      const compute = computeIdx >= 0 ? Number(argv[computeIdx + 1]) : undefined
-      const provider = providerIdx >= 0 ? Number(argv[providerIdx + 1]) : undefined
+      const parseAmount = (flag: string, raw: string | undefined): number | undefined => {
+        if (raw === undefined) return undefined
+        const n = Number(raw)
+        if (!Number.isFinite(n) || n <= 0 || n > 1e6) {
+          console.error(
+            `Bad amount for ${flag}: ${raw}\n  Each topup flag takes an amount in 0G, not an address: ${flag} <amount>\n  Examples: anima topup --compute 2     anima topup --provider 5     anima topup --agent 1`,
+          )
+          process.exit(2)
+        }
+        return n
+      }
+      const agent = parseAmount('--agent', agentIdx >= 0 ? argv[agentIdx + 1] : undefined)
+      const compute = parseAmount('--compute', computeIdx >= 0 ? argv[computeIdx + 1] : undefined)
+      const provider = parseAmount(
+        '--provider',
+        providerIdx >= 0 ? argv[providerIdx + 1] : undefined,
+      )
       const { runTopup } = await import('./commands/topup')
       await runTopup({ agent, compute, provider })
       return

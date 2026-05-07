@@ -708,7 +708,7 @@ export class LedgerInsufficientError extends Error {
     providerAddress: string
   }) {
     super(
-      `Compute ledger sub-account short by ${opts.shortfallOg} 0G (provider ${opts.providerAddress.slice(0, 10)}…, locked ${opts.availableOg} of ${opts.requiredOg} required). Topup with: anima topup compute --amount 2`,
+      `Compute ledger sub-account short by ${opts.shortfallOg} 0G (provider ${opts.providerAddress.slice(0, 10)}…, locked ${opts.availableOg} of ${opts.requiredOg} required). Topup with: anima topup --compute 2`,
     )
     this.name = 'LedgerInsufficientError'
     this.availableOg = opts.availableOg

@@ -71,6 +71,8 @@ export type AutoTopupEventKind =
   | 'topup-failed'
   /** Agent EOA balance crossed the notify threshold downward. */
   | 'wallet-low'
+  /** v0.21.4: topup tick observed but skipped (broker not ready, RPC error). Visibility into a polling manager that would otherwise be silent. */
+  | 'topup-skipped'
 
 export interface AutoTopupEvent {
   kind: AutoTopupEventKind
@@ -216,19 +218,43 @@ export class AutoTopupManager {
     if (this.#stopping) return
     const ts = Date.now()
     const broker = await this.#deps.getBrokerLedger()
-    if (!broker) return
+    if (!broker) {
+      // v0.21.4: emit topup-skipped so operators can see the manager IS running
+      // but is waiting for the brain to lazy-init the broker. Without this,
+      // the absence of any auto-topup events looks identical to "manager not
+      // started" and is undebuggable.
+      this.#deps.onEvent({
+        kind: 'topup-skipped',
+        ts,
+        message: 'auto-topup waiting for brain broker to initialize',
+        data: { reason: 'broker-not-ready' },
+      })
+      return
+    }
     let walletWei: bigint
     try {
       walletWei = await this.#deps.publicClient.getBalance({ address: this.#deps.agentAddress })
-    } catch {
-      return // transient RPC; don't emit, retry next tick
+    } catch (err) {
+      this.#deps.onEvent({
+        kind: 'topup-skipped',
+        ts,
+        message: `auto-topup wallet read failed: ${(err as Error).message?.slice(0, 100) ?? 'unknown'}`,
+        data: { reason: 'wallet-rpc-error', error: String(err) },
+      })
+      return
     }
     this.#maybeEmitWalletLow(walletWei, ts)
 
     let envelopes: Array<readonly [string, bigint, bigint]>
     try {
       envelopes = await broker.getProvidersWithBalance('inference')
-    } catch {
+    } catch (err) {
+      this.#deps.onEvent({
+        kind: 'topup-skipped',
+        ts,
+        message: `auto-topup provider read failed: ${(err as Error).message?.slice(0, 100) ?? 'unknown'}`,
+        data: { reason: 'provider-rpc-error', error: String(err) },
+      })
       return
     }
     const ours = envelopes.find(

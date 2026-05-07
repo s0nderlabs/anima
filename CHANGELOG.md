@@ -4,6 +4,17 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.4] - 2026-05-07
+
+### Fixed
+
+- **`anima topup` CLI rejects bad amounts with a clear error.** Pre-fix, passing an Ethereum address as a flag value (e.g. `anima topup --provider 0xADDR --amount 1`) silently coerced the address through `Number()`, producing ~`8.74e+47` which then fed into viem's `parseEther` and threw an opaque "Number 8.74510097402409e+47 is not a valid decimal number" deep inside the deposit flow AFTER on-chain side effects had partially executed. v0.21.4 validates each `--agent` / `--compute` / `--provider` argument up front: must be a finite positive number ≤ 1e6 0G; otherwise prints a usage hint pointing at the correct syntax (`flag <amount-in-0G>`, not `flag <address>`) and exits with code 2 before any chain RPC fires.
+- **Brain hint string for `LedgerInsufficientError` matches the actual CLI.** Pre-fix, the error suggested `anima topup compute --amount 2` (no such command); v0.21.4 corrects it to `anima topup --compute 2` (the actual flag).
+
+### Changed
+
+- **AutoTopupManager now emits `topup-skipped` events** when a tick can't proceed (broker not yet initialized at gateway boot, RPC failure on wallet balance read, RPC failure on provider envelope read). Pre-fix, these silent returns meant operators couldn't tell the difference between "manager isn't running" and "manager is running but waiting for the brain to spin up." Now every silent path produces an `auto-topup` activity-log entry with `kind:'topup-skipped'` and a `reason` field (`broker-not-ready` / `wallet-rpc-error` / `provider-rpc-error`). New `'topup-skipped'` kind added to `AutoTopupEventKind`; existing 1 unit test updated.
+
 ## [0.21.3] - 2026-05-07
 
 ### Changed
