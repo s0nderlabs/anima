@@ -21,7 +21,17 @@ export interface TopupOpts {
   agent?: number
   /** Top up the compute ledger from agent EOA, amount in 0G. */
   compute?: number
-  /** Top up the Galileo sandbox provider deposit from operator wallet, amount in 0G. */
+  /**
+   * v0.21.5: top up the Galileo SandboxBilling deposit from operator wallet, amount in 0G.
+   * Was: `provider` in v0.17.1+; renamed to disambiguate from "compute provider".
+   */
+  sandbox?: number
+  /**
+   * @deprecated Use `sandbox` instead. v0.17.1 named this `provider` (matching
+   * the SandboxBilling smart-contract field name) which collided with "compute
+   * provider". Kept as an alias for backwards compat with existing runbooks;
+   * will be removed in a future release.
+   */
   provider?: number
 }
 
@@ -47,7 +57,9 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
   })
   const paths = agentPaths.agent(finalAgentId)
 
-  let mode: 'agent' | 'compute' | 'provider' | null = null
+  // v0.21.5: 'sandbox' is the canonical mode discriminant (was 'provider' in
+  // v0.17.1+). `opts.provider` is accepted as a backwards-compat alias.
+  let mode: 'agent' | 'compute' | 'sandbox' | null = null
   let amount = 0
   if (opts.agent !== undefined) {
     mode = 'agent'
@@ -55,8 +67,11 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
   } else if (opts.compute !== undefined) {
     mode = 'compute'
     amount = opts.compute
+  } else if (opts.sandbox !== undefined) {
+    mode = 'sandbox'
+    amount = opts.sandbox
   } else if (opts.provider !== undefined) {
-    mode = 'provider'
+    mode = 'sandbox'
     amount = opts.provider
   }
 
@@ -72,15 +87,15 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
         {
           value: 'compute' as const,
           label: 'Compute ledger (inference credits)',
-          hint: 'agent deposits 0G into 0G Compute',
+          hint: 'agent deposits 0G into 0G Compute (mainnet)',
         },
         {
-          value: 'provider' as const,
-          label: 'Sandbox provider deposit (Galileo testnet runtime fees)',
-          hint: 'operator deposits 0G into SandboxServing for harness billing',
+          value: 'sandbox' as const,
+          label: 'Sandbox billing deposit (Galileo testnet runtime fees)',
+          hint: 'operator deposits 0G into SandboxBilling for harness burn',
         },
       ],
-    })) as 'agent' | 'compute' | 'provider' | symbol
+    })) as 'agent' | 'compute' | 'sandbox' | symbol
     if (isCancel(choice)) {
       cancel('Aborted.')
       return
@@ -102,7 +117,7 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
     amount = Number(amtRaw)
   }
 
-  if (mode === 'provider') {
+  if (mode === 'sandbox') {
     const operator = await loadOrPickOperatorSigner({ network, hint: config.operator })
     if (!operator) return
     const operatorAccount = await operator.account()

@@ -80,6 +80,7 @@ export {
 export {
   acquireTelegramTokenLock,
   BotTokenLockedError,
+  clearStaleTelegramTokenLock,
   clearWebhookBeforePolling,
   classifyStartFailure,
   TELEGRAM_TOKEN_LOCK_SCOPE,

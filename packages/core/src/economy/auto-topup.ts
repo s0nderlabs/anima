@@ -109,6 +109,16 @@ export interface AutoTopupDeps {
   publicClient: PublicClientLike
   /** Lazy: the broker takes seconds to spin up. We accept a getter so the manager doesn't block on construction. */
   getBrokerLedger(): Promise<BrokerLedgerLike | null>
+  /**
+   * v0.21.5: when the broker is null (typically because brain.init() hasn't
+   * fired yet — broker is lazy on first infer), AutoTopupManager will call
+   * this once and re-check getBrokerLedger before emitting topup-skipped.
+   * Without this, an idle agent (no chat turns) would never autotopup until
+   * the operator types something. With it, the manager wakes the broker on
+   * the first poll tick. Optional — if absent, manager preserves the
+   * v0.21.4 broker-not-ready skipped behavior.
+   */
+  getBrainInit?: () => Promise<void>
   /** Notification sink; fires once per actionable change. */
   onEvent: (ev: AutoTopupEvent) => void
 }
@@ -175,6 +185,15 @@ export class AutoTopupManager {
   #counter = new TopupCounter()
   #lastWalletBalanceWei: bigint | null = null
   #stopping = false
+  /**
+   * v0.21.5: once getBrainInit fails, back off subsequent retries to avoid
+   * hammering brain.init() every 5 minutes for the same dead provider. Reset
+   * to null when a tick observes a non-null broker (init eventually
+   * succeeded) so a transient failure doesn't permanently disable the wake.
+   */
+  #brainInitFailedAt: number | null = null
+  /** Min ms between brain.init() retries after a failure. Default 1 hour. */
+  #brainInitRetryCooldownMs = 60 * 60 * 1000
 
   constructor(opts: AutoTopupOpts, deps: AutoTopupDeps) {
     if (!opts.compute?.provider) throw new Error('compute.provider is required')
@@ -217,7 +236,44 @@ export class AutoTopupManager {
   async tick(): Promise<void> {
     if (this.#stopping) return
     const ts = Date.now()
-    const broker = await this.#deps.getBrokerLedger()
+    let broker = await this.#deps.getBrokerLedger()
+    // v0.21.5: an idle agent (no chat turns yet) keeps the broker null until
+    // brain.init() runs. If the caller wired getBrainInit, eagerly trigger
+    // init on the first null-ledger tick so an unattended agent can still
+    // refill its compute envelope without operator intervention.
+    if (broker) {
+      // Init eventually succeeded; clear any back-off so the next failure
+      // gets one fresh attempt before the cooldown kicks in.
+      this.#brainInitFailedAt = null
+    } else if (this.#deps.getBrainInit) {
+      const cooledDown =
+        this.#brainInitFailedAt === null ||
+        ts - this.#brainInitFailedAt >= this.#brainInitRetryCooldownMs
+      if (!cooledDown) {
+        this.#deps.onEvent({
+          kind: 'topup-skipped',
+          ts,
+          message: 'auto-topup waiting for brain broker (init backoff)',
+          data: { reason: 'broker-not-ready', backoffUntil: this.#brainInitFailedAt },
+        })
+        return
+      }
+      try {
+        await this.#deps.getBrainInit()
+        broker = await this.#deps.getBrokerLedger()
+        if (broker) this.#brainInitFailedAt = null
+      } catch (err) {
+        this.#brainInitFailedAt = ts
+        const errMsg = (err as Error)?.message?.slice(0, 200) ?? 'unknown'
+        this.#deps.onEvent({
+          kind: 'topup-skipped',
+          ts,
+          message: `auto-topup tried to wake brain broker but init failed: ${errMsg}`,
+          data: { reason: 'broker-not-ready', initError: errMsg },
+        })
+        return
+      }
+    }
     if (!broker) {
       // v0.21.4: emit topup-skipped so operators can see the manager IS running
       // but is waiting for the brain to lazy-init the broker. Without this,

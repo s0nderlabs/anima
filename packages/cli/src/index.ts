@@ -61,13 +61,17 @@ async function main(): Promise<void> {
     case 'topup': {
       const agentIdx = argv.indexOf('--agent')
       const computeIdx = argv.indexOf('--compute')
+      // v0.21.5: --sandbox is the canonical flag for SandboxBilling (Galileo
+      // testnet runtime fees). --provider stays as a deprecated alias for
+      // backwards compat with v0.17.1+ runbooks.
+      const sandboxIdx = argv.indexOf('--sandbox')
       const providerIdx = argv.indexOf('--provider')
       const parseAmount = (flag: string, raw: string | undefined): number | undefined => {
         if (raw === undefined) return undefined
         const n = Number(raw)
         if (!Number.isFinite(n) || n <= 0 || n > 1e6) {
           console.error(
-            `Bad amount for ${flag}: ${raw}\n  Each topup flag takes an amount in 0G, not an address: ${flag} <amount>\n  Examples: anima topup --compute 2     anima topup --provider 5     anima topup --agent 1`,
+            `Bad amount for ${flag}: ${raw}\n  Each topup flag takes an amount in 0G, not an address: ${flag} <amount>\n  Examples: anima topup --compute 2     anima topup --sandbox 5     anima topup --agent 1`,
           )
           process.exit(2)
         }
@@ -75,12 +79,27 @@ async function main(): Promise<void> {
       }
       const agent = parseAmount('--agent', agentIdx >= 0 ? argv[agentIdx + 1] : undefined)
       const compute = parseAmount('--compute', computeIdx >= 0 ? argv[computeIdx + 1] : undefined)
-      const provider = parseAmount(
+      const sandboxArg = parseAmount(
+        '--sandbox',
+        sandboxIdx >= 0 ? argv[sandboxIdx + 1] : undefined,
+      )
+      const providerLegacyArg = parseAmount(
         '--provider',
         providerIdx >= 0 ? argv[providerIdx + 1] : undefined,
       )
+      if (providerLegacyArg !== undefined && sandboxArg === undefined) {
+        console.warn(
+          '[deprecated] `anima topup --provider` is renamed to `--sandbox` (Galileo testnet billing); both flags work for now but `--provider` will be removed in a future release.',
+        )
+      } else if (providerLegacyArg !== undefined && sandboxArg !== undefined) {
+        console.error(
+          'anima topup: cannot pass both --sandbox and --provider; pick one (--sandbox is canonical).',
+        )
+        process.exit(2)
+      }
+      const sandbox = sandboxArg ?? providerLegacyArg
       const { runTopup } = await import('./commands/topup')
-      await runTopup({ agent, compute, provider })
+      await runTopup({ agent, compute, sandbox })
       return
     }
     case 'model': {
@@ -257,7 +276,8 @@ function printHelp(): void {
       '  anima status              show agent + wallet + config state',
       '  anima logs                tail the activity log  (flags: --tail N, --agent <id>)',
       '  anima restore <ref>       recover an agent from an iNFT (ref: eip155:16661:0x..:N)',
-      '  anima topup               add funds  (flags: --agent N  --compute N  --provider N)',
+      '  anima topup               add funds  (flags: --agent N  --compute N  --sandbox N)',
+      '                            (--provider N is a deprecated alias for --sandbox)',
       '  anima ledger [sub]        compute ledger ops  (subs: balance | refund | retrieve | close)',
       '                            flags: --amount N  --all  --yes',
       '  anima drain --to <addr>   sweep agent EOA balance to address (default: operator)',

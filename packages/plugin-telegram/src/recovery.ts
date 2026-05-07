@@ -9,9 +9,11 @@
 // classification is sufficient.
 
 import {
+  type ClearStaleScopedLockResult,
   DEFAULT_LOCK_TTL_SECONDS,
   type ScopedLockHandle,
   acquireScopedLock,
+  clearStaleScopedLock,
 } from '@s0nderlabs/anima-core'
 import type { Bot } from 'grammy'
 
@@ -59,6 +61,30 @@ export function acquireTelegramTokenLock(
 
 function wrapLockHandle(handle: ScopedLockHandle): TokenLock {
   return { release: handle.releaseFn, refresh: handle.refreshFn }
+}
+
+/**
+ * v0.21.5: gateway boot must proactively reap a zombie/crashed listener's
+ * bot-token lock before TelegramListener.start() runs. Without this, the
+ * acquire path calls scheduleStartRetry which waits 30s × 12 attempts (6 min)
+ * for the TTL to expire — operators see "TG silent" the whole time.
+ *
+ * Returns whether a stale lock was cleared. Never deletes a lock held by a
+ * live foreign PID (that's the legitimate "another anima is polling this bot"
+ * case, where the listener should fail loud).
+ *
+ * Identity hash matches `acquireTelegramTokenLock`: `${agentId ?? 'default'}:${botToken}`.
+ */
+export function clearStaleTelegramTokenLock(
+  botToken: string,
+  opts: AcquireTokenLockOpts = {},
+): ClearStaleScopedLockResult {
+  const identity = `${opts.agentId ?? 'default'}:${botToken}`
+  return clearStaleScopedLock({
+    scope: TELEGRAM_TOKEN_LOCK_SCOPE,
+    identity,
+    rootDir: opts.rootDir,
+  })
 }
 
 /**

@@ -6,7 +6,7 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { ApprovalRelay } from './approval-relay'
 import { approvalResponseHash, chatMessageHash, provisionMessageHash } from './auth'
 import { EventHub } from './events'
-import type { RuntimeConfig } from './runtime'
+import type { RuntimeAdapter, RuntimeConfig } from './runtime'
 import { createGatewayServer } from './server'
 import { type GatewaySession, createSession } from './state'
 import { StubRuntime } from './stub-runtime'
@@ -43,7 +43,13 @@ async function listenOnRandomPort(server: http.Server): Promise<number> {
   })
 }
 
-async function setupFixture(): Promise<Fixture> {
+interface SetupFixtureOpts {
+  runtime?: RuntimeAdapter
+  trustLocal?: boolean
+  sandboxId?: string
+}
+
+async function setupFixture(opts: SetupFixtureOpts = {}): Promise<Fixture> {
   const operatorPriv = generatePrivateKey()
   const operatorAddress = privateKeyToAccount(operatorPriv).address
 
@@ -51,12 +57,12 @@ async function setupFixture(): Promise<Fixture> {
   const session = createSession({
     bootstrap: generateBootstrapKeypair(),
     expectedOperatorAddress: operatorAddress,
-    sandboxId: 'sbx-test-1',
+    sandboxId: opts.sandboxId ?? 'sbx-test-1',
     events,
     approvals: new ApprovalRelay(events),
-    runtime: new StubRuntime(),
+    runtime: opts.runtime ?? new StubRuntime(),
   })
-  const server = createGatewayServer({ session })
+  const server = createGatewayServer({ session, trustLocal: opts.trustLocal })
   const port = await listenOnRandomPort(server)
   return {
     server,
@@ -66,6 +72,25 @@ async function setupFixture(): Promise<Fixture> {
     operatorPriv,
     operatorAddress,
     agentPriv: generatePrivateKey(),
+  }
+}
+
+type TickResultFn = () => Awaited<ReturnType<NonNullable<RuntimeAdapter['triggerTopupTick']>>>
+
+function makeStubRuntimeWithTick(tickFn: TickResultFn): RuntimeAdapter {
+  return {
+    async start() {},
+    ready: () => true,
+    async runChatTurn() {
+      return { response: '', toolCalls: [], durationMs: 0 }
+    },
+    async flushSync() {
+      return { slots: [] }
+    },
+    async stop() {},
+    async triggerTopupTick() {
+      return tickFn()
+    },
   }
 }
 
@@ -305,6 +330,83 @@ describe('harness HTTP server — events SSE', () => {
     expect(stream).toContain('tool-call-start')
     expect(stream).toContain('tool-call-end')
     expect(stream).toContain('turn-end')
+  })
+})
+
+describe('harness HTTP server — admin endpoints', () => {
+  let fix: Fixture
+
+  beforeEach(async () => {
+    fix = await setupFixture()
+  })
+  afterEach(() => {
+    fix.session.approvals.stop()
+    fix.server.close()
+  })
+
+  test('POST /admin/autotopup/tick returns 401 without trustLocal', async () => {
+    await provisionFixture(fix)
+    const r = await fetch(`${fix.base}/admin/autotopup/tick`, { method: 'POST' })
+    expect(r.status).toBe(401)
+    const body = (await r.json()) as Record<string, unknown>
+    expect(body.error).toBe('unauthorized')
+  })
+
+  test('POST /admin/autotopup/tick returns 501 when runtime has no triggerTopupTick', async () => {
+    // StubRuntime does not implement triggerTopupTick — confirm 501.
+    const local = await setupFixture({ trustLocal: true, sandboxId: 'sbx-trust-1' })
+    await provisionFixture(local)
+    const r = await fetch(`${local.base}/admin/autotopup/tick`, { method: 'POST' })
+    expect(r.status).toBe(501)
+    const body = (await r.json()) as Record<string, unknown>
+    expect(body.error).toBe('not-supported')
+    local.server.close()
+    local.session.approvals.stop()
+  })
+
+  test('POST /admin/autotopup/tick 503 with trustLocal + autotopup-disabled runtime', async () => {
+    const local = await setupFixture({
+      trustLocal: true,
+      sandboxId: 'sbx-tick-1',
+      runtime: makeStubRuntimeWithTick(() => ({
+        ok: false as const,
+        reason: 'autotopup-disabled' as const,
+      })),
+    })
+    await provisionFixture(local)
+    const r = await fetch(`${local.base}/admin/autotopup/tick`, { method: 'POST' })
+    expect(r.status).toBe(503)
+    const body = (await r.json()) as Record<string, unknown>
+    expect(body.ok).toBe(false)
+    expect(body.reason).toBe('autotopup-disabled')
+    local.server.close()
+    local.session.approvals.stop()
+  })
+
+  test('POST /admin/autotopup/tick 200 with trustLocal + ok runtime', async () => {
+    let tickCalls = 0
+    const local = await setupFixture({
+      trustLocal: true,
+      sandboxId: 'sbx-tick-2',
+      runtime: makeStubRuntimeWithTick(() => {
+        tickCalls++
+        return { ok: true as const }
+      }),
+    })
+    await provisionFixture(local)
+    const r = await fetch(`${local.base}/admin/autotopup/tick`, { method: 'POST' })
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as Record<string, unknown>
+    expect(body.ok).toBe(true)
+    expect(tickCalls).toBe(1)
+    local.server.close()
+    local.session.approvals.stop()
+  })
+
+  test('POST /admin/autotopup/tick 409 when not Ready', async () => {
+    const r = await fetch(`${fix.base}/admin/autotopup/tick`, { method: 'POST' })
+    // Without trustLocal we get 401 first; the not-Ready gate is local-mode only.
+    expect(r.status).toBe(401)
   })
 })
 

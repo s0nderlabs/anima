@@ -75,18 +75,28 @@ export function isZombieLinux(pid: number): boolean {
   }
 }
 
-function isStale(record: LockRecord, now: number): boolean {
-  if (now - record.updatedAt > record.ttl) return true
-  if (record.pid === process.pid) return false
+type StaleReason = 'live' | 'pid-dead' | 'zombie' | 'ttl'
+
+// Single source of truth for "is this lock record dead, and if so, why?"
+// `attemptOnce` only cares whether it can reclaim; `clearStaleScopedLock`
+// reports the reason back to operators. Both go through this so the policy
+// (TTL > kill(0) ESRCH > linux zombie) stays in one place.
+function classifyStale(record: LockRecord, now: number): StaleReason {
+  if (now - record.updatedAt > record.ttl) return 'ttl'
+  if (record.pid === process.pid) return 'live'
   try {
     process.kill(record.pid, 0)
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code
-    if (code === 'EPERM') return false
-    return true
+    if (code === 'EPERM') return 'live'
+    return 'pid-dead'
   }
-  if (process.platform === 'linux' && isZombieLinux(record.pid)) return true
-  return false
+  if (process.platform === 'linux' && isZombieLinux(record.pid)) return 'zombie'
+  return 'live'
+}
+
+function isStale(record: LockRecord, now: number): boolean {
+  return classifyStale(record, now) !== 'live'
 }
 
 function attemptOnce(
@@ -177,4 +187,47 @@ export function acquireScopedLock(opts: AcquireScopedLockOpts): AcquireScopedLoc
     if (result.existing) return result
   }
   return { acquired: false }
+}
+
+export type ClearStaleScopedLockReason =
+  | 'no-lock'
+  | 'alive-pid'
+  | 'cleared-stale'
+  | 'cleared-zombie'
+  | 'cleared-ttl'
+  | 'cleared-unreadable'
+
+export interface ClearStaleScopedLockResult {
+  cleared: boolean
+  reason: ClearStaleScopedLockReason
+}
+
+/**
+ * Inspect the lock file at `(scope, identity)` and remove it iff it's stale
+ * (PID dead, zombie on Linux, or TTL expired). Never deletes a lock held by a
+ * live foreign PID — caller must wait for it.
+ *
+ * Used at gateway boot to proactively reap zombie/crashed listener locks so
+ * the new TG listener can acquire its bot-token slot without the 30s/6min
+ * retry waltz from `recovery.ts:scheduleStartRetry`.
+ */
+export function clearStaleScopedLock(opts: AcquireScopedLockOpts): ClearStaleScopedLockResult {
+  const path = lockPath(opts.scope, opts.identity, opts.rootDir)
+  const existing = readLock(path)
+  if (!existing) return { cleared: false, reason: 'no-lock' }
+  const reason = classifyStale(existing, Math.floor(Date.now() / 1000))
+  if (reason === 'live') return { cleared: false, reason: 'alive-pid' }
+  try {
+    unlinkSync(path)
+  } catch {
+    return { cleared: false, reason: 'cleared-unreadable' }
+  }
+  switch (reason) {
+    case 'zombie':
+      return { cleared: true, reason: 'cleared-zombie' }
+    case 'pid-dead':
+      return { cleared: true, reason: 'cleared-stale' }
+    case 'ttl':
+      return { cleared: true, reason: 'cleared-ttl' }
+  }
 }

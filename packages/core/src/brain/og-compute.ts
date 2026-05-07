@@ -525,8 +525,8 @@ export class OGComputeBrain implements Brain {
       const body = await resp.text()
       // Translate the 0G provider's "insufficient balance" HTTP 400 into a
       // typed error so dispatchers (TUI + TG) can render an actionable
-      // message ("topup compute --provider <addr> --amount X") instead of
-      // the raw HTTP body. Pattern matches the message format from
+      // message ("anima topup --compute N") instead of the raw HTTP body.
+      // Pattern matches the message format from
       // `feedback-compute-ledger-total-vs-provider.md`.
       const ledgerErr = parseLedgerInsufficientError(body, this.opts.providerAddress)
       if (ledgerErr) throw ledgerErr

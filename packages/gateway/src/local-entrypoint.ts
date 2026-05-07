@@ -177,6 +177,29 @@ async function main(): Promise<void> {
     agentAddress,
   })
 
+  // v0.21.5: proactively reap a zombie/crashed listener's bot-token lock so
+  // TelegramListener.start() doesn't get stuck in scheduleStartRetry's 30s ×
+  // 12-attempt waltz waiting for TTL eviction. Identity hash matches what
+  // acquireTelegramTokenLock will compute (`${agentId}:${botToken}`). Skips
+  // entirely when no telegram secrets present.
+  if (secrets?.telegram?.botToken) {
+    try {
+      const { clearStaleTelegramTokenLock } = await import('@s0nderlabs/anima-plugin-telegram')
+      const cleanup = clearStaleTelegramTokenLock(secrets.telegram.botToken, { agentId })
+      if (cleanup.cleared) {
+        process.stdout.write(
+          `[gateway] ${new Date().toISOString()} cleared stale TG bot-token lock (${cleanup.reason})\n`,
+        )
+      }
+    } catch (err) {
+      // Best-effort: failure here doesn't block boot; listener will fall back
+      // to scheduleStartRetry and emit BotTokenLockedError visibly.
+      process.stderr.write(
+        `gateway: stale-tg-lock-cleanup failed: ${(err as Error).message?.slice(0, 200) ?? 'unknown'}\n`,
+      )
+    }
+  }
+
   // Acquire host-wide gateway lock so two `anima gateway run` calls for the
   // same agent can't both bind the socket. 5-minute TTL with refresh below.
   const lockResult = acquireScopedLock({

@@ -213,6 +213,96 @@ describe('AutoTopupManager', () => {
     expect((events[0]?.data as { reason?: string } | undefined)?.reason).toBe('broker-not-ready')
   })
 
+  it('v0.21.5: getBrainInit wakes broker on first null tick + reattempts ledger', async () => {
+    const { broker, state } = makeBroker({ initialEnvelopeWei: ONE_OG / 10n })
+    const { events, onEvent } = captureEvents()
+    let initCalls = 0
+    let brokerReady = false
+    const m = new AutoTopupManager(
+      { compute: { provider: PROVIDER, lowThreshold: 0.5, topUpAmount: 1.0 } },
+      {
+        agentAddress: AGENT,
+        publicClient: makePublicClient(10n * ONE_OG),
+        getBrokerLedger: async () => (brokerReady ? broker : null),
+        getBrainInit: async () => {
+          initCalls++
+          brokerReady = true
+        },
+        onEvent,
+      },
+    )
+    await m.tick()
+    expect(initCalls).toBe(1)
+    // Broker became ready after init; topup should fire on the same tick.
+    expect(state.deposits).toEqual([1.0])
+    expect(events.find(e => e.kind === 'topup-fired')).toBeDefined()
+    // No spurious topup-skipped event.
+    expect(events.find(e => e.kind === 'topup-skipped')).toBeUndefined()
+  })
+
+  it('v0.21.5: getBrainInit failure surfaces as topup-skipped with initError', async () => {
+    const { events, onEvent } = captureEvents()
+    let initCalls = 0
+    const m = new AutoTopupManager(
+      { compute: { provider: PROVIDER, lowThreshold: 0.5 } },
+      {
+        agentAddress: AGENT,
+        publicClient: makePublicClient(10n * ONE_OG),
+        getBrokerLedger: async () => null,
+        getBrainInit: async () => {
+          initCalls++
+          throw new Error('compute provider unreachable')
+        },
+        onEvent,
+      },
+    )
+    await m.tick()
+    expect(initCalls).toBe(1)
+    expect(events).toHaveLength(1)
+    expect(events[0]?.kind).toBe('topup-skipped')
+    const data = events[0]?.data as { reason?: string; initError?: string }
+    expect(data.reason).toBe('broker-not-ready')
+    expect(data.initError).toContain('compute provider unreachable')
+  })
+
+  it('v0.21.5: getBrainInit not called when broker already ready', async () => {
+    const { broker } = makeBroker({ initialEnvelopeWei: ONE_OG })
+    const { onEvent } = captureEvents()
+    let initCalls = 0
+    const m = new AutoTopupManager(
+      { compute: { provider: PROVIDER, lowThreshold: 0.5 } },
+      {
+        agentAddress: AGENT,
+        publicClient: makePublicClient(10n * ONE_OG),
+        getBrokerLedger: async () => broker,
+        getBrainInit: async () => {
+          initCalls++
+        },
+        onEvent,
+      },
+    )
+    await m.tick()
+    // Broker was ready immediately, init should NOT be called.
+    expect(initCalls).toBe(0)
+  })
+
+  it('v0.21.5: legacy callers without getBrainInit see the same broker-not-ready path', async () => {
+    const { events, onEvent } = captureEvents()
+    const m = new AutoTopupManager(
+      { compute: { provider: PROVIDER } },
+      {
+        agentAddress: AGENT,
+        publicClient: makePublicClient(10n * ONE_OG),
+        getBrokerLedger: async () => null,
+        onEvent,
+      },
+    )
+    await m.tick()
+    expect(events).toHaveLength(1)
+    expect(events[0]?.kind).toBe('topup-skipped')
+    expect((events[0]?.data as { reason?: string } | undefined)?.reason).toBe('broker-not-ready')
+  })
+
   it('refuses construction when compute.provider is missing', () => {
     expect(
       () =>

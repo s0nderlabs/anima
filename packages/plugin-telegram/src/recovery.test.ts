@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   BotTokenLockedError,
   acquireTelegramTokenLock,
   classifyStartFailure,
+  clearStaleTelegramTokenLock,
   clearWebhookBeforePolling,
 } from './recovery'
 
@@ -88,6 +90,70 @@ describe('classifyStartFailure', () => {
     const v = classifyStartFailure(new Error('something weird'))
     expect(v.kind).toBe('fatal')
     expect(v.retryable).toBe(false)
+  })
+})
+
+describe('clearStaleTelegramTokenLock', () => {
+  it('returns no-lock when nothing exists', () => {
+    const r = clearStaleTelegramTokenLock('token-xyz', { agentId: 'agent-7', rootDir: lockDir })
+    expect(r.cleared).toBe(false)
+    expect(r.reason).toBe('no-lock')
+  })
+
+  it('returns alive-pid when a live owner holds the lock', () => {
+    const lock = acquireTelegramTokenLock('token-live', { agentId: 'agent-7', rootDir: lockDir })
+    const r = clearStaleTelegramTokenLock('token-live', { agentId: 'agent-7', rootDir: lockDir })
+    expect(r.cleared).toBe(false)
+    expect(r.reason).toBe('alive-pid')
+    lock.release()
+  })
+
+  it('clears a dead-PID lock written manually', () => {
+    const identity = 'agent-7:token-zombie'
+    const hash = createHash('sha256').update(identity).digest('hex').slice(0, 16)
+    const path = join(lockDir, `telegram-bot-token-${hash}.lock`)
+    writeFileSync(
+      path,
+      JSON.stringify({
+        pid: 999_996,
+        scope: 'telegram-bot-token',
+        identityHash: hash,
+        startedAt: Math.floor(Date.now() / 1000),
+        updatedAt: Math.floor(Date.now() / 1000),
+        ttl: 600,
+      }),
+    )
+    const r = clearStaleTelegramTokenLock('token-zombie', { agentId: 'agent-7', rootDir: lockDir })
+    expect(r.cleared).toBe(true)
+    expect(r.reason).toBe('cleared-stale')
+  })
+
+  it('lets a fresh acquire follow a clear', () => {
+    const identity = 'agent-X:token-recoverable'
+    const hash = createHash('sha256').update(identity).digest('hex').slice(0, 16)
+    const path = join(lockDir, `telegram-bot-token-${hash}.lock`)
+    writeFileSync(
+      path,
+      JSON.stringify({
+        pid: 999_995,
+        scope: 'telegram-bot-token',
+        identityHash: hash,
+        startedAt: 0,
+        updatedAt: 0,
+        ttl: 1,
+      }),
+    )
+    const cleanup = clearStaleTelegramTokenLock('token-recoverable', {
+      agentId: 'agent-X',
+      rootDir: lockDir,
+    })
+    expect(cleanup.cleared).toBe(true)
+    const lock = acquireTelegramTokenLock('token-recoverable', {
+      agentId: 'agent-X',
+      rootDir: lockDir,
+    })
+    expect(lock).toBeDefined()
+    lock.release()
   })
 })
 

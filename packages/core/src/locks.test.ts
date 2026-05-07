@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { DEFAULT_LOCK_TTL_SECONDS, acquireScopedLock, isZombieLinux } from './locks'
+import {
+  DEFAULT_LOCK_TTL_SECONDS,
+  acquireScopedLock,
+  clearStaleScopedLock,
+  isZombieLinux,
+} from './locks'
 
 let testDir: string
 
@@ -174,6 +179,75 @@ describe('acquireScopedLock evicts dead-pid lock', () => {
     const r = acquireScopedLock({ scope: 'test', identity: 'dead-pid', rootDir: testDir })
     expect(r.acquired).toBe(true)
     r.handle?.releaseFn()
+  })
+})
+
+describe('clearStaleScopedLock', () => {
+  it('returns no-lock when nothing exists', () => {
+    const r = clearStaleScopedLock({ scope: 'test', identity: 'fresh', rootDir: testDir })
+    expect(r.cleared).toBe(false)
+    expect(r.reason).toBe('no-lock')
+  })
+
+  it('returns alive-pid when a live PID holds the lock', () => {
+    const a = acquireScopedLock({ scope: 'test', identity: 'live', rootDir: testDir })
+    expect(a.acquired).toBe(true)
+    const r = clearStaleScopedLock({ scope: 'test', identity: 'live', rootDir: testDir })
+    expect(r.cleared).toBe(false)
+    expect(r.reason).toBe('alive-pid')
+    a.handle?.releaseFn()
+  })
+
+  it('clears a dead-PID lock and reports cleared-stale', () => {
+    const path = findLockFile(testDir, 'test', 'dead')
+    writeFileSync(
+      path,
+      JSON.stringify({
+        pid: 999_997,
+        scope: 'test',
+        identityHash: 'x',
+        startedAt: Math.floor(Date.now() / 1000),
+        updatedAt: Math.floor(Date.now() / 1000),
+        ttl: 600,
+      }),
+    )
+    const r = clearStaleScopedLock({ scope: 'test', identity: 'dead', rootDir: testDir })
+    expect(r.cleared).toBe(true)
+    expect(r.reason).toBe('cleared-stale')
+    // Re-clear should now return no-lock.
+    const r2 = clearStaleScopedLock({ scope: 'test', identity: 'dead', rootDir: testDir })
+    expect(r2.cleared).toBe(false)
+    expect(r2.reason).toBe('no-lock')
+  })
+
+  it('clears a TTL-expired lock and reports cleared-ttl', () => {
+    const path = findLockFile(testDir, 'test', 'expired')
+    const ancient = Math.floor(Date.now() / 1000) - 9999
+    writeFileSync(
+      path,
+      JSON.stringify({
+        pid: process.pid,
+        scope: 'test',
+        identityHash: 'x',
+        startedAt: ancient,
+        updatedAt: ancient,
+        ttl: 60,
+      }),
+    )
+    const r = clearStaleScopedLock({ scope: 'test', identity: 'expired', rootDir: testDir })
+    expect(r.cleared).toBe(true)
+    expect(r.reason).toBe('cleared-ttl')
+  })
+
+  it('does not delete a lock owned by current process within TTL', () => {
+    const a = acquireScopedLock({ scope: 'test', identity: 'mine', rootDir: testDir })
+    expect(a.acquired).toBe(true)
+    const r = clearStaleScopedLock({ scope: 'test', identity: 'mine', rootDir: testDir })
+    expect(r.cleared).toBe(false)
+    expect(r.reason).toBe('alive-pid')
+    // Lock still acquireable by us via refresh:
+    expect(a.handle?.refreshFn()).toBe(true)
+    a.handle?.releaseFn()
   })
 })
 

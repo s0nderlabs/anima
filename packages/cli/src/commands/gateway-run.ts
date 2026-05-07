@@ -8,19 +8,11 @@
  */
 
 import { spawn } from 'node:child_process'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
+import { resolveLocalBin } from '../util/gateway-spawn'
 
 export interface GatewayRunOpts {
   agentId?: string
-}
-
-function resolveLocalBin(): string {
-  // Resolve the gateway package location from this CLI's perspective. Works
-  // both in the workspace dev tree and in installed npm node_modules.
-  const pkgUrl = import.meta.resolve('@s0nderlabs/anima-gateway/package.json')
-  const pkgRoot = dirname(fileURLToPath(pkgUrl))
-  return join(pkgRoot, 'bin', 'anima-gateway-local')
 }
 
 export async function runGatewayForeground(opts: GatewayRunOpts): Promise<void> {

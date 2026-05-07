@@ -305,6 +305,33 @@ export function createGatewayServer(deps: ServerDeps): http.Server {
         }
       }
 
+      // v0.21.5: admin endpoint to live-fire an AutoTopupManager tick. Local
+      // mode is gated by trustLocal (unix-sock 0600 perm = auth). Sandbox
+      // mode is intentionally locked out for now — operators tune via
+      // economy.autoTopup config edit + container restart, or curl from
+      // inside the container against localhost. Adding sandbox-side EIP-191
+      // auth is post-MVP scope.
+      if (method === 'POST' && url === '/admin/autotopup/tick') {
+        if (!trustLocal) {
+          return send(res, 401, {
+            error: 'unauthorized',
+            reason: 'admin endpoints are local-mode only in v0.21.5',
+          })
+        }
+        if (session.state !== 'Ready') {
+          return send(res, 409, { error: 'not-ready', state: session.state })
+        }
+        if (!session.runtime.triggerTopupTick) {
+          return send(res, 501, { error: 'not-supported' })
+        }
+        try {
+          const result = await session.runtime.triggerTopupTick()
+          return send(res, result.ok ? 200 : 503, result)
+        } catch (e) {
+          return send(res, 500, { error: 'tick-failed', detail: (e as Error).message })
+        }
+      }
+
       const approvalMatch = url.match(/^\/approval\/([^/]+)\/respond$/)
       if (method === 'POST' && approvalMatch?.[1]) {
         const approvalId = approvalMatch[1]

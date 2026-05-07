@@ -14,10 +14,8 @@
  *   8. Print pid + socket path
  */
 
-import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { join } from 'node:path'
 import { spinner } from '@clack/prompts'
 import {
   OPERATOR_BLOB_SCOPES,
@@ -31,16 +29,11 @@ import {
 } from '@s0nderlabs/anima-core'
 import { type Address, getAddress } from 'viem'
 import { findAndLoadConfig } from '../config/load'
+import { spawnGatewayDaemon } from '../util/gateway-spawn'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 
 export interface GatewayStartOpts {
   agentId?: string
-}
-
-function resolveLocalBin(): string {
-  const pkgUrl = import.meta.resolve('@s0nderlabs/anima-gateway/package.json')
-  const pkgRoot = dirname(fileURLToPath(pkgUrl))
-  return join(pkgRoot, 'bin', 'anima-gateway-local')
 }
 
 export async function runGatewayStart(opts: GatewayStartOpts): Promise<void> {
@@ -106,33 +99,26 @@ export async function runGatewayStart(opts: GatewayStartOpts): Promise<void> {
 
   // Spawn gateway daemon detached. Inherit stdio for the first ~3s so the
   // user sees boot errors, then redirect to log file when ready.
-  const env = { ...process.env, ANIMA_AGENT_ID: agentId, ANIMA_CONFIG: found.path ?? '' }
   const sBoot = spinner()
   sBoot.start(`Spawning gateway daemon (agent=${agentId.slice(0, 8)}…)`)
 
-  const proc = spawn('bun', [resolveLocalBin()], {
-    env,
-    detached: true,
-    stdio: ['ignore', 'inherit', 'inherit'],
+  const result = await spawnGatewayDaemon({
+    agentId,
+    configPath: found.path ?? '',
+    socketPath,
+    timeoutMs: 10_000,
+    stdio: 'inherit',
   })
-  proc.unref()
-
-  // Poll for socket existence as readiness signal (up to 10s).
-  const start = Date.now()
-  let ready = false
-  while (Date.now() - start < 10_000) {
-    if (existsSync(socketPath)) {
-      ready = true
-      break
-    }
-    await new Promise(r => setTimeout(r, 200))
-  }
-  if (ready) {
-    sBoot.stop(`gateway running pid=${proc.pid} socket=${socketPath}`)
+  if (result.ready) {
+    sBoot.stop(`gateway running pid=${result.pid} socket=${socketPath}`)
     console.log('stop with: anima gateway stop')
     console.log('logs:      anima gateway logs -f')
   } else {
-    sBoot.stop(`gateway did not bind socket within 10s (pid=${proc.pid}); check above output`)
+    const reason = result.reason ?? 'unknown'
+    const detail = result.error ? `: ${result.error}` : ''
+    sBoot.stop(
+      `gateway did not bind socket within 10s (reason=${reason} pid=${result.pid ?? '?'})${detail}; check above output`,
+    )
     process.exit(1)
   }
 }

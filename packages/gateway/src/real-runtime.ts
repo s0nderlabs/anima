@@ -8,7 +8,13 @@ import { privateKeyToAccount } from 'viem/accounts'
 import type { ApprovalRelay } from './approval-relay'
 import { type BuiltRuntime, buildAnimaRuntime } from './build-runtime'
 import type { EventHub } from './events'
-import type { ChatTurnInput, ChatTurnResult, RuntimeAdapter, RuntimeConfig } from './runtime'
+import type {
+  ChatTurnInput,
+  ChatTurnResult,
+  RuntimeAdapter,
+  RuntimeConfig,
+  TriggerTopupTickResult,
+} from './runtime'
 
 /**
  * Mirror of dispatchTelegramBypass for the TUI /chat HTTP path. Runs BEFORE
@@ -233,6 +239,23 @@ export class RealRuntime implements RuntimeAdapter {
     if (this.#runtime) {
       await this.#runtime.dispose()
       this.#runtime = null
+    }
+  }
+
+  /**
+   * v0.21.5: manually trigger one AutoTopupManager poll. Used by the admin
+   * endpoint POST /admin/autotopup/tick to live-fire topup events without
+   * waiting for the 5-minute poll interval. Outcome flows through the
+   * existing event/activity-log surfaces, NOT this return value.
+   */
+  async triggerTopupTick(): Promise<TriggerTopupTickResult> {
+    if (!this.#runtime) return { ok: false, reason: 'runtime-not-started' }
+    if (!this.#runtime.autoTopup) return { ok: false, reason: 'autotopup-disabled' }
+    try {
+      await this.#runtime.autoTopup.tick()
+      return { ok: true }
+    } catch (err) {
+      return { ok: false, reason: (err as Error).message?.slice(0, 200) ?? 'tick-failed' }
     }
   }
 

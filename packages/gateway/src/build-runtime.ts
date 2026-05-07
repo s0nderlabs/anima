@@ -959,6 +959,11 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
         agentAddress,
         publicClient: viemClients.publicClient,
         getBrokerLedger: async () => brain.getLedger(),
+        // v0.21.5: wake the broker eagerly on the first null-ledger tick so
+        // an idle agent (no chat turns yet) still autotopups its compute
+        // envelope. brain.init() is idempotent; the second call short-
+        // circuits via `if (this.broker) return`.
+        getBrainInit: () => brain.init(),
         onEvent: onAutoTopupEvent,
       },
     )

@@ -1,5 +1,7 @@
+import { existsSync } from 'node:fs'
 import { mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { isCancel, select, spinner } from '@clack/prompts'
 import {
   ANIMA_INBOX_ADDRESS,
@@ -42,6 +44,7 @@ import {
   explorerTxUrl,
   fetchAndDecryptKeystore,
   iNFTAgentId,
+  isOperatorSessionFresh,
   loadPlugins,
   makeMemoryReadTool,
   makeMemorySaveTool,
@@ -113,16 +116,53 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   // present at ~/.anima/agents/<id>/gateway.sock), route to the same thin
   // client over a unix socket. The TUI no longer holds the runtime — the
   // gateway daemon does. Closing the TUI doesn't stop the listeners.
+  //
+  // v0.21.5: when no daemon is running but an operator session is fresh,
+  // AUTO-SPAWN the daemon as a child process and attach as thin-client.
+  // Without this, embedded TUI fallthrough silently disables (a) Telegram
+  // pairing-store wiring (no inbound delivery) and (b) AutoTopupManager
+  // polling. ANIMA_FORCE_EMBEDDED=1 escape hatch keeps the legacy path
+  // available for tests / debugging.
   {
-    const { existsSync } = await import('node:fs')
-    const { join } = await import('node:path')
     const _contractAddr = config.identity.iNFT.contract as Address
     const _tokId = BigInt(config.identity.iNFT.tokenId)
     const _aid = iNFTAgentId({ contractAddress: _contractAddr, tokenId: _tokId })
     const _gatewaySock = join(agentPaths.agent(_aid).dir, 'gateway.sock')
+    const forceEmbedded = process.env.ANIMA_FORCE_EMBEDDED === '1'
     if (existsSync(_gatewaySock)) {
       const { runChatSandbox } = await import('./chat-sandbox')
       return runChatSandbox(config, { unixSocketPath: _gatewaySock })
+    }
+    if (!forceEmbedded && isOperatorSessionFresh(_aid)) {
+      const { spawnGatewayDaemon } = await import('../util/gateway-spawn')
+      const sBoot = spinner()
+      sBoot.start('Starting gateway daemon (auto-spawn)')
+      try {
+        const result = await spawnGatewayDaemon({
+          agentId: _aid,
+          configPath: configPath ?? '',
+          socketPath: _gatewaySock,
+          timeoutMs: 12_000,
+        })
+        if (result.ready) {
+          sBoot.stop(`gateway running pid=${result.pid}`)
+          const { runChatSandbox } = await import('./chat-sandbox')
+          return runChatSandbox(config, { unixSocketPath: _gatewaySock })
+        }
+        const reason = result.reason ?? 'unknown'
+        const detail = result.error ? `: ${result.error}` : ''
+        sBoot.stop(`gateway auto-spawn failed (${reason}${detail}); falling back to embedded mode`)
+      } catch (err) {
+        sBoot.stop(
+          `gateway auto-spawn errored: ${(err as Error).message?.slice(0, 160)}; falling back to embedded mode`,
+        )
+      }
+    } else if (!forceEmbedded) {
+      // Session not fresh → operator must run `anima gateway start` for the
+      // full daemon path (Touch ID + scope-key derivation). Print a hint.
+      console.log(
+        'note: gateway daemon would unlock TG + auto-topup; run `anima gateway start` to enable. Continuing in embedded mode.',
+      )
     }
   }
   const contractAddress = config.identity.iNFT.contract as Address

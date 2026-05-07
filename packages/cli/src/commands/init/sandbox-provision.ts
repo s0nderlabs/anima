@@ -900,7 +900,7 @@ export function pickPermissionMode(): PermissionMode {
  * enigma archive was caused by this balance dropping below `min_balance` mid
  * settlement, so the safe floor is 2× min_balance (= 0.12 0G). Returns true
  * if the operator may proceed; returns false (and surfaces a `cancel(...)`
- * with a `topup --provider` suggestion) otherwise.
+ * with a `topup --sandbox` suggestion) otherwise.
  *
  * Best-effort: a chain RPC failure surfaces as a `note` warning and returns
  * true (don't block on read failures).
@@ -916,7 +916,7 @@ export async function preflightProviderDeposit(operator: OperatorSigner): Promis
       cancel(
         [
           `Galileo provider deposit ${formatEther(balance)} 0G is below safe threshold (0.12 0G).`,
-          'Run `anima topup --provider 1` to deposit 1 0G first (~11h runway).',
+          'Run `anima topup --sandbox 1` to deposit 1 0G first (~11h runway).',
         ].join('\n'),
       )
       return false

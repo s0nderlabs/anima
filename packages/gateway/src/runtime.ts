@@ -78,6 +78,17 @@ export interface ChatTurnResult {
 }
 
 /**
+ * v0.21.5: result of a manual auto-topup tick. `ok:true` means the manager
+ * ran a poll cycle and emitted whatever events it saw fit (topup-fired /
+ * topup-skipped / topup-failed / wallet-low). `ok:false` is reserved for
+ * "manager not configured" or runtime not started.
+ */
+export interface TriggerTopupTickResult {
+  ok: boolean
+  reason?: 'autotopup-disabled' | 'runtime-not-started' | string
+}
+
+/**
  * Runtime adapter that the harness server delegates to. Real impl wires
  * OGComputeBrain + MemorySyncManager + plugin set. Stub impl in
  * `stub-runtime.ts` is for HTTP-bridge testing without burning compute.
@@ -93,4 +104,13 @@ export interface RuntimeAdapter {
   flushSync(): Promise<{ tx?: string; slots: string[] }>
   ready(): boolean
   stop(): Promise<void>
+  /**
+   * v0.21.5: force the AutoTopupManager to run one tick now (bypassing the
+   * 5-minute poll interval). Returns ok:false with reason='autotopup-disabled'
+   * when the runtime has no manager wired (economy.autoTopup.enabled === false
+   * or brain.provider unset). Returns ok:true after the tick completes; the
+   * actual outcome (fired/skipped/failed) flows through the existing event
+   * + activity-log surfaces, NOT this return value.
+   */
+  triggerTopupTick?(): Promise<TriggerTopupTickResult>
 }

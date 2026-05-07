@@ -291,9 +291,12 @@ export { Runtime, type RuntimeDeps, ActivityLog, type ActivityEntry } from './ru
 
 export {
   acquireScopedLock,
+  clearStaleScopedLock,
   DEFAULT_LOCK_TTL_SECONDS,
   type AcquireScopedLockOpts,
   type AcquireScopedLockResult,
+  type ClearStaleScopedLockReason,
+  type ClearStaleScopedLockResult,
   type ScopedLockHandle,
 } from './locks'
 
