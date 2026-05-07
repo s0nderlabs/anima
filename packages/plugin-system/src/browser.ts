@@ -104,8 +104,16 @@ function whichIn(name: string, dirs: string[]): string | null {
 function findAgentBrowser(override?: string, cwdOverride?: string): string | null {
   if (override) return override
 
-  const localBin = join(cwdOverride ?? process.cwd(), 'node_modules', '.bin', 'agent-browser')
+  const cwd = cwdOverride ?? process.cwd()
+
+  const localBin = join(cwd, 'node_modules', '.bin', 'agent-browser')
   if (statSync(localBin, { throwIfNoEntry: false })?.isFile()) return localBin
+
+  // Fallback: package's own bin/agent-browser.js. Survives the bootstrap race
+  // where `bun install` finishes extracting the package but hasn't yet linked
+  // the .bin/ symlink.
+  const localPkg = join(cwd, 'node_modules', 'agent-browser', 'bin', 'agent-browser.js')
+  if (statSync(localPkg, { throwIfNoEntry: false })?.isFile()) return localPkg
 
   const pathEnv = process.env.PATH ?? ''
   const pathDirs = pathEnv.split(delimiter).filter(Boolean)
