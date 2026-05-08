@@ -115,6 +115,10 @@ export function createGatewayServer(deps: ServerDeps): http.Server {
         // missing scope key). `active` = listener registered. `failed` =
         // registered but start threw (future, once we plumb start outcomes).
         const listeners = session.runtime.listenerStates?.() ?? { telegram: 'disabled' as const }
+        // v0.21.13: surface the current permission mode so the TUI thin client
+        // can sync its statusline. Pre-fix the TUI hardcoded `approvalsMode: 'off'`
+        // and never reflected /perms or /yolo flips routed through dispatchBypass.
+        const permsMode = session.runtime.permissionMode?.()
         return send(res, 200, {
           state: session.state,
           sandboxId: session.sandboxId,
@@ -129,6 +133,7 @@ export function createGatewayServer(deps: ServerDeps): http.Server {
           subscribers: session.events.size(),
           pendingApprovals: session.approvals.pendingCount(),
           listeners,
+          permsMode,
         })
       }
 

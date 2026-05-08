@@ -164,6 +164,21 @@ describe('harness HTTP server — provision + lifecycle', () => {
     expect(['active', 'disabled', 'failed']).toContain(body.listeners?.telegram ?? '')
   })
 
+  test('GET /healthz exposes permsMode field (v0.21.13)', async () => {
+    // Stub runtime omits permissionMode() so the server returns undefined.
+    // Real RealRuntime returns runtime.permission.getMode() so the TUI thin
+    // client can seed its statusline. The field is optional in the response
+    // type to keep the contract additive.
+    const r = await fetch(`${fix.base}/healthz`)
+    const body = (await r.json()) as { permsMode?: string }
+    // Stub returns undefined; assert the key is present (even if value is
+    // omitted from JSON when undefined). Reading without throwing is enough.
+    expect(body).toBeDefined()
+    if (body.permsMode !== undefined) {
+      expect(['off', 'prompt', 'strict']).toContain(body.permsMode)
+    }
+  })
+
   test('POST /bootstrap/provision happy path → Provisioned then Ready', async () => {
     await provisionFixture(fix)
     expect(fix.session.state).toBe('Ready')

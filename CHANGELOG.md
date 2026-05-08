@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.13] - 2026-05-08
+
+### Fixed
+
+- **TUI statusline `perms:` field now reflects gateway state, and `/yolo` + `/perms` + `/reset` work in sandbox-mode TUI.** Pre-fix the TUI thin client (`chat-sandbox.tsx`) hardcoded `approvalsMode: 'off'` at chat init and had no slash interceptors for `/yolo`, `/perms`, or `/reset`. Slash messages got shipped through `client.chat()` and the gateway's `dispatchBypass` correctly updated the server-side `PermissionService` (and the brain replied `"perms set to prompt"`), but the TUI's local `state.approvalsMode` signal never moved, so the statusbar stayed stuck at `perms: off` for the entire session even after toggling. Cosmetic, not a security issue (the gateway's PermissionService — not the TUI display — gates the actual approval modal), but it broke the demo story. Fix: `/healthz` now exposes `permsMode: 'off' | 'prompt' | 'strict'` (gateway-side, plumbed through `RuntimeAdapter.permissionMode?()` on `RealRuntime` returning `runtime.permission.getMode()`); `chat-sandbox.tsx` reads `health.permsMode` to seed the chat state on init AND adds local handlers for `/yolo`, `/perms`, and `/reset` that forward through `client.chat()` (so the gateway's bypass dispatcher still owns the source of truth) AND re-fetch `/healthz` to sync the local statusbar. Closes the v0.21.5+ regression filed in `feedback-tui-statusbar-stale-perms-thin-client.md`.
+
 ## [0.21.12] - 2026-05-07
 
 ### Fixed

@@ -129,4 +129,13 @@ export interface RuntimeAdapter {
    * 'failed' = registered but start() threw OR a runtime invariant violated.
    */
   listenerStates?(): Record<string, 'active' | 'disabled' | 'failed'>
+  /**
+   * v0.21.13: report the current permission mode so `/healthz` consumers
+   * (notably the TUI thin client) can render an accurate statusline. Without
+   * this the TUI hardcoded `approvalsMode: 'off'` after the v0.19.0 thin-client
+   * refactor and never reflected `/perms` / `/yolo` flips that the gateway
+   * routed through `dispatchBypass`. Returns undefined if the runtime hasn't
+   * yet wired its PermissionService (e.g. pre-Ready).
+   */
+  permissionMode?(): 'off' | 'prompt' | 'strict' | undefined
 }

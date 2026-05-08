@@ -129,6 +129,10 @@ export class RealRuntime implements RuntimeAdapter {
     return { ...this.#listenerStates }
   }
 
+  permissionMode(): 'off' | 'prompt' | 'strict' | undefined {
+    return this.#runtime?.permission.getMode()
+  }
+
   async runChatTurn(input: ChatTurnInput): Promise<ChatTurnResult> {
     if (!this.#runtime) throw new Error('runtime-not-started')
     const r = this.#runtime

@@ -57,6 +57,10 @@ export interface HealthzResponse {
   eventsLastSeq: number
   subscribers: number
   pendingApprovals: number
+  /** v0.21.12: per-listener state. */
+  listeners?: Record<string, 'active' | 'disabled' | 'failed'>
+  /** v0.21.13: current permission mode (used by TUI thin client to seed statusline). */
+  permsMode?: 'off' | 'prompt' | 'strict'
 }
 
 export interface ProvisionPayload {

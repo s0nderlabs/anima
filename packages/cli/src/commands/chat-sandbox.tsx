@@ -81,9 +81,13 @@ export async function runChatSandbox(
   const sReady = spinner()
   const probeLabel = isLocalGateway ? 'local gateway socket' : `harness ${sandboxEndpoint}`
   sReady.start(`Connecting to ${probeLabel}`)
+  // v0.21.13: capture initial perms mode from /healthz so the TUI statusline
+  // reflects the gateway's actual PermissionService state (not hardcoded 'off').
+  let initialPermsMode: 'off' | 'prompt' | 'strict' = 'off'
   try {
     // Fast probe first; if the harness is healthy we skip every recovery path.
     const health = await client.waitReady({ timeoutMs: 8_000, intervalMs: 1000 })
+    if (health.permsMode) initialPermsMode = health.permsMode
     sReady.stop(
       `${isLocalGateway ? 'gateway' : 'harness'} ready (uptime ${(health.uptimeMs / 1000).toFixed(0)}s)`,
     )
@@ -141,6 +145,7 @@ export async function runChatSandbox(
         onProgress: msg => sReady.message(msg),
       })
       const health = await client.waitReady({ timeoutMs: 30_000, intervalMs: 1500 })
+      if (health.permsMode) initialPermsMode = health.permsMode
       sReady.stop(
         `harness back online via auto-resume (uptime ${(health.uptimeMs / 1000).toFixed(0)}s)`,
       )
@@ -162,7 +167,11 @@ export async function runChatSandbox(
     initialSystem: `connected to sandbox ${sandboxId.slice(0, 8)} @ ${sandboxEndpoint}`,
     identityLabel: `agent ${agentId}  ${shortAddr(agentAddress)}`,
     brainLabel: shortAddr(config.brain.provider),
-    approvalsMode: 'off',
+    // v0.21.13: seeded from /healthz.permsMode so the statusline reflects
+    // the gateway's actual mode after auto-spawn / restart cycles. The
+    // statusline subsequently updates locally via the /yolo and /perms
+    // slash handlers below.
+    approvalsMode: initialPermsMode === 'strict' ? 'prompt' : initialPermsMode,
   })
 
   const renderer = await createCliRenderer({
@@ -382,10 +391,43 @@ export async function runChatSandbox(
       }
       return true
     }
+    // v0.21.13: forward bypass commands to the gateway via client.chat() (the
+    // gateway's dispatchBypass intercepts before brain.infer) AND optimistically
+    // update the local statusline. Pre-fix the gateway updated its own
+    // PermissionService but the TUI's hardcoded `approvalsMode: 'off'` never
+    // moved, leaving the statusbar stuck at 'off' even after `/perms prompt`.
+    if (cmd === '/yolo' || cmd === '/perms' || cmd.startsWith('/perms ')) {
+      try {
+        const r = await client.chat(cmd)
+        state.pushRow({ role: 'assistant', text: r.response })
+        // Re-read healthz for ground truth; cheap (~5ms) and immune to brain reply parsing.
+        const h = await client.health().catch(() => null)
+        const next = h?.permsMode
+        if (next) state.setApprovalsMode(next === 'strict' ? 'prompt' : next)
+      } catch (e) {
+        state.pushRow({
+          role: 'system',
+          text: `${cmd} failed: ${(e as Error).message.slice(0, 200)}`,
+        })
+      }
+      return true
+    }
+    if (cmd === '/reset') {
+      try {
+        const r = await client.chat(cmd)
+        state.pushRow({ role: 'assistant', text: r.response })
+      } catch (e) {
+        state.pushRow({
+          role: 'system',
+          text: `reset failed: ${(e as Error).message.slice(0, 200)}`,
+        })
+      }
+      return true
+    }
     if (cmd === '/help') {
       state.pushRow({
         role: 'system',
-        text: 'sandbox-mode slash commands:\n  /sync   force memory + activity flush via remote harness\n  /exit   quit (harness keeps running)\n  /help   this message',
+        text: "sandbox-mode slash commands:\n  /sync   force memory + activity flush via remote harness\n  /yolo   toggle approval prompts off/on for this session\n  /perms <mode>  set permission mode (off|prompt|strict); no arg shows current\n  /reset  clear this channel's conversation history\n  /exit   quit (harness keeps running)\n  /help   this message",
       })
       return true
     }
