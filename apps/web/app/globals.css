@@ -1,0 +1,116 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-cream: #f9f8f6;
+  --color-cream-deep: #f2f1ee;
+  --color-paper: #fbfbf9;
+  --color-cream-warm: #f0e8d6;
+  --color-ink: #100f09;
+  --color-ink-2: #525251;
+  --color-ink-3: #8b8b88;
+  --color-border: rgba(16, 15, 9, 0.09);
+  --color-border-strong: rgba(16, 15, 9, 0.2);
+
+  --font-display: var(--font-fraunces);
+  --font-italic: var(--font-instrument-serif);
+  --font-body: var(--font-outfit);
+  --font-mono: var(--font-geist-mono);
+  --font-pixel: var(--font-geist-mono);
+  --font-wordmark: var(--font-cal-sans);
+
+  --container-narrow: 880px;
+  --container-wrap: 1180px;
+  --section-py: clamp(96px, 10vh, 180px);
+
+  --shadow-doc: 0 30px 80px -40px rgba(70, 50, 30, 0.35);
+  --shadow-card: 0 20px 50px -30px rgba(50, 35, 22, 0.28);
+  --shadow-doc-asym: 18px 28px 60px -34px rgba(45, 30, 18, 0.42);
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  html {
+    color-scheme: light;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    background: var(--color-cream);
+    color: var(--color-ink);
+  }
+  body {
+    font-family: var(--font-body), 'Outfit', system-ui, sans-serif;
+    font-weight: 400;
+    line-height: 1.55;
+    letter-spacing: -0.005em;
+    background: var(--color-cream);
+    color: var(--color-ink);
+    overflow-x: hidden;
+  }
+  ::selection {
+    background: var(--color-ink);
+    color: var(--color-cream);
+  }
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+}
+
+@utility font-display {
+  font-family: var(--font-display), 'Fraunces', serif;
+  font-optical-sizing: auto;
+}
+@utility font-italic-serif {
+  font-family: var(--font-italic), 'Instrument Serif', serif;
+  font-style: italic;
+}
+@utility font-body {
+  font-family: var(--font-body), 'Outfit', system-ui, sans-serif;
+}
+@utility font-mono {
+  font-family: var(--font-mono), 'Geist Mono', ui-monospace, monospace;
+  letter-spacing: 0.005em;
+}
+@utility font-pixel {
+  font-family: var(--font-pixel), 'Geist Mono', ui-monospace, monospace;
+  font-feature-settings: 'tnum' 1;
+}
+@utility font-wordmark {
+  font-family: var(--font-wordmark), 'Cal Sans', system-ui, sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+
+@utility kicker {
+  font-family: var(--font-mono), 'Geist Mono', ui-monospace, monospace;
+  font-size: 11.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--color-ink-2);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001s !important;
+    scroll-behavior: auto !important;
+  }
+}

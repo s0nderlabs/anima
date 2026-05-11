@@ -6,7 +6,7 @@
   "description": "First fully on-chain sovereign agent harness on 0G",
   "repository": "github.com/s0nderlabs/anima",
   "license": "MIT",
-  "workspaces": ["packages/*"],
+  "workspaces": ["packages/*", "apps/*"],
   "scripts": {
     "build": "bun run --filter='*' build",
     "typecheck": "tsc -b",

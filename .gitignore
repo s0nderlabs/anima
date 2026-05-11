@@ -52,3 +52,11 @@ test/local/*
 .vscode/
 .idea/
 *.swp
+
+# Local design mocks (HTML/CSS prototypes, not part of the published harness)
+mock/
+
+# Next.js build outputs (apps/web)
+apps/web/.next/
+apps/web/.vercel/
+apps/web/out/
