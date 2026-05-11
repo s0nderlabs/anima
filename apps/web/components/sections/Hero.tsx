@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { motion } from 'framer-motion'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { useEffect, useState } from 'react'
 import { HeroCanvas } from './HeroCanvas'
 
 const lineVariants = {
@@ -14,7 +15,23 @@ const lineVariants = {
   },
 }
 
+const SWAP_WORDS = ['sovereign', 'onchain'] as const
+const SWAP_INTERVAL_MS = 2800
+
 export function Hero() {
+  const reduceMotion = useReducedMotion()
+  const [wordIndex, setWordIndex] = useState(0)
+
+  useEffect(() => {
+    if (reduceMotion) return
+    const id = window.setInterval(() => {
+      setWordIndex((i) => (i + 1) % SWAP_WORDS.length)
+    }, SWAP_INTERVAL_MS)
+    return () => window.clearInterval(id)
+  }, [reduceMotion])
+
+  const currentWord = SWAP_WORDS[wordIndex] ?? SWAP_WORDS[0]
+
   return (
     <section
       id="hero"
@@ -32,7 +49,25 @@ export function Hero() {
         >
           <motion.span variants={lineVariants} className="block">
             A fully{' '}
-            <span className="font-italic-serif italic text-[var(--color-ink)]">sovereign</span>
+            <span className="font-italic-serif inline-grid align-baseline italic text-[var(--color-ink)]">
+              <span aria-hidden className="invisible col-start-1 row-start-1">
+                sovereign
+              </span>
+              <span className="col-start-1 row-start-1">
+                <AnimatePresence mode="wait" initial={false}>
+                  <motion.span
+                    key={currentWord}
+                    initial={{ opacity: 0, y: 12, filter: 'blur(5px)' }}
+                    animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+                    exit={{ opacity: 0, y: -12, filter: 'blur(5px)' }}
+                    transition={{ duration: 0.85, ease: [0.22, 1, 0.36, 1] }}
+                    className="inline-block"
+                  >
+                    {currentWord}
+                  </motion.span>
+                </AnimatePresence>
+              </span>
+            </span>
           </motion.span>
           <motion.span variants={lineVariants} className="block">
             agentic harness.
