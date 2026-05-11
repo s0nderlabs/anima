@@ -8,11 +8,11 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 type Props = { cycle: Cycle }
 
 /**
- * Right-side hero canvas. The agent's voyage through 0G — the prompt
+ * Right-side hero canvas. The agent's voyage through 0G , the prompt
  * descends through five stations (your wallet, the TEE brain, the
  * sandbox, 0G Storage, 0G Chain). A continuous ink line runs the full
  * height; the path "fills in" downward to the active station's node as
- * each one fires. Empty stations don't render — only the line.
+ * each one fires. Empty stations don't render , only the line.
  *
  * Each node holds a tool-specific animated glyph: a signature drawing
  * itself, a TEE seal pulsing, a browser cursor traversing, a padlock
@@ -146,7 +146,7 @@ function Voyage({
 
   return (
     <div ref={containerRef} className="relative">
-      {/* CONTINUOUS LINE — anchored to the first dot's center, drawing
+      {/* CONTINUOUS LINE , anchored to the first dot's center, drawing
           downward to the active node's center as stations fire. */}
       <motion.div
         aria-hidden
@@ -177,7 +177,7 @@ function Voyage({
         ))}
       </ol>
 
-      {/* outcome — only after every station has landed */}
+      {/* outcome , only after every station has landed */}
       <AnimatePresence>
         {allDone ? (
           <motion.div
@@ -216,7 +216,7 @@ function Station({
         gridTemplateColumns: `${NODE_COL_PX}px 1fr ${GLYPH_COL_PX}px`,
       }}
     >
-      {/* node column — small simple ink dot, pushed down via paddingTop
+      {/* node column , small simple ink dot, pushed down via paddingTop
           so its center aligns with the narration's first line (not the
           small layer label above it). */}
       <div className="relative flex justify-center" style={{ paddingTop: DOT_TOP_OFFSET_PX }}>
@@ -243,9 +243,9 @@ function NodeDot({
     <AnimatePresence>
       {visible ? (
         <motion.div
-          initial={{ scale: 0, opacity: 0 }}
-          animate={{ scale: [0, 1.4, 1], opacity: 1 }}
-          exit={{ scale: 0, opacity: 0 }}
+          initial={{ scale: 0.95, opacity: 0 }}
+          animate={{ scale: [0.95, 1.4, 1], opacity: 1 }}
+          exit={{ scale: 0.95, opacity: 0 }}
           transition={{ duration: 0.6, ease: [0.22, 1.6, 0.36, 1] }}
           className="relative h-full w-full rounded-full"
           style={{ background: 'var(--color-ink)' }}
@@ -388,7 +388,7 @@ function BigGlyph({ kind, active }: { kind: GlyphKind; active: boolean }) {
   }
 }
 
-const GLYPH_SIZE = 42 // px — big right-column animated glyph
+const GLYPH_SIZE = 42 // px , big right-column animated glyph
 
 const G_STROKE = 'var(--color-ink)'
 
@@ -401,16 +401,16 @@ function SignGlyph() {
   //
   // Anatomy of the main path:
   //   M 3 14              start at the baseline left edge
-  //   C 5 6 8 6 8 14      tall first arch (peaks at y=6) — the capital
+  //   C 5 6 8 6 8 14      tall first arch (peaks at y=6) , the capital
   //   C 8 10 11 10 11 14  smaller second arch (peaks at y=10)
   //   S 14 17 16 13       smooth cubic dipping below baseline then up
   //   Q 19 9 21 7         quadratic flourish curling up-right off the page
   //
-  // The overall feel is "tall · short · dip · flourish" — the way many
+  // The overall feel is "tall · short · dip · flourish" , the way many
   // handwritten signatures actually move.
   return (
     <svg viewBox="0 0 24 24" width={GLYPH_SIZE} height={GLYPH_SIZE} className="relative z-10">
-      {/* Main signature gesture — one continuous stroke */}
+      {/* Main signature gesture , one continuous stroke */}
       <motion.path
         d="M 3 14 C 5 6 8 6 8 14 C 8 10 11 10 11 14 S 14 17 16 13 Q 19 9 21 7"
         fill="none"
@@ -422,7 +422,7 @@ function SignGlyph() {
         animate={{ pathLength: 1 }}
         transition={{ duration: 1.5, ease: [0.4, 0, 0.2, 1], delay: 0.15 }}
       />
-      {/* i-tittle dot — drops in above the second arch like dotting
+      {/* i-tittle dot , drops in above the second arch like dotting
           an i mid-name */}
       <motion.circle
         cx="11"
@@ -459,15 +459,15 @@ function BrainGlyph({ active }: { active: boolean }) {
   // Anatomical brain icon. Drops the previous hexagon shield (it was
   // squeezing the inside until nothing read as a brain) and lets the
   // brain occupy the full viewBox. Anatomy:
-  //   1. Outer two-lobed silhouette — oval body with a shallow notch
+  //   1. Outer two-lobed silhouette , oval body with a shallow notch
   //      at the top center where the hemispheres meet, drawn as a
   //      single closed cubic Bezier path
-  //   2. Longitudinal fissure — vertical center line dividing the lobes
-  //   3. Cortical folds — 4 small S-curves (2 per hemisphere) suggesting
+  //   2. Longitudinal fissure , vertical center line dividing the lobes
+  //   3. Cortical folds , 4 small S-curves (2 per hemisphere) suggesting
   //      the brain's signature gyri/sulci pattern
-  //   4. Brainstem hint — a small stub poking down from the bottom center
+  //   4. Brainstem hint , a small stub poking down from the bottom center
   // When this is the active station, the entire brain matter (fissure +
-  // folds) pulses opacity in a slow 2.4s rhythm — visualising thought.
+  // folds) pulses opacity in a slow 2.4s rhythm , visualising thought.
   // The TEE-enclave context now lives in the narration ("Reasoning ran
   // inside a TEE..."), so the glyph can stay focused on cognition.
   return (
@@ -497,7 +497,7 @@ function BrainGlyph({ active }: { active: boolean }) {
         transition={{ duration: 1.1, ease: [0.4, 0, 0.2, 1], delay: 0.2 }}
       />
 
-      {/* INNER BRAIN MATTER — fissure + cortical folds + brainstem,
+      {/* INNER BRAIN MATTER , fissure + cortical folds + brainstem,
           wrapped in a g that pulses opacity when this station is active */}
       <motion.g
         animate={active ? { opacity: [0.65, 1, 0.65] } : { opacity: 1 }}
@@ -523,7 +523,7 @@ function BrainGlyph({ active }: { active: boolean }) {
           transition={{ duration: 0.65, ease: 'easeOut', delay: 1.25 }}
         />
 
-        {/* LEFT HEMISPHERE FOLDS — two horizontal-ish S-curves
+        {/* LEFT HEMISPHERE FOLDS , two horizontal-ish S-curves
             suggesting the brain's gyri */}
         <motion.path
           d="M 5 9 Q 6.5 8.2 7.2 10 Q 7.8 11.6 9.6 10.8"
@@ -550,7 +550,7 @@ function BrainGlyph({ active }: { active: boolean }) {
           transition={{ duration: 0.55, delay: 1.6 }}
         />
 
-        {/* RIGHT HEMISPHERE FOLDS — mirror */}
+        {/* RIGHT HEMISPHERE FOLDS , mirror */}
         <motion.path
           d="M 19 9 Q 17.5 8.2 16.8 10 Q 16.2 11.6 14.4 10.8"
           fill="none"
@@ -576,7 +576,7 @@ function BrainGlyph({ active }: { active: boolean }) {
           transition={{ duration: 0.55, delay: 1.65 }}
         />
 
-        {/* Brainstem — a tiny stub poking down from bottom center */}
+        {/* Brainstem , a tiny stub poking down from bottom center */}
         <motion.path
           d="M 11.2 19.4 Q 12 21 12.8 19.4"
           fill="none"
@@ -680,7 +680,7 @@ function LockGlyph() {
         animate={{ pathLength: 1 }}
         transition={{ duration: 0.7, ease: [0.4, 0, 0.2, 1], delay: 0.3 }}
       />
-      {/* shackle — animates from "open" (offset) to "shut" (centered) */}
+      {/* shackle , animates from "open" (offset) to "shut" (centered) */}
       <motion.path
         d="M 8 11 V 8 a 4 3 0 0 1 8 0 V 11"
         fill="none"
@@ -718,14 +718,14 @@ function LockGlyph() {
 }
 
 function AnchorGlyph() {
-  // Nautical anchor — the storage root anchored into the iNFT. Anatomy:
+  // Nautical anchor , the storage root anchored into the iNFT. Anatomy:
   //   1. Shackle (ring at top, where rope/chain attaches)
   //   2. Shank (vertical shaft connecting ring to crown)
   //   3. Stock (horizontal crossbar near the top)
   //   4. Crown + arms (curved U at the bottom)
   //   5. Flukes (barbed points at the ends of each arm)
   // The whole anchor drops in from above (y motion on the wrapping g)
-  // while strokes draw in sequence — it lands like a real anchor finding
+  // while strokes draw in sequence , it lands like a real anchor finding
   // the seabed.
   return (
     <svg viewBox="0 0 24 24" width={GLYPH_SIZE} height={GLYPH_SIZE} className="relative z-10">
@@ -734,7 +734,7 @@ function AnchorGlyph() {
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.5, ease: [0.4, 1.2, 0.4, 1], delay: 0.15 }}
       >
-        {/* shackle — ring at the top */}
+        {/* shackle , ring at the top */}
         <motion.circle
           cx="12"
           cy="4"
@@ -746,7 +746,7 @@ function AnchorGlyph() {
           animate={{ pathLength: 1 }}
           transition={{ duration: 0.45, ease: 'easeOut', delay: 0.3 }}
         />
-        {/* shank — the vertical shaft */}
+        {/* shank , the vertical shaft */}
         <motion.line
           x1="12"
           y1="5.7"
@@ -759,7 +759,7 @@ function AnchorGlyph() {
           animate={{ pathLength: 1 }}
           transition={{ duration: 0.65, ease: 'easeOut', delay: 0.55 }}
         />
-        {/* stock — the horizontal crossbar near the top, a touch
+        {/* stock , the horizontal crossbar near the top, a touch
             shorter on the right than the left for that worn nautical
             asymmetry */}
         <motion.line
@@ -774,7 +774,7 @@ function AnchorGlyph() {
           animate={{ pathLength: 1 }}
           transition={{ duration: 0.45, ease: 'easeOut', delay: 0.85 }}
         />
-        {/* crown + arms — the U-curve at the bottom */}
+        {/* crown + arms , the U-curve at the bottom */}
         <motion.path
           d="M 6 13.5 Q 6 19 12 19 Q 18 19 18 13.5"
           fill="none"
@@ -785,7 +785,7 @@ function AnchorGlyph() {
           animate={{ pathLength: 1 }}
           transition={{ duration: 0.7, ease: [0.4, 0, 0.2, 1], delay: 1.05 }}
         />
-        {/* left fluke — a small barbed triangle hint at the arm end */}
+        {/* left fluke , a small barbed triangle hint at the arm end */}
         <motion.path
           d="M 6 13.5 L 4.3 12.5 M 6 13.5 L 5 15.6"
           fill="none"
@@ -797,7 +797,7 @@ function AnchorGlyph() {
           animate={{ pathLength: 1 }}
           transition={{ duration: 0.35, ease: 'easeOut', delay: 1.65 }}
         />
-        {/* right fluke — mirror */}
+        {/* right fluke , mirror */}
         <motion.path
           d="M 18 13.5 L 19.7 12.5 M 18 13.5 L 19 15.6"
           fill="none"
@@ -814,7 +814,7 @@ function AnchorGlyph() {
   )
 }
 
-// extra glyphs for other cycles (swap, stake, message, gavel) — minimal
+// extra glyphs for other cycles (swap, stake, message, gavel) , minimal
 
 function SwapGlyph({ active }: { active: boolean }) {
   return (
@@ -856,7 +856,7 @@ function SwapGlyph({ active }: { active: boolean }) {
 }
 
 function StakeGlyph() {
-  // A coin balanced on a pillar that gets locked into place — the metaphor
+  // A coin balanced on a pillar that gets locked into place , the metaphor
   // of staking: value placed on a substrate, held there by a contractual
   // bar that "clicks shut" at the end. Drawing order:
   //   1. base/ground line (the foundation)
@@ -879,7 +879,7 @@ function StakeGlyph() {
         animate={{ pathLength: 1 }}
         transition={{ duration: 0.45, ease: [0.4, 0, 0.2, 1], delay: 0.2 }}
       />
-      {/* pillar — a vertical column rising up from the base */}
+      {/* pillar , a vertical column rising up from the base */}
       <motion.rect
         x="9.5"
         y="10"
@@ -920,7 +920,7 @@ function StakeGlyph() {
         animate={{ pathLength: 1 }}
         transition={{ duration: 0.5, ease: 'easeOut', delay: 1.0 }}
       />
-      {/* coin balanced on top — drops in from above */}
+      {/* coin balanced on top , drops in from above */}
       <motion.circle
         cx="12"
         cy="6.5"
@@ -946,7 +946,7 @@ function StakeGlyph() {
         animate={{ opacity: 1 }}
         transition={{ duration: 0.3, delay: 1.6 }}
       />
-      {/* lock crossbar — slides in from the left, snaps over the
+      {/* lock crossbar , slides in from the left, snaps over the
           pillar's top edge (this is the "locked" beat) */}
       <motion.line
         x1="7"

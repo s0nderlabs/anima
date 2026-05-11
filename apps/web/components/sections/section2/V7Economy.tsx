@@ -142,7 +142,7 @@ function Row({ label, value }: { label: string; value: string }) {
 }
 
 function Refresh() {
-  const [now, setNow] = useState('—:—:—')
+  const [now, setNow] = useState(',:,:,')
   useEffect(() => {
     const tick = () => {
       const d = new Date()

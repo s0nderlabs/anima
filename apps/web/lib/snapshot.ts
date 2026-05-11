@@ -6,6 +6,9 @@
  */
 
 export const SNAPSHOT_TAKEN_AT = '2026-05-09T07:30:00Z'
+export const SNAPSHOT_TAKEN_AT_UTC = new Date(SNAPSHOT_TAKEN_AT)
+  .toUTCString()
+  .replace('GMT', 'UTC')
 
 export const ENIGMA = {
   subname: 'enigma.anima.0g',

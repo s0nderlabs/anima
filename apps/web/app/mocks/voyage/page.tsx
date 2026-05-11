@@ -86,7 +86,7 @@ function Section({
 
 function Cartographic() {
   // station coordinates within the 760×600 viewBox. Meandering
-  // descent — slight horizontal wander gives the "voyage" feel.
+  // descent , slight horizontal wander gives the "voyage" feel.
   const STATIONS: Array<{ x: number; y: number; r: Receipt }> = [
     { x: 200, y: 90, r: RECEIPTS[0] },
     { x: 560, y: 200, r: RECEIPTS[1] },
@@ -95,7 +95,7 @@ function Cartographic() {
     { x: 340, y: 540, r: RECEIPTS[4] },
   ]
 
-  // Cubic-bezier route through the points — handcrafted control
+  // Cubic-bezier route through the points , handcrafted control
   // points so the curve breathes. Dasharray for the dotted look.
   const path =
     `M ${STATIONS[0]!.x} ${STATIONS[0]!.y} ` +
@@ -154,7 +154,7 @@ function Cartographic() {
           opacity="0.4"
         />
 
-        {/* the route — dotted journey */}
+        {/* the route , dotted journey */}
         <path
           d={path}
           fill="none"
@@ -426,7 +426,7 @@ function ArchSection() {
 // ─── C · Constellation ────────────────────────────────────────────────
 
 function Constellation() {
-  // five stars arranged in a descending S — abstract but readable
+  // five stars arranged in a descending S , abstract but readable
   const STARS = [
     { x: 220, y: 110, r: RECEIPTS[0]! },
     { x: 530, y: 220, r: RECEIPTS[1]! },
@@ -443,7 +443,7 @@ function Constellation() {
 
   return (
     <div className="relative w-full" style={{ aspectRatio: '760 / 620' }}>
-      {/* darker mood background — a midnight vellum */}
+      {/* darker mood background , a midnight vellum */}
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"

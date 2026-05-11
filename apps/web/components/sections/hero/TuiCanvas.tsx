@@ -71,7 +71,7 @@ export function TuiCanvas({ cycle }: { cycle: Cycle }) {
 
   return (
     <div className="flex h-full min-h-[460px] flex-col bg-[var(--color-paper)] font-mono text-[12px] leading-[1.55] text-[var(--color-ink)]">
-      {/* SCROLLBACK — every line uses a 60px label column on the left
+      {/* SCROLLBACK , every line uses a 60px label column on the left
           (sys/you/anima) + content on the right. Matches real anima TUI.
           `min-h-0` forces the flex child to honor its share instead of
           growing to intrinsic content height, so long replies scroll
@@ -80,7 +80,7 @@ export function TuiCanvas({ cycle }: { cycle: Cycle }) {
         ref={scrollRef}
         className="min-h-0 flex-1 overflow-y-auto px-4 pt-3 pb-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
-        {/* sys line — always visible at top */}
+        {/* sys line , always visible at top */}
         <Row label="sys" labelColor={COLOR_SYS}>
           <span style={{ color: COLOR_SYS }}>
             connected to anima.0g · 0G mainnet
@@ -101,7 +101,7 @@ export function TuiCanvas({ cycle }: { cycle: Cycle }) {
           </motion.div>
         )}
 
-        {/* anima row — tools then reply share a single content column */}
+        {/* anima row , tools then reply share a single content column */}
         {showAnimaRow && (
           <motion.div
             initial={{ opacity: 0 }}
@@ -140,17 +140,17 @@ export function TuiCanvas({ cycle }: { cycle: Cycle }) {
         )}
       </div>
 
-      {/* THINKING ROW — appears between scrollback + input while the brain
+      {/* THINKING ROW , appears between scrollback + input while the brain
           is working. Disappears once the reply lands. */}
       {showThinking && <ThinkingRow stage={stage} />}
 
-      {/* INPUT BAR — `>` + typed chars + inline block cursor.
+      {/* INPUT BAR , `>` + typed chars + inline block cursor.
           Cursor must be inline (not a flex sibling) so when the prompt wraps
           to a second line, the cursor sits after the last typed character
           on the current line instead of floating to the right edge of the
           multi-line flex row.
           `shrink-0` locks input + status to the bottom of the canvas frame
-          even when the scrollback fills — they never get squeezed off. */}
+          even when the scrollback fills , they never get squeezed off. */}
       <div
         className="shrink-0 border-t border-[var(--color-border)] px-4 py-2.5"
         style={{ background: 'rgba(26, 20, 16, 0.05)' }}
@@ -170,7 +170,7 @@ export function TuiCanvas({ cycle }: { cycle: Cycle }) {
         </div>
       </div>
 
-      {/* STATUS LINE — agent identity + key meta */}
+      {/* STATUS LINE , agent identity + key meta */}
       <div className="flex shrink-0 items-center justify-between border-t border-[var(--color-border)] bg-[var(--color-paper)] px-4 py-1.5 text-[10px] tracking-[0.04em]">
         <span className="flex items-center gap-2">
           <span style={{ color: COLOR_ANIMA, fontWeight: 500 }}>anima.0g</span>

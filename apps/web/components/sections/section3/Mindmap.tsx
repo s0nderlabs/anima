@@ -45,7 +45,7 @@ export function Mindmap() {
           </h2>
           <p className="mt-5 max-w-xl text-[15px] leading-relaxed text-[var(--color-ink-2)]">
             Every line on this graph is a 0G primitive. Not a brand-name VPS, not someone's
-            laptop, not a daemon babysat by an operator. Just protocol — alive, attesting, anchoring.
+            laptop, not a daemon babysat by an operator. Just protocol , alive, attesting, anchoring.
           </p>
         </div>
         <span className="font-mono inline-flex items-center gap-2 rounded-full border border-[var(--color-border)] bg-[var(--color-paper)] px-3 py-1.5 text-[10.5px] uppercase tracking-[0.18em] text-[var(--color-ink-3)]">

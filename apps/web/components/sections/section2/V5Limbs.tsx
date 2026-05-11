@@ -38,7 +38,7 @@ export function V5Limbs() {
           <p className="max-w-md text-[15px] leading-relaxed text-[var(--color-ink-2)] lg:col-span-5">
             Tools are dumb on purpose. No mini-LLM inside <span className="font-mono text-[var(--color-ink)]">shell.run</span>, no
             heuristic fallbacks inside <span className="font-mono text-[var(--color-ink)]">browser.click</span>. Brain decides everything;
-            limbs execute literal commands. Same shape as Claude Code's tools — every decision auditable.
+            limbs execute literal commands. Same shape as Claude Code's tools , every decision auditable.
           </p>
         </div>
 

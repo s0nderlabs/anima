@@ -1,5 +1,5 @@
 /**
- * Provenance ledger entries — what actually happened in the substrate
+ * Provenance ledger entries , what actually happened in the substrate
  * (TEE, sandbox, storage, chain) for each cycle. The right-side hero
  * canvas renders these as commentary on the left-side chat.
  *
@@ -20,7 +20,7 @@ export type StampKind =
 
 /**
  * Tool-specific animated glyph kind. Each one renders a small SVG icon
- * inside the station node — the icon ANIMATES on station activation
+ * inside the station node , the icon ANIMATES on station activation
  * (the line draws itself, the lock shackle closes, etc.) so the moment
  * of the substrate firing is visible.
  */
@@ -39,13 +39,13 @@ export type Receipt = {
   id: string
   /** Tool-specific animated glyph for the station node. */
   glyph: GlyphKind
-  /** Legacy big-stamp kind — kept for cycles that haven't been migrated. */
+  /** Legacy big-stamp kind , kept for cycles that haven't been migrated. */
   stamp?: StampKind
   /** Title-cased display label rendered in the right-side panel. */
   layer: 'You' | 'Brain' | 'Limbs' | 'Memory' | 'Chain' | 'Comms' | 'Commerce'
   /** Plain-English sentence that EXPLAINS what just happened. */
   narration: string
-  /** Optional explorer link — when set, renders a "verify on chain ↗" link below the narration. */
+  /** Optional explorer link , when set, renders a "verify on chain ↗" link below the narration. */
   proofHref?: string
   delayMs: number
 }
@@ -59,7 +59,7 @@ export type Provenance = {
 
 // Real 0G mainnet contract addresses. Each `proofHref` points at the
 // chainscan /address/ page for the contract that actually settles the
-// station's action — clicking it shows real on-chain activity (recent
+// station's action , clicking it shows real on-chain activity (recent
 // txs, balance, code), not a stylized fake hash.
 const CHAINSCAN_ADDR = 'https://chainscan.0g.ai/address/'
 const ANIMA_AGENT_NFT = '0x9e71d79f06f956d4d2666b5c93dafab721c84721'
@@ -73,11 +73,11 @@ const INTRO = 'every step above leaves a trail on 0G'
 // ─── per-cycle provenance ──────────────────────────────────────────────
 //
 // All cycles follow a 5-station voyage synced to the left-side chat:
-//   1. You      — wallet signs the intent
-//   2. Brain    — TEE reasons + signs the plan
-//   3. [action] — the cycle's headline beat (sandbox / chain / comms+commerce)
-//   4. Memory   — receipt encrypted to 0G Storage
-//   5. Chain    — storage root sealed into iNFT (omitted for cycle 3, where
+//   1. You      , wallet signs the intent
+//   2. Brain    , TEE reasons + signs the plan
+//   3. [action] , the cycle's headline beat (sandbox / chain / comms+commerce)
+//   4. Memory   , receipt encrypted to 0G Storage
+//   5. Chain    , storage root sealed into iNFT (omitted for cycle 3, where
 //                 the gavel beat IS the chain finale)
 //
 // `delayMs` for each station is hand-tuned to fire just after the matching
@@ -86,7 +86,7 @@ const INTRO = 'every step above leaves a trail on 0G'
 // `last_station_delayMs + ~3000ms outcome hold`.
 
 export const PROVENANCE: Record<string, Provenance> = {
-  // ─── Cycle 1 — TUI · research ────────────────────────────────────────
+  // ─── Cycle 1 , TUI · research ────────────────────────────────────────
   // TuiCanvas: commit at 2800, tools start at 2800 stagger 700ms each, last
   // tool (memory.save, idx 5) at 6300, reply at 7600.
   research: {
@@ -140,7 +140,7 @@ export const PROVENANCE: Record<string, Provenance> = {
     ],
   },
 
-  // ─── Cycle 2 — TG · swap ─────────────────────────────────────────────
+  // ─── Cycle 2 , TG · swap ─────────────────────────────────────────────
   // TgCanvas: greeting 200/800/1500, main user at 2400, think at 3000,
   // tools at 3800 stagger 380ms each. chain.tx (idx 3) lands at 4940.
   // memory.save (idx 4) at 5320. Reply at 6320.
@@ -195,7 +195,7 @@ export const PROVENANCE: Record<string, Provenance> = {
     ],
   },
 
-  // ─── Cycle 3 — TUI · commerce ────────────────────────────────────────
+  // ─── Cycle 3 , TUI · commerce ────────────────────────────────────────
   // TuiCanvas: commit at 2800, tools at 2800 stagger 700ms.
   // agent.message (idx 2) at 4200. market.acceptResult (idx 4) at 5600.
   // memory.save (idx 5) at 6300. Reply at 7600. No anchor station: the
@@ -251,7 +251,7 @@ export const PROVENANCE: Record<string, Provenance> = {
     ],
   },
 
-  // ─── Cycle 4 — TG · stake ────────────────────────────────────────────
+  // ─── Cycle 4 , TG · stake ────────────────────────────────────────────
   // TgCanvas: greeting 200/800/1500, main user at 2400, think at 3000,
   // tools at 3800 stagger 380ms. chain.tx (idx 2) at 4560. memory.save
   // (idx 3) at 4940. Reply at 5940.

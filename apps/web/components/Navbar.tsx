@@ -50,7 +50,7 @@ export function Navbar() {
   // to native scroll events, which never fire under Lenis (verified live May
   // 11 2026: scrollEventCount=0 even when window.scrollY=3600). So we drive
   // our scroll MotionValue directly from a rAF loop reading window.scrollY,
-  // then feed useSpring + useTransform exactly as before — no other call
+  // then feed useSpring + useTransform exactly as before , no other call
   // sites have to change.
   const scrollY = useMotionValue(0)
   const smoothScroll = useSpring(scrollY, { damping: 50, stiffness: 280, mass: 0.6 })
@@ -65,7 +65,7 @@ export function Navbar() {
   const [menuOpen, setMenuOpen] = useState(false)
   // Mobile-only: track the bg color of whatever section is currently scrolled
   // behind the navbar, so the flat mobile nav strip seamlessly inherits the
-  // section's color (Lovart pattern — cream over Hero/Sec3/Sec4, cream-deep
+  // section's color (Lovart pattern , cream over Hero/Sec3/Sec4, cream-deep
   // over Sec2, etc.) instead of staying one fixed shade.
   const [sectionBg, setSectionBg] = useState<string>('var(--color-cream)')
 
@@ -139,7 +139,7 @@ export function Navbar() {
   const ctaX = useTransform(smoothScroll, [morphStart, morphEnd], [spread, 0])
   const navY = useTransform(smoothScroll, [morphStart, morphEnd], [0, -2])
 
-  // Glassy translucent end state — paper grain + content underneath show through.
+  // Glassy translucent end state , paper grain + content underneath show through.
   // Bg caps at 0.62 (not 1) so the pill never reads as a solid bar; blur
   // compensates so type behind it stays soft, not legible. Border + shadow
   // are dialed back to keep the pill feeling like a halo, not a card.
@@ -170,7 +170,7 @@ export function Navbar() {
           style={{ y: navY, maxWidth: PILL_WIDTH, paddingLeft: PILL_INSET, paddingRight: PILL_INSET }}
           aria-label="primary"
         >
-          {/* Pill chrome — anchored to nav bounds, fades in via opacity + blur.
+          {/* Pill chrome , anchored to nav bounds, fades in via opacity + blur.
               Hidden on phones (Lovart pattern): mobile navbar is flat, not a pill. */}
           <motion.span
             aria-hidden
@@ -184,13 +184,13 @@ export function Navbar() {
             }}
           />
 
-          {/* Logo — natural left of pill, translates further left at top of page.
+          {/* Logo , natural left of pill, translates further left at top of page.
               Wider left padding on phones (no pill chrome to seat against). */}
           <motion.div className="flex shrink-0 items-center pl-5 md:pl-3" style={{ x: logoX }}>
             <Brand />
           </motion.div>
 
-          {/* Middle items — desktop only (md+). Phones see the hamburger instead. */}
+          {/* Middle items , desktop only (md+). Phones see the hamburger instead. */}
           <div className="hidden flex-1 items-center justify-center gap-9 md:flex">
             {NAV_ITEMS.map(item => (
               <NavLink key={item.label} href={item.href}>
@@ -199,7 +199,7 @@ export function Navbar() {
             ))}
           </div>
 
-          {/* CTA — natural right of pill, translates further right at top of page.
+          {/* CTA , natural right of pill, translates further right at top of page.
               On phones the CTA shrinks (compact variant) so it fits alongside
               the wordmark + hamburger without overlap. */}
           <motion.div className="ml-auto flex shrink-0 items-center gap-2 pr-4 md:ml-0 md:pr-1" style={{ x: ctaX }}>
@@ -358,7 +358,7 @@ function MobileMenuOverlay({ onClose }: { onClose: () => void }) {
       exit={{ opacity: 0 }}
       transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
     >
-      {/* Top bar — same coordinates as the page navbar so brand + close X
+      {/* Top bar , same coordinates as the page navbar so brand + close X
           line up with where the wordmark and hamburger were a moment ago. */}
       <div className="flex items-center justify-between px-5 pt-5 sm:px-8 sm:pt-6">
         <Brand />
@@ -368,7 +368,7 @@ function MobileMenuOverlay({ onClose }: { onClose: () => void }) {
         </div>
       </div>
 
-      {/* Nav items — large display type, stacked, stagger-in. Lovart parity. */}
+      {/* Nav items , large display type, stacked, stagger-in. Lovart parity. */}
       <nav className="flex flex-1 flex-col justify-center px-5 sm:px-8" aria-label="mobile primary">
         <ul className="space-y-2 sm:space-y-3">
           {NAV_ITEMS.map((item, i) => (
@@ -381,10 +381,10 @@ function MobileMenuOverlay({ onClose }: { onClose: () => void }) {
         </ul>
       </nav>
 
-      {/* Footer attribution — Lovart had Theme switcher here; we have no dark
+      {/* Footer attribution , Lovart had Theme switcher here; we have no dark
           mode so this slot gets the same s0nderlabs credit shown in the page
           footer. Keeps the overlay from feeling empty at the bottom. */}
-      <div className="border-t border-[var(--color-border)] px-5 py-5 sm:px-8 sm:py-6">
+      <div className="border-t border-[var(--color-border)] p-5 sm:px-8 sm:py-6">
         <p className="font-mono text-[11px] tracking-[0.04em] text-[var(--color-ink-3)]">
           s0nderlabs · 2026
         </p>

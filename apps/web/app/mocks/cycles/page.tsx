@@ -1,5 +1,5 @@
 /**
- * Static reading mock — all 4 cycles' end-state content side by side.
+ * Static reading mock , all 4 cycles' end-state content side by side.
  * Renders the chat surface (left) and voyage panel (right) for each cycle
  * as plain readable typography, not the real animated canvases. The point
  * is to read every prompt, tool block, reply, narration, and proof line
@@ -209,8 +209,8 @@ function VoyageColumn({
                 />
               ) : null}
             </div>
-            {/* annotation — layer label + narration + optional verify link.
-                No algorithm names, no hash chunks, no debug timing — those
+            {/* annotation , layer label + narration + optional verify link.
+                No algorithm names, no hash chunks, no debug timing , those
                 are noise for non-crypto readers. The narration carries the
                 meaning; only the chain anchor stations show a link, since
                 that's where someone could actually verify on chainscan. */}
@@ -232,7 +232,7 @@ function VoyageColumn({
                 </a>
               ) : null}
             </div>
-            {/* glyph slot — just label since we're not animating */}
+            {/* glyph slot , just label since we're not animating */}
             <div className="font-mono pt-[2px] text-right text-[9px] text-[var(--color-ink-3)]">
               {glyphSymbol(r.glyph)}
             </div>

@@ -2,7 +2,7 @@
 
 import { motion } from 'framer-motion'
 import { useEffect, useState } from 'react'
-import { ENIGMA, SNAPSHOT_TAKEN_AT } from '@/lib/snapshot'
+import { ENIGMA, SNAPSHOT_TAKEN_AT_UTC } from '@/lib/snapshot'
 
 export function Mindmap() {
   return (
@@ -62,7 +62,7 @@ export function Mindmap() {
         Every line is a 0G primitive. No central host. Just protocol.
       </p>
       <p className="font-mono text-[10.5px] uppercase tracking-[0.18em] text-[var(--color-ink-3)]">
-        ↻ snapshot · {new Date(SNAPSHOT_TAKEN_AT).toUTCString().replace('GMT', 'UTC')}
+        ↻ snapshot · {SNAPSHOT_TAKEN_AT_UTC}
       </p>
     </div>
   )

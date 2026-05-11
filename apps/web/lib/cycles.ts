@@ -61,7 +61,7 @@ export type Cycle = {
 }
 
 export const CYCLES: Cycle[] = [
-  // ─── Cycle 1 — TUI · deep research on 0G chain ───────────────────────
+  // ─── Cycle 1 , TUI · deep research on 0G chain ───────────────────────
   {
     id: 'research',
     surface: 'tui',
@@ -77,15 +77,15 @@ export const CYCLES: Cycle[] = [
     ],
     reply: `0G is a modular AI-first L1 with a 4-layer stack:
 
-**0G Chain** — EVM-compatible L1. Mainnet (chain 16661, evmrpc.0g.ai), Galileo testnet (chain 16602). ~89 active validators, $24M TVL on mainnet today.
+**0G Chain** , EVM-compatible L1. Mainnet (chain 16661, evmrpc.0g.ai), Galileo testnet (chain 16602). ~89 active validators, $24M TVL on mainnet today.
 
-**0G Storage** — DA + KV + blob layers. $11/TB/month. Indexer: indexer-storage-turbo.0g.ai.
+**0G Storage** , DA + KV + blob layers. $11/TB/month. Indexer: indexer-storage-turbo.0g.ai.
 
-**0G Compute** — TeeML inference w/ attestation receipts. GLM-5 flagship (744B MoE, fp8 quant) routed natively via @0glabs/0g-serving-broker v0.7.5+.
+**0G Compute** , TeeML inference w/ attestation receipts. GLM-5 flagship (744B MoE, fp8 quant) routed natively via @0glabs/0g-serving-broker v0.7.5+.
 
-**0G Sandbox** — TDX TEE app deployment for hosting agentic harnesses. Galileo-only today (mainnet pending).
+**0G Sandbox** , TDX TEE app deployment for hosting agentic harnesses. Galileo-only today (mainnet pending).
 
-**Token**: $0G — 1B supply, native gas + delegation. Validator APR ~9.4% (28d avg).
+**Token**: $0G , 1B supply, native gas + delegation. Validator APR ~9.4% (28d avg).
 
 **Notable**: ERC-7857 iNFT spec for AI agent identity, ERC-8183 for agentic marketplaces. 0G APAC Hackathon active w/ $150K prize pool.
 
@@ -107,7 +107,7 @@ Saved to /user/learnings/0g-chain. 7 sources cited.`,
     durationMs: 12000,
   },
 
-  // ─── Cycle 2 — TG · greeting + swap ──────────────────────────────────
+  // ─── Cycle 2 , TG · greeting + swap ──────────────────────────────────
   {
     id: 'swap',
     surface: 'tg',
@@ -148,7 +148,7 @@ Saved to /user/swaps/2026-05-09 for tax records.`,
     durationMs: 10500,
   },
 
-  // ─── Cycle 3 — TUI · hire auditor ─────────────────────────────────────
+  // ─── Cycle 3 , TUI · hire auditor ─────────────────────────────────────
   {
     id: 'commerce',
     surface: 'tui',
@@ -191,7 +191,7 @@ Saved to /user/audits/2026-05-09.`,
     durationMs: 10500,
   },
 
-  // ─── Cycle 4 — TG · greeting + stake ─────────────────────────────────
+  // ─── Cycle 4 , TG · greeting + stake ─────────────────────────────────
   {
     id: 'stake',
     surface: 'tg',

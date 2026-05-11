@@ -1,5 +1,4 @@
-export const CHAINSCAN_BASE = 'https://chainscan.0g.ai'
-export const STORAGE_INDEXER = 'https://indexer-storage-turbo.0g.ai'
+const CHAINSCAN_BASE = 'https://chainscan.0g.ai'
 
 export const CONTRACTS = {
   AnimaAgentNFT: '0x9e71d79f06f956d4d2666b5c93dafab721c84721',

@@ -20,7 +20,7 @@ export function HeroCanvas() {
 
   return (
     <div className="relative">
-      {/* OUTER canvas — Aurelia painting IS the background. No blur, near-full
+      {/* OUTER canvas , Aurelia painting IS the background. No blur, near-full
           opacity, brushstrokes visible. The painting is the artwork, not a wash.
           Locked to 16:9 from sm: upward to match lovart's hero canvas proportion
           (1480 × 833 at desktop). On phones we use an explicit clamped height so
@@ -56,18 +56,18 @@ export function HeroCanvas() {
           }}
         />
 
-        {/* Painting margin — top + sides only. Lovart-coded: the inner frame
+        {/* Painting margin , top + sides only. Lovart-coded: the inner frame
             extends FLUSH to the bottom edge of the painting (no pb), so the
             painting reads as a frame on three sides with the content butting
             up against the bottom. `flex h-full flex-col` always-on so the
             chat scrollback can overflow internally on phones. */}
         <div className="relative flex h-full flex-col px-5 pt-5 sm:px-10 sm:pt-10 lg:px-12 lg:pt-12">
-          {/* INNER content frame — clean surface that holds the actual app UI.
+          {/* INNER content frame , clean surface that holds the actual app UI.
               Bottom radius is 0 so the frame seats flush against the painting's
               rounded bottom; outer's overflow-hidden masks any bleed. */}
           <div className="relative flex flex-1 overflow-hidden rounded-t-[14px] border border-b-0 border-[var(--color-border)] bg-[var(--color-paper)] shadow-[0_-24px_50px_-30px_rgba(40,28,18,0.32)]">
             <div className="grid h-full min-h-0 w-full grid-cols-12 grid-rows-1 gap-0">
-              {/* Chat surface — full width on phones (voyage hidden), 5/12 from sm: up */}
+              {/* Chat surface , full width on phones (voyage hidden), 5/12 from sm: up */}
               <div className="col-span-12 sm:col-span-5 sm:border-r sm:border-[var(--color-border)]">
                 {cycle.surface === 'tui' ? (
                   <TuiCanvas key={cycle.id} cycle={cycle} />
@@ -76,7 +76,7 @@ export function HeroCanvas() {
                 )}
               </div>
 
-              {/* Output canvas (voyage) — hidden on phones, 7/12 from sm: up. Phones
+              {/* Output canvas (voyage) , hidden on phones, 7/12 from sm: up. Phones
                   show chat-only so the page reads cleanly without a stranded
                   empty panel below. */}
               <div className="hidden sm:col-span-7 sm:block">

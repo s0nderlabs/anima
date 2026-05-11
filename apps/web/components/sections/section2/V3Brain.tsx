@@ -27,7 +27,7 @@ export function V3Brain() {
             </motion.h2>
             <p className="max-w-md text-[15px] leading-relaxed text-[var(--color-ink-2)]">
               Every turn runs inside a TeeML enclave on 0G Compute. The agent gets back not just
-              the answer but a signed receipt — proof the inference happened on the model the
+              the answer but a signed receipt , proof the inference happened on the model the
               brain claimed to use, with the prompt the brain claimed to send.
             </p>
           </div>

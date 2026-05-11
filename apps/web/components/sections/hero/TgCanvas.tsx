@@ -18,7 +18,7 @@ type Stage =
 const SF_STACK =
   '-apple-system, "SF Pro Text", "SF Pro", system-ui, "Segoe UI", Roboto, sans-serif'
 
-// Subset of `packages/plugin-telegram/src/progress.ts:29` — the tool→emoji
+// Subset of `packages/plugin-telegram/src/progress.ts:29` , the tool→emoji
 // map that real anima TG uses. Anything not listed defaults to 🔧.
 const TOOL_EMOJI: Record<string, string> = {
   'shell.run': '💻',
@@ -119,7 +119,7 @@ export function TgCanvas({ cycle }: { cycle: Cycle }) {
     setMainReplyT(fmtNow(60))
   }, [cycle.id])
 
-  // Stage gates — once a stage is reached, the prior stages stay rendered
+  // Stage gates , once a stage is reached, the prior stages stay rendered
   // (typing bubbles unmount when their stage ends; chat history accumulates).
   const showGreetingUser =
     hasGreeting &&
@@ -151,7 +151,7 @@ export function TgCanvas({ cycle }: { cycle: Cycle }) {
         typing={stage === 'greeting-think' || stage === 'main-think'}
       />
 
-      {/* Bubbles stack from bottom up. Each bubble keeps its own slot — once
+      {/* Bubbles stack from bottom up. Each bubble keeps its own slot , once
           mounted it stays. Typing bubbles unmount cleanly when their stage
           ends (no AnimatePresence that would fight with the next bubble). */}
       <div className="relative z-10 flex min-h-0 flex-1 flex-col justify-end overflow-hidden pt-2 pb-2">
@@ -622,7 +622,7 @@ function TypingBubble() {
 function Composer() {
   return (
     <div
-      className="relative z-20 flex shrink-0 items-center gap-1.5 border-t border-black/10 px-2 py-2 backdrop-blur-xl"
+      className="relative z-20 flex shrink-0 items-center gap-1.5 border-t border-black/10 p-2 backdrop-blur-xl"
       style={{
         background: 'rgba(247,247,247,.88)',
         WebkitBackdropFilter: 'blur(20px) saturate(180%)',

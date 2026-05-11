@@ -12,7 +12,7 @@ const STEPS = [
     label: '01',
     title: 'Install',
     body:
-      'anima ships as a single bun-installable package. The CLI carries the full harness — runtime, gateway, plugins, brain wrapper, all of it.',
+      'anima ships as a single bun-installable package. The CLI carries the full harness , runtime, gateway, plugins, brain wrapper, all of it.',
     code: 'bun add -g @s0nderlabs/anima',
   },
   {
@@ -33,7 +33,7 @@ const STEPS = [
     label: '04',
     title: 'Walk away',
     body:
-      'Run `anima deploy` to lift the harness off your machine onto a 0G Sandbox enclave. The agent now lives on chain + storage + compute + sandbox — six layers, none of them yours. Pair via Telegram for ambient access.',
+      'Run `anima deploy` to lift the harness off your machine onto a 0G Sandbox enclave. The agent now lives on chain + storage + compute + sandbox , six layers, none of them yours. Pair via Telegram for ambient access.',
     code: 'anima deploy --target 0g-sandbox',
   },
 ]
