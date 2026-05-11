@@ -185,12 +185,12 @@ function Voyage({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1], delay: 0.3 }}
-            className="mt-7 flex items-baseline gap-2 pl-[34px]"
+            className="mt-7 pl-[34px]"
           >
-            <span className="font-italic text-[12px] italic text-[var(--color-ink-3)]">
-              outcome
-            </span>
-            <span className="font-body text-[13px] text-[var(--color-ink)]">{outcome}</span>
+            <div className="mb-3 h-px w-10 bg-[var(--color-ink-3)] opacity-50" />
+            <div className="font-body text-[14.5px] font-medium leading-snug text-[var(--color-ink)]">
+              {outcome}
+            </div>
           </motion.div>
         ) : null}
       </AnimatePresence>
