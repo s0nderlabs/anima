@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto'
+import { gunzipSync, gzipSync } from 'node:zlib'
 import type { Hex } from 'viem'
 import { hexToBytes } from 'viem'
 
@@ -18,10 +19,16 @@ import { hexToBytes } from 'viem'
  * security envelope is the same as the keystore's.
  *
  * Format: v(1) || iv(12) || tag(16) || ciphertext  (raw bytes, no JSON wrap).
- *   The leading version byte lets future formats coexist (v=2 for ECIES-to-
- *   operator-pubkey on /user/* if we ever split agent/user encryption keys).
+ *   v=1: plaintext encrypted directly (legacy).
+ *   v=2: plaintext gzip-compressed first then encrypted. Decryption gunzips
+ *        after AES-GCM. Used for the activity-log slot where JSON content
+ *        compresses 5-10x and the 0G Storage upload is the bottleneck.
+ *
+ * Both versions are backwards-compatible: decryptMemoryBytes dispatches on
+ * the leading version byte and reads either layout.
  */
 export const MEMORY_BLOB_VERSION = 1 as const
+export const MEMORY_BLOB_VERSION_GZIP = 2 as const
 
 const HKDF_INFO = Buffer.from('anima-memory-aead-v1', 'utf8')
 const KEY_LEN = 32
@@ -33,13 +40,29 @@ export function deriveMemoryKey(agentPrivkey: Hex): Buffer {
   return Buffer.from(hkdfSync('sha256', ikm, Buffer.alloc(0), HKDF_INFO, KEY_LEN))
 }
 
-export function encryptMemoryBytes(plaintext: Uint8Array, key: Buffer): Uint8Array {
+export interface EncryptOpts {
+  /**
+   * Gzip the plaintext before encrypting. Reduces blob size 5-10x on JSON-
+   * heavy content like the activity log. Costs a few ms of CPU per upload
+   * — fine because the network upload it saves is much slower. Default
+   * false to preserve byte-for-byte compatibility with v=1 callers.
+   */
+  compress?: boolean
+}
+
+export function encryptMemoryBytes(
+  plaintext: Uint8Array,
+  key: Buffer,
+  opts: EncryptOpts = {},
+): Uint8Array {
   if (key.length !== KEY_LEN) throw new Error(`memory key must be ${KEY_LEN} bytes`)
   const iv = randomBytes(IV_LEN)
   const cipher = createCipheriv('aes-256-gcm', key, iv)
-  const ct = Buffer.concat([cipher.update(plaintext), cipher.final()])
+  const payload = opts.compress ? gzipSync(plaintext) : plaintext
+  const ct = Buffer.concat([cipher.update(payload), cipher.final()])
   const tag = cipher.getAuthTag()
-  return new Uint8Array(Buffer.concat([Buffer.from([MEMORY_BLOB_VERSION]), iv, tag, ct]))
+  const version = opts.compress ? MEMORY_BLOB_VERSION_GZIP : MEMORY_BLOB_VERSION
+  return new Uint8Array(Buffer.concat([Buffer.from([version]), iv, tag, ct]))
 }
 
 export function decryptMemoryBytes(blob: Uint8Array, key: Buffer): Uint8Array {
@@ -49,7 +72,7 @@ export function decryptMemoryBytes(blob: Uint8Array, key: Buffer): Uint8Array {
     throw new Error(`memory blob too short: ${buf.length} bytes`)
   }
   const version = buf[0]
-  if (version !== MEMORY_BLOB_VERSION) {
+  if (version !== MEMORY_BLOB_VERSION && version !== MEMORY_BLOB_VERSION_GZIP) {
     throw new Error(`unsupported memory blob version: ${version}`)
   }
   const iv = buf.subarray(1, 1 + IV_LEN)
@@ -57,5 +80,9 @@ export function decryptMemoryBytes(blob: Uint8Array, key: Buffer): Uint8Array {
   const ct = buf.subarray(1 + IV_LEN + TAG_LEN)
   const decipher = createDecipheriv('aes-256-gcm', key, iv)
   decipher.setAuthTag(tag)
-  return new Uint8Array(Buffer.concat([decipher.update(ct), decipher.final()]))
+  const decrypted = Buffer.concat([decipher.update(ct), decipher.final()])
+  if (version === MEMORY_BLOB_VERSION_GZIP) {
+    return new Uint8Array(gunzipSync(decrypted))
+  }
+  return new Uint8Array(decrypted)
 }

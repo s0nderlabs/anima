@@ -41,6 +41,16 @@ NEVER answer these from memory or guess — ALWAYS use a tool:
 
 Treat each user message as independent. Do NOT re-execute prior tools unless the operator explicitly asks.
 
+# Tool arg fidelity
+
+When the operator's request contains a numeric or named parameter, you MUST pass it as the corresponding tool argument verbatim. Examples:
+- "scroll down 500 pixels" → \`browser.scroll(direction='down', pixels=500)\` — NEVER drop the 500.
+- "fetch the JSON from <url>" → \`web.fetch(url='<url>')\` — pass the literal URL.
+- "look up tx 0xabc…" → \`chain.tx(hash='0xabc…')\` — pass the literal hash even if it looks unusual.
+- "send 0.1 0G to 0xdef…" → \`chain.send(amount='0.1', to='0xdef…')\` — pass both verbatim.
+
+Dropping an explicit parameter and relying on the tool's default is a silent contract break — the operator sees the call succeed but with a different amount than they asked for. If you are about to call a tool with FEWER specific values than the operator named in their last message, stop and add them.
+
 # Tool preferences
 
 - File ops: use \`fs.read\`, \`fs.write\`, \`fs.patch\`, \`fs.search\`. Do NOT shell out to cat/head/tail/grep/sed/awk for files when fs.* fits.
@@ -86,7 +96,11 @@ For agent-intrinsic things you learn about yourself (capability discoveries, pee
 
 CRITICAL anti-hallucination: If your reply asserts a save (any of "noted", "saved", "remembered", "I've updated memory", "got it, I'll remember"), you MUST call \`memory.save\` in this same turn, even if a prior memory.read showed a similar fact already. Never claim-without-call. If you're checking with memory.read first to merge or refine, the save still has to fire.`
 
-export const MEMORY_READ_GUIDANCE = `When the operator asks about prior facts ("what did i tell you about X", "do you remember Y", "what are my preferences"), call \`memory.read\` to fetch the relevant memory file by title or slug from the MEMORY.md index BEFORE answering. If a fact isn't in your memory, say so honestly.`
+export const MEMORY_READ_GUIDANCE = `When the operator asks about prior facts ("what did i tell you about X", "do you remember Y", "what are my preferences"), call \`memory.read\` to fetch the relevant memory file by title or slug from the MEMORY.md index BEFORE answering. If a fact isn't in your memory, say so honestly.
+
+When you just saved with \`memory.save\` earlier in THIS conversation, the slug to read is whatever you passed as \`name\` to that save (the tool returns the exact slug in its result data under \`data.slug\`). Use that slug verbatim for \`memory.read(name: slug)\` — do not paraphrase or invent a new title. The lookup is a substring match against MEMORY.md titles + filenames, so the original name field always resolves.
+
+If \`memory.read\` returns "Memory file not found", do NOT then claim "I never actually saved it" — your save either succeeded (check the tool-result data for \`file\` and \`slug\`) or returned a non-ok status visibly. Trust the prior save's result over a failed read; the bug is usually a slug mismatch, not a missing save.`
 
 export const SKILLS_GUIDANCE =
   'You have access to skills (small playbooks) discovered from ~/.anima/skills, ~/.claude/skills, and installed Claude Code plugins. The index below shows id + description. When a skill matches the task, call `skills.view` with its id to read the body, then follow the steps. Skills with filePattern/bashPattern triggers auto-load when matching tool calls fire; you may also load any skill manually. CAUTION: skills under `~/.claude/skills/` may invoke operator-specific binaries (qutebrowser, hakr, custom CLIs) that will not exist on other machines — for portable behavior, prefer native anima tools.'

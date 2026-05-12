@@ -1,3 +1,5 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import { type Address, type Hex, keccak256 } from 'viem'
 import type { AnimaNetwork } from '../config'
 import { AnimaAgentNFTClient, AnimaAgentNFTReader } from '../identity/contract'
@@ -31,6 +33,31 @@ export interface MemorySyncManagerOpts {
   agentAddress: Address
   contractAddress: Address
   tokenId: bigint
+  /**
+   * Override the activity-log path. The gateway daemon writes its live
+   * activity log under `${TMPDIR}/anima-gateway/<id>/activity.jsonl`, not
+   * the legacy `~/.anima/agents/<id>/activity.jsonl`. Without this override
+   * /sync would upload the stale legacy file (often megabytes of dead data)
+   * and ignore the fresh runtime log. Pass whenever the daemon's agentDir
+   * differs from `agentPaths.agent(id).dir`.
+   */
+  activityLogPath?: string
+  /**
+   * Override the memory directory base. Same rationale as `activityLogPath`:
+   * defaults to `~/.anima/agents/<id>/memory/`, but the daemon writes to
+   * `${TMPDIR}/anima-gateway/<id>/memory/`. Pass the daemon's memoryDir
+   * here so /sync uploads the live MEMORY.md + agent/identity.md +
+   * agent/persona.md, not the legacy on-disk copies.
+   */
+  memoryDir?: string
+  /**
+   * Path to the sync-state sidecar file. Stores `{slot: plaintextHash}` map
+   * of the LAST SUCCESSFUL upload per slot. Read on init() to seed the
+   * diff cache so a daemon restart doesn't re-upload everything on the
+   * next /sync. Default `${agentDir}/sync-state.json` derived from the
+   * activityLogPath's parent dir (or the legacy agentPaths fallback).
+   */
+  syncStatePath?: string
 }
 
 export interface FlushResult {
@@ -48,6 +75,7 @@ export class MemorySyncManager {
   private readonly memoryKey: Buffer
   private readonly fileTargets: SyncTarget[]
   private readonly activityLogPath: string
+  private readonly syncStatePath: string
   private lastPlaintextHash: Map<IntelligentDataSlot, Hex> = new Map()
   private inFlight: Promise<FlushResult> | null = null
 
@@ -59,35 +87,90 @@ export class MemorySyncManager {
       privkeyHex: opts.agentPrivkey,
     })
     this.memoryKey = deriveMemoryKey(opts.agentPrivkey)
-    this.fileTargets = defaultMemorySyncTargets(opts.agentId)
-    this.activityLogPath = agentPaths.agent(opts.agentId).activityLog
+    this.fileTargets = defaultMemorySyncTargets(opts.agentId, opts.memoryDir)
+    this.activityLogPath = opts.activityLogPath ?? agentPaths.agent(opts.agentId).activityLog
+    // Sidecar lives alongside activity.jsonl by default so it tracks the
+    // same agent state tree (TMPDIR for the gateway daemon, ~/.anima for
+    // embedded callers). Falls back to the legacy agent dir if neither
+    // override is supplied.
+    this.syncStatePath =
+      opts.syncStatePath ??
+      (opts.activityLogPath
+        ? `${dirname(opts.activityLogPath)}/sync-state.json`
+        : `${agentPaths.agent(opts.agentId).dir}/sync-state.json`)
   }
 
   /**
-   * Optional cold start: read current on-chain slot hashes so the first
-   * `flushTurn()` doesn't re-anchor unchanged slots. Skipping `init()` is
-   * safe — first flush will just re-upload and produce one redundant tx,
-   * then steady-state diffing kicks in. Stored hashes are CIPHERTEXT root
-   * hashes (what's on chain), not plaintext hashes — so they only help
-   * shortcut the activity-log path on first call. Memory-file slots always
-   * recompute via plaintext-hash diff, which is the load-bearing optimization.
+   * Cold start: hydrate the plaintext-hash diff cache from the on-disk
+   * sidecar (correct, populated by each successful upload). Fall back to
+   * the chain's ciphertext root hashes if the sidecar is missing, but
+   * those are only useful for the activity-log slot since the file slots
+   * always compare plaintext-vs-stored — first flush after a sidecar-less
+   * start will re-upload memory files once, then steady-state diffing
+   * keeps things idle.
+   *
+   * Without the sidecar, every restart caused /sync to upload every slot
+   * again (potentially many MB), which on Galileo-sandbox networks could
+   * exceed the 15-minute client timeout. The sidecar makes /sync no-op
+   * fast when nothing has actually changed.
    */
   async init(): Promise<void> {
-    const reader = new AnimaAgentNFTReader({
-      network: this.opts.network,
-      contractAddress: this.opts.contractAddress,
-    })
-    const data = await reader.getIntelligentData(this.opts.tokenId)
-    const known = new Set<string>(INTELLIGENT_DATA_SLOTS)
-    for (const entry of data) {
-      // Defensive: chain returns whatever was written; ignore unknown slot
-      // names so a future contract emitting extra entries can't pollute the
-      // diff cache.
-      if (!known.has(entry.dataDescription)) continue
-      this.lastPlaintextHash.set(
-        entry.dataDescription as IntelligentDataSlot,
-        entry.dataHash as Hex,
-      )
+    // 1. Sidecar (preferred — plaintext hashes match what doFlush compares).
+    try {
+      const text = await readFile(this.syncStatePath, 'utf8')
+      const parsed = JSON.parse(text) as Record<string, Hex>
+      const known = new Set<string>(INTELLIGENT_DATA_SLOTS)
+      for (const [slot, hash] of Object.entries(parsed)) {
+        if (!known.has(slot)) continue
+        if (typeof hash !== 'string' || !hash.startsWith('0x')) continue
+        this.lastPlaintextHash.set(slot as IntelligentDataSlot, hash as Hex)
+      }
+    } catch {
+      // Missing or unreadable sidecar — fall through to chain hashes below.
+      // First flush will rebuild + persist a sidecar.
+    }
+
+    // 2. Chain hashes (only useful when sidecar absent, these are CIPHERTEXT
+    // root hashes which don't match plaintext-hash comparisons in doFlush,
+    // but they do help the activity-log path skip re-upload when the local
+    // file's plaintext hash happens to match what the chain last saw, rare,
+    // but the existing on-chain lookup costs us nothing).
+    // Skip the RPC round-trip when sidecar already populated every known slot.
+    if (this.lastPlaintextHash.size >= INTELLIGENT_DATA_SLOTS.length) return
+    try {
+      const reader = new AnimaAgentNFTReader({
+        network: this.opts.network,
+        contractAddress: this.opts.contractAddress,
+      })
+      const data = await reader.getIntelligentData(this.opts.tokenId)
+      const known = new Set<string>(INTELLIGENT_DATA_SLOTS)
+      for (const entry of data) {
+        if (!known.has(entry.dataDescription)) continue
+        if (this.lastPlaintextHash.has(entry.dataDescription as IntelligentDataSlot)) continue
+        this.lastPlaintextHash.set(
+          entry.dataDescription as IntelligentDataSlot,
+          entry.dataHash as Hex,
+        )
+      }
+    } catch {
+      // Chain read failed (RPC blip, fresh agent without on-chain history),
+      // safe to proceed; first flush handles cold start.
+    }
+  }
+
+  /** Persist the current plaintext-hash cache to the sidecar. Best-effort. */
+  private async writeSidecar(): Promise<void> {
+    try {
+      const out: Record<string, string> = {}
+      for (const [slot, hash] of this.lastPlaintextHash.entries()) {
+        out[slot] = hash
+      }
+      await mkdir(dirname(this.syncStatePath), { recursive: true })
+      await writeFile(this.syncStatePath, JSON.stringify(out, null, 2))
+    } catch {
+      // Non-fatal: a missed sidecar write just means the next /sync may
+      // re-upload unchanged slots once. Surface to chain anchor + retry
+      // next flush.
     }
   }
 
@@ -108,9 +191,17 @@ export class MemorySyncManager {
     return next
   }
 
-  /** Force flush regardless of diff state. Used by `anima sync` and pre-transfer. */
+  /**
+   * Diff-driven flush triggered by `/sync` and pre-transfer. Old versions
+   * called `clear()` here, which forced re-upload of EVERY slot even when
+   * nothing changed (slow + wasteful + caused the Galileo-sandbox
+   * 15-minute timeout because activity-log + memory files all re-encrypted
+   * + uploaded together). The sidecar persistence in init() now keeps the
+   * cache valid across daemon restarts, so the regular diff in doFlush()
+   * is the right ceiling: only uploads slots whose plaintext hash differs
+   * from the last successful anchor.
+   */
   async flushAll(): Promise<FlushResult> {
-    this.lastPlaintextHash.clear()
     return this.flushTurn()
   }
 
@@ -157,6 +248,12 @@ export class MemorySyncManager {
     let txHash: Hex | null = null
     if (updates.length > 0) {
       txHash = await this.nft.updateSlots(this.opts.tokenId, updates)
+      // Persist sidecar AFTER the chain anchor lands — guarantees the
+      // sidecar only reflects state that's actually on chain. If the
+      // tx reverts or RPC drops, sidecar stays at the prior state and
+      // the next flush retries the same upload (idempotent in 0G
+      // Storage: same plaintext → same ciphertext → same root hash).
+      await this.writeSidecar()
     }
     return { changedSlots, txHash, uploads }
   }

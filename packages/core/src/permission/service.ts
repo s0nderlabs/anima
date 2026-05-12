@@ -85,12 +85,16 @@ export class PermissionService {
   }> {
     if (this.mode === 'off') return { allowed: true, via: 'yolo' }
 
-    const sigKey = this.signature(req)
+    const dangerous = req.command ? detectDangerousCommand(req.command) : { match: false as const }
+
+    // Signature for session-allow tracking. When the request matched a
+    // dangerous pattern, key on the PATTERN (e.g. "delete in root path") so
+    // the user's "allow session" covers every match of the same pattern for
+    // the rest of the session, not just the literal command.
+    const sigKey = dangerous.match ? this.signature(req, dangerous.key) : this.signature(req)
     if (this.sessionAllowed.has(sigKey)) {
       return { allowed: true, via: 'session-allow' }
     }
-
-    const dangerous = req.command ? detectDangerousCommand(req.command) : { match: false as const }
 
     // Value-moving on-chain tools: ALWAYS prompt in `prompt` mode regardless
     // of dangerous-pattern match (which is regex-based and doesn't fire here).
@@ -152,7 +156,12 @@ export class PermissionService {
     return { allowed: false, reason: 'rejected in approval modal', via: 'deny' }
   }
 
-  private signature(req: PermissionRequest): string {
+  private signature(req: PermissionRequest, dangerousKey?: string): string {
+    // For dangerous-pattern matches, key on the pattern type ("delete in
+    // root path", "recursive delete", ...) so allow-session generalises
+    // across every command that triggers the same pattern. Without this,
+    // each unique rm path was a fresh decision.
+    if (dangerousKey) return `${req.kind}|dangerous:${dangerousKey}`
     return [req.kind, req.command ?? '', req.path ?? '', req.recipient ?? '', req.token ?? ''].join(
       '|',
     )

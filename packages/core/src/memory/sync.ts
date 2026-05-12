@@ -20,8 +20,16 @@ export interface SyncTarget {
  * the agent's public bio (post-MVP). User-partition files (`/user/*`) live
  * on 0G Storage but are NEVER anchored on chain.
  */
-export function defaultMemorySyncTargets(agentId: string): SyncTarget[] {
-  const memDir = agentPaths.agent(agentId).memoryDir
+export function defaultMemorySyncTargets(
+  agentId: string,
+  memoryDirOverride?: string,
+): SyncTarget[] {
+  // Callers in the gateway daemon write memory under a tmpdir-based agent
+  // state path (`${TMPDIR}/anima-gateway/<id>/memory/`), not the legacy
+  // `~/.anima/agents/<id>/memory/`. When the daemon's agentDir differs,
+  // pass `memoryDirOverride` so /sync reads + uploads the live memory tree
+  // instead of stale on-disk leftovers from a prior embedded run.
+  const memDir = memoryDirOverride ?? agentPaths.agent(agentId).memoryDir
   return [
     { slot: 'memory-index', path: join(memDir, 'MEMORY.md') },
     { slot: 'identity', path: join(memDir, 'agent', 'identity.md') },

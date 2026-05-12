@@ -122,8 +122,14 @@ export class TelegramListener {
   private async handleCallbackQuery(ctx: Context): Promise<void> {
     const q = ctx.callbackQuery
     if (!q) return
+    console.log(
+      `[telegram] callback_query received from user=${q.from.id} data=${(q.data ?? '').slice(0, 80)}`,
+    )
     const parsed = parseCallbackData(q.data)
     if (!parsed) {
+      console.log(
+        `[telegram] callback_query dropped: malformed data=${(q.data ?? '').slice(0, 80)}`,
+      )
       try {
         await ctx.answerCallbackQuery({ text: 'malformed approval callback' })
       } catch {
@@ -132,6 +138,9 @@ export class TelegramListener {
       return
     }
     if (this.opts.allowedUserIds.length > 0 && !this.opts.allowedUserIds.includes(q.from.id)) {
+      console.log(
+        `[telegram] callback_query dropped: unauthorized user=${q.from.id} (allowlist=${this.opts.allowedUserIds.join(',')})`,
+      )
       try {
         await ctx.answerCallbackQuery({ text: '⛔ You are not authorized to approve commands.' })
       } catch {
@@ -141,6 +150,9 @@ export class TelegramListener {
     }
     const resolver = this.approvalResolver
     if (!resolver) {
+      console.log(
+        `[telegram] callback_query dropped: no resolver pending for approval=${parsed.approvalId} choice=${parsed.choice}`,
+      )
       try {
         await ctx.answerCallbackQuery({ text: 'no approval pending' })
       } catch {
@@ -148,6 +160,9 @@ export class TelegramListener {
       }
       return
     }
+    console.log(
+      `[telegram] callback_query resolved: approval=${parsed.approvalId} choice=${parsed.choice} from=${q.from.id}`,
+    )
     resolver(parsed.approvalId, parsed.choice, q.from.id)
     try {
       await ctx.answerCallbackQuery({ text: `✓ ${parsed.choice}` })

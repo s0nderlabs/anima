@@ -106,14 +106,20 @@ function findAgentBrowser(override?: string, cwdOverride?: string): string | nul
 
   const cwd = cwdOverride ?? process.cwd()
 
-  const localBin = join(cwd, 'node_modules', '.bin', 'agent-browser')
-  if (statSync(localBin, { throwIfNoEntry: false })?.isFile()) return localBin
-
-  // Fallback: package's own bin/agent-browser.js. Survives the bootstrap race
-  // where `bun install` finishes extracting the package but hasn't yet linked
-  // the .bin/ symlink.
-  const localPkg = join(cwd, 'node_modules', 'agent-browser', 'bin', 'agent-browser.js')
-  if (statSync(localPkg, { throwIfNoEntry: false })?.isFile()) return localPkg
+  // Search a small ladder of candidate roots: the operator-supplied cwd
+  // first, then the daemon's bun cwd, then a probe one level deeper
+  // ("./anima") which catches the sandbox-harness case where the daemon
+  // boots from $HOME but the workspace tree (with node_modules) lives in
+  // a sibling dir. Without that probe enigma's `findAgentBrowser` would
+  // miss `/home/daytona/anima/node_modules/.bin/agent-browser` and the
+  // brain quietly falls back to web.fetch.
+  const candidates = Array.from(new Set([cwd, process.cwd(), join(cwd, 'anima')]))
+  for (const root of candidates) {
+    const localBin = join(root, 'node_modules', '.bin', 'agent-browser')
+    if (statSync(localBin, { throwIfNoEntry: false })?.isFile()) return localBin
+    const localPkg = join(root, 'node_modules', 'agent-browser', 'bin', 'agent-browser.js')
+    if (statSync(localPkg, { throwIfNoEntry: false })?.isFile()) return localPkg
+  }
 
   const pathEnv = process.env.PATH ?? ''
   const pathDirs = pathEnv.split(delimiter).filter(Boolean)
@@ -132,8 +138,27 @@ function findAgentBrowser(override?: string, cwdOverride?: string): string | nul
  * registration so dev installs that skip `bun install` don't crash on first
  * browser.* call.
  */
-export function isBrowserAvailable(): boolean {
-  return findAgentBrowser() !== null
+/**
+ * Detect whether the agent-browser binary is reachable from disk. Accepts
+ * an optional `cwdOverride` because the daemon's `process.cwd()` is not
+ * always the workspace root — in the enigma sandbox the harness boots
+ * from `/home/daytona`, but `node_modules/.bin/agent-browser` lives one
+ * level deeper at `/home/daytona/anima/node_modules/.bin/`. The plugin
+ * loader passes `ctx.workspaceRoot` here so registration uses the right
+ * tree on both surfaces.
+ */
+export function isBrowserAvailable(cwdOverride?: string): boolean {
+  return findAgentBrowser(undefined, cwdOverride) !== null
+}
+
+/**
+ * Same as `isBrowserAvailable` but returns the resolved path (or null).
+ * Plugin loaders use this once at registration time and pass the result
+ * as `binPath` to each factory so per-call spawns don't re-search PATH —
+ * a re-search would fail again when daemon cwd ≠ workspace root.
+ */
+export function findAgentBrowserOrNull(cwdOverride?: string): string | null {
+  return findAgentBrowser(undefined, cwdOverride)
 }
 
 function socketSafeTmpdir(): string {
@@ -420,14 +445,16 @@ const ClickSchema = z.object({
   selector: z
     .string()
     .min(1)
-    .describe("CSS selector OR snapshot ref (e.g. '@e5', 'button.primary')."),
+    .describe(
+      "Snapshot ref (e.g. '@e5') from the most recent browser.snapshot — preferred — OR a plain CSS selector ('button.primary', '#submit'). NOT a Playwright-style pseudo-class: ':has-text()', ':has()', ':contains()' are NOT supported and will fail.",
+    ),
 })
 
 export function makeBrowserClick(deps: BrowserDeps): ToolDef<z.infer<typeof ClickSchema>> {
   return {
     name: 'browser.click',
     description:
-      'Click an element by selector or snapshot ref. Auto-waits 1200ms post-click so any triggered navigation/state change settles before the next snapshot.',
+      "Click an element. Arg name is `selector` (snapshot @ref like '@e5' or plain CSS like 'button.primary'). Auto-waits 1200ms post-click so any triggered navigation/state change settles before the next snapshot. To click a link by visible text, take a fresh `browser.snapshot` first and pass the @eN ref of the matching node — Playwright pseudo-classes (:has-text, :contains) are not supported.",
     shouldDefer: true,
     searchHint: 'browser click element selector ref',
     schema: ClickSchema,
@@ -454,23 +481,42 @@ export function makeBrowserType(deps: BrowserDeps): ToolDef<z.infer<typeof TypeS
 }
 
 const ScrollSchema = z.object({
-  direction: z.enum(['up', 'down', 'left', 'right']),
+  direction: z
+    .enum(['up', 'down', 'left', 'right'])
+    .optional()
+    .describe(
+      "Scroll direction. Defaults to 'down' when omitted. Pass 'up'/'left'/'right' when needed.",
+    ),
   pixels: coerceInt
     .refine(n => n > 0, 'pixels must be > 0')
     .optional()
-    .describe('Default 800.'),
+    .describe('Optional scroll distance in pixels. Default 800.'),
+  // `amount` is a tolerated alias for `pixels` — observed brain calls
+  // (qwen3.6-plus) routinely emit `amount=N` instead of `pixels=N` because
+  // the operator's natural-language prompt says "scroll N pixels" and the
+  // brain projects that onto a generic `amount` slot. Without this alias
+  // the schema silently strips the unknown key and the tool defaults to
+  // 800 — the call succeeds but with the wrong distance, which reads as
+  // the tool ignoring the operator's intent. Accept both spellings; merge
+  // in the handler.
+  amount: coerceInt
+    .refine(n => n > 0, 'amount must be > 0')
+    .optional()
+    .describe('Alias for `pixels`. Prefer `pixels`; `amount` accepted for compatibility.'),
 })
 
 export function makeBrowserScroll(deps: BrowserDeps): ToolDef<z.infer<typeof ScrollSchema>> {
   return {
     name: 'browser.scroll',
-    description: 'Scroll the page in a direction by N pixels.',
+    description:
+      "Scroll the page. Both args are optional: `direction` defaults to 'down' (override with 'up'/'left'/'right'); `pixels` defaults to 800. For 'scroll down N pixels' pass pixels=N. The schema also accepts `amount` as an alias for `pixels` — use either; pixels is preferred.",
     shouldDefer: true,
     searchHint: 'browser scroll page up down',
     schema: ScrollSchema,
     handler: async args => {
-      const args2: string[] = [args.direction]
-      if (args.pixels) args2.push(String(args.pixels))
+      const args2: string[] = [args.direction ?? 'down']
+      const px = args.pixels ?? args.amount
+      if (px) args2.push(String(px))
       return runAgentBrowser('scroll', args2, deps)
     },
   }

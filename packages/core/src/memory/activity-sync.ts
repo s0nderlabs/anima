@@ -41,7 +41,11 @@ export async function syncActivityLog(opts: SyncActivityOpts): Promise<SyncActiv
   if (opts.lastPlaintextHash && plaintextHash === opts.lastPlaintextHash) {
     return { rootHash: null, plaintextHash, uploaded: false }
   }
-  const ciphertext = encryptMemoryBytes(bytes, opts.memoryKey)
+  // gzip + encrypt: activity.jsonl is structured JSON with ~5-10x compression
+  // ratio. The 0G Storage upload was the /sync timeout root cause on the
+  // Galileo sandbox path; shrinking the blob 5-10x makes it fit comfortably
+  // within the 15-min client deadline even with accumulated multi-MB logs.
+  const ciphertext = encryptMemoryBytes(bytes, opts.memoryKey, { compress: true })
   const rootHash = (await opts.storage.putBlob(ciphertext)) as Hex
   if (!rootHash.startsWith('0x') || rootHash.length !== 66) {
     throw new Error(

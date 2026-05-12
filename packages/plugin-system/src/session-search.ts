@@ -17,7 +17,12 @@ interface SessionSearchDeps {
 }
 
 const SearchSchema = z.object({
-  query: z.string().min(1).describe('Substring or regex to match against any JSON line.'),
+  query: z
+    .string()
+    .min(1)
+    .describe(
+      "Plain substring to match against any JSON line. Default mode is SUBSTRING — do NOT escape regex metacharacters (e.g. for tool name 'shell.run' pass 'shell.run' as-is, NOT 'shell\\\\.run'). Set `regex: true` only when you genuinely need a pattern.",
+    ),
   kind: z
     .enum(['wake', 'tool-call', 'tool-result', 'brain-response', 'error', 'all'])
     .optional()
@@ -29,14 +34,18 @@ const SearchSchema = z.object({
     .max(200)
     .optional()
     .describe('Cap matches returned. Default 25.'),
-  regex: coerceBool.optional().describe('When true, query is interpreted as a regex.'),
+  regex: coerceBool
+    .optional()
+    .describe(
+      "Opt-in regex mode. Default false (substring). Only set true when the query uses regex constructs ('.+', '|', anchors); plain dotted tool names match fine in substring mode.",
+    ),
 })
 
 export function makeSessionSearch(deps: SessionSearchDeps): ToolDef<z.infer<typeof SearchSchema>> {
   return {
     name: 'session.search',
     description:
-      "Search the agent's activity log for past wake events, tool calls/results, and brain responses. Useful for 'what did I do last hour?' or 'when did I call <tool>?'. Returns timestamped JSON entries.",
+      "Search the agent's activity log for past wake events, tool calls/results, and brain responses. Useful for 'what did I do last hour?' or 'when did I call <tool>?'. Default is plain substring match — pass the tool name verbatim ('shell.run' not 'shell\\\\.run'). Returns timestamped JSON entries.",
     searchHint: 'session search activity log history past',
     schema: SearchSchema,
     handler: async args => {

@@ -191,7 +191,16 @@ export class SandboxClient {
   }
 
   async sync(): Promise<{ tx?: string; slots: string[] }> {
-    const r = await this.#fetch(`${this.endpoint}/sync`, { method: 'POST' })
+    // /sync uploads the full activity log + memory tree to 0G Storage and
+    // anchors via one updateSlots tx. For large activity logs (multi-MB)
+    // the upload can take minutes per segment. Bun's default fetch timeout
+    // is 5 min, which was tripping on real-size logs. Bump to 15 min — the
+    // gateway side never blocks indefinitely (0G SDK retries with backoff),
+    // so a long client wait is the right ceiling.
+    const r = await this.#fetch(`${this.endpoint}/sync`, {
+      method: 'POST',
+      signal: AbortSignal.timeout(15 * 60 * 1000),
+    })
     if (!r.ok) throw new Error(`sync failed (${r.status})`)
     return (await r.json()) as { tx?: string; slots: string[] }
   }

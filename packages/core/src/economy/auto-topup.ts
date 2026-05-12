@@ -60,7 +60,14 @@ export interface AutoTopupOpts {
 const DEFAULT_OPTS = {
   enabled: true,
   pollIntervalMs: 5 * 60 * 1000,
-  compute: { lowThreshold: 0.5, topUpAmount: 1.0, maxPerDay: 5 },
+  // lowThreshold raised from 0.5 → 1.7: per-inference cost on qwen3.6-plus
+  // locks ~1.6 0G in the provider sub-account before the call runs. 0.5
+  // left zero headroom and the brain failed mid-turn with "sub-account
+  // short" before auto-topup ever fired. 1.7 keeps a thin margin above the
+  // typical lock without firing aggressively when the envelope is in the
+  // 1.5-1.7 mid-conversation range. The cool-down logic in `tick()` also
+  // suppresses repeat failed-wallet emissions so a thin EOA doesn't spam.
+  compute: { lowThreshold: 1.7, topUpAmount: 1.0, maxPerDay: 5 },
   wallet: { notifyThreshold: 2.0, minRetainedAfterTopup: 0.1 },
 } as const
 
@@ -194,6 +201,16 @@ export class AutoTopupManager {
   #brainInitFailedAt: number | null = null
   /** Min ms between brain.init() retries after a failure. Default 1 hour. */
   #brainInitRetryCooldownMs = 60 * 60 * 1000
+  /**
+   * Suppress repeat insufficient-wallet failures: when the agent EOA can't
+   * cover a 1 0G topup, we'd otherwise emit one topup-failed event per poll
+   * (every 60s on specter). Operators see a wall of identical sys rows in
+   * the TUI. Track the last failure ts + back off subsequent retries for
+   * 10 minutes so the chat stays readable and on-chain transfer attempts
+   * don't pile up.
+   */
+  #insufficientWalletFailedAt: number | null = null
+  #insufficientWalletCooldownMs = 10 * 60 * 1000
 
   constructor(opts: AutoTopupOpts, deps: AutoTopupDeps) {
     if (!opts.compute?.provider) throw new Error('compute.provider is required')
@@ -344,10 +361,19 @@ export class AutoTopupManager {
     const topUpWei = ogToWei(this.#opts.topUpAmount)
     const minRetainedWei = ogToWei(this.#opts.minRetainedAfterTopup)
     if (walletWei < topUpWei + minRetainedWei) {
+      // Suppress repeat emissions during the cool-down window. Without
+      // this, the AutoTopupManager spams one topup-failed sys row per
+      // poll (60s on specter) for as long as the operator keeps the
+      // wallet thin — visually drowns the TUI.
+      const recentlyFailed =
+        this.#insufficientWalletFailedAt !== null &&
+        ts - this.#insufficientWalletFailedAt < this.#insufficientWalletCooldownMs
+      if (recentlyFailed) return
+      this.#insufficientWalletFailedAt = ts
       this.#deps.onEvent({
         kind: 'topup-failed',
         ts,
-        message: `compute envelope low (${weiToOg(availableWei).toFixed(3)} 0G) but agent wallet too thin (${weiToOg(walletWei).toFixed(3)} 0G)`,
+        message: `compute envelope low (${weiToOg(availableWei).toFixed(3)} 0G) but agent wallet too thin (${weiToOg(walletWei).toFixed(3)} 0G); will retry in ${Math.round(this.#insufficientWalletCooldownMs / 60_000)} min`,
         data: {
           provider: this.#opts.provider,
           envelope: 'compute',
@@ -355,10 +381,14 @@ export class AutoTopupManager {
           walletBalance: weiToOg(walletWei),
           required: this.#opts.topUpAmount + this.#opts.minRetainedAfterTopup,
           reason: 'insufficient-wallet',
+          cooldownMs: this.#insufficientWalletCooldownMs,
         },
       })
       return
     }
+    // Wallet check passed — clear cool-down so a future thin-wallet event
+    // emits immediately rather than waiting another 10 min.
+    this.#insufficientWalletFailedAt = null
 
     let depositTx: Hex | undefined
     let transferTx: Hex | undefined

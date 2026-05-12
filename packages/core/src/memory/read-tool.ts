@@ -56,14 +56,73 @@ export function makeMemoryReadTool({ agentId }: MakeMemoryReadToolArgs): ToolDef
         if (result) return success(query, result)
       }
 
-      // 2. MEMORY.md lookup — match by title or filename substring
+      // 2. MEMORY.md lookup — match by title or filename. Three passes:
+      //    (a) exact match on title or file
+      //    (b) substring of title or file contains the full query
+      //    (c) token-overlap score (each non-stopword in query that appears
+      //        in the entry's title+file+hook counts; ties broken by recency)
+      // Pass (c) is the one that catches "tool test run" → "Tool test session"
+      // — the brain often paraphrases titles when recalling, and substring
+      // match alone fails when the operator's word order or extra tokens
+      // differ from the canonical name.
       try {
         const idx = await readIndexFile(memoryIndex)
         const q = query.toLowerCase()
         const entries = Array.from(idx.entries.values())
-        const match =
-          entries.find(e => e.title.toLowerCase() === q || e.file.toLowerCase() === q) ??
+        const exact = entries.find(e => e.title.toLowerCase() === q || e.file.toLowerCase() === q)
+        const substringMatch =
+          exact ??
           entries.find(e => e.title.toLowerCase().includes(q) || e.file.toLowerCase().includes(q))
+        let match = substringMatch
+        if (!match) {
+          const STOP = new Set([
+            'the',
+            'a',
+            'an',
+            'and',
+            'or',
+            'of',
+            'to',
+            'in',
+            'on',
+            'for',
+            'is',
+            'are',
+            'was',
+            'were',
+            'be',
+            'been',
+            'i',
+            'my',
+            'me',
+            'you',
+            'your',
+            'about',
+            'remember',
+            'what',
+            'did',
+            'tell',
+            'said',
+            'told',
+            'memory',
+            'note',
+            'notes',
+          ])
+          const tokens = q.split(/[^a-z0-9]+/).filter(t => t.length >= 2 && !STOP.has(t))
+          if (tokens.length > 0) {
+            let best: { entry: (typeof entries)[number]; score: number } | null = null
+            for (const e of entries) {
+              const blob = `${e.title} ${e.file} ${e.hook ?? ''}`.toLowerCase()
+              const score = tokens.reduce((s, t) => s + (blob.includes(t) ? 1 : 0), 0)
+              if (score > 0 && (best === null || score > best.score)) {
+                best = { entry: e, score }
+              }
+            }
+            if (best && best.score >= Math.max(1, Math.ceil(tokens.length / 2))) {
+              match = best.entry
+            }
+          }
+        }
         if (match) {
           const result = await safeRead(match.file)
           tried.push(`MEMORY.md→${match.file}`)

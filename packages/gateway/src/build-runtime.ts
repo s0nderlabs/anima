@@ -476,6 +476,33 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
   const collectedListeners: Listener[] = []
   const skillsDisabled = { current: [] as string[] }
 
+  // Sub-brain factory for delegate.task. Mirrors chat.tsx: a fresh
+  // OGComputeBrain on the same provider/model with a custom system prompt
+  // and the requested tool subset. Without this the delegate.task tool
+  // never registers (the plugin gates registration on ctx.delegateFactory).
+  const delegateFactory: import('@s0nderlabs/anima-core').DelegateBrainFactory = async ({
+    systemPrompt,
+    tools: subTools,
+  }) => {
+    const subBrain = new OGComputeBrain({
+      privkeyHex: opts.agentPrivkey,
+      rpcUrl: NETWORK_RPC[network],
+      providerAddress: config.brain.provider!,
+      tools: subTools,
+      prefix: buildFrozenPrefix({
+        systemPrompt,
+        memoryIndex: null,
+        identity: null,
+        persona: null,
+        loadedToolNames: [],
+        skills: [],
+        timestamp: null,
+      }),
+    })
+    await subBrain.init()
+    return subBrain as unknown as import('@s0nderlabs/anima-core').DelegateBrainHandle
+  }
+
   // Resolver imports plugin packages directly (workspace deps; cycle-free).
   const loadResult = await loadPlugins(pluginNames, {
     tools,
@@ -496,6 +523,7 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
     comms,
     onchain,
     telegram,
+    delegateFactory,
     resolve: async name => {
       switch (name) {
         case 'system':
@@ -519,6 +547,16 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
   }
 
   // 5. MemorySyncManager + activity log + frozen prefix
+  //
+  // Path split that matters for /sync correctness:
+  //   - `activityLogPath` is the DAEMON's runtime log (under TMPDIR) — the
+  //     gateway appends every wake/tool-call/brain-response there, so /sync
+  //     must read from this path to capture the live history.
+  //   - `memoryDir` is intentionally OMITTED — memory.save + memory.read
+  //     (both registered by plugin-system) resolve via `agentPaths.agent(id)`
+  //     which lives under `~/.anima/agents/<id>/memory/`. Forcing the
+  //     sync-manager to look elsewhere would upload a stale daemon-side
+  //     snapshot and ignore the operator's actual saves.
   const sync = new MemorySyncManager({
     network,
     agentId,
@@ -526,6 +564,7 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
     agentAddress,
     contractAddress,
     tokenId,
+    activityLogPath,
   })
   const activity = new ActivityLog(activityLogPath)
 
@@ -757,12 +796,19 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
         permission.setPrompter(async req => {
           const approvalId = idFactory()
           const body = `🔐 Approval needed for ${req.kind}\n\n${req.command ?? req.path ?? req.recipient ?? ''}\n\nReason: ${req.reason}`
+          console.log(
+            `[tg-approval] prompter invoked: id=${approvalId} kind=${req.kind} chat=${input.chatId}`,
+          )
           return new Promise<PermissionDecision>(resolve => {
             const timeoutMs = 5 * 60_000
             const timer = setTimeout(() => {
-              if (pending.delete(approvalId)) resolve('deny')
+              if (pending.delete(approvalId)) {
+                console.log(`[tg-approval] TIMEOUT after ${timeoutMs}ms: id=${approvalId} → deny`)
+                resolve('deny')
+              }
             }, timeoutMs)
             pending.set(approvalId, choice => {
+              console.log(`[tg-approval] resolver fired: id=${approvalId} choice=${choice}`)
               clearTimeout(timer)
               resolve(
                 choice === 'once'
@@ -772,10 +818,15 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
                     : 'deny',
               )
             })
-            void send(input.chatId, body, approvalId).catch(() => {
-              clearTimeout(timer)
-              if (pending.delete(approvalId)) resolve('deny')
-            })
+            void send(input.chatId, body, approvalId)
+              .then(() => console.log(`[tg-approval] inline keyboard sent: id=${approvalId}`))
+              .catch(err => {
+                console.log(
+                  `[tg-approval] inline keyboard send FAILED: id=${approvalId} err=${(err as Error).message?.slice(0, 100)}`,
+                )
+                clearTimeout(timer)
+                if (pending.delete(approvalId)) resolve('deny')
+              })
           })
         })
         permission.setMode('prompt')
@@ -786,7 +837,12 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
         await activity.append({
           ts: Date.now(),
           kind: 'wake',
-          data: { source: 'telegram', chatId: input.chatId, userId: input.userId },
+          data: {
+            source: 'telegram',
+            chatId: input.chatId,
+            userId: input.userId,
+            text: input.text,
+          },
         })
         const turn = await brain.infer({
           event: {

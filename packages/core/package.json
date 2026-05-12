@@ -1,6 +1,6 @@
 {
   "name": "@s0nderlabs/anima-core",
-  "version": "0.21.13",
+  "version": "0.21.14",
   "type": "module",
   "description": "Always-on infrastructure for anima, the sovereign agent gateway on 0G (runtime, brain, identity, memory, storage, wallet, tool registry)",
   "license": "MIT",

@@ -4,6 +4,20 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.14] - 2026-05-12
+
+### Fixed
+
+- **Memory sync sidecar makes a warm `/sync` truly a no-op.** Pre-fix, every `/sync` call ran the full `getIntelligentData` chain read at startup, then a second pass-through of every slot even when the activity-log + memory file plaintext hashes were unchanged since the last flush. Sidecar (`${dirname(activityLogPath)}/sync-state.json`) now persists the plaintext-hash map after each successful flush; init reads it first, falls back to chain hashes only when sidecar is missing. When sidecar populates every known slot, the chain RPC round-trip is skipped entirely. Second `/sync` is now empty across both specter and enigma surfaces.
+- **Activity-log uploads gzip-then-encrypt, shrinking blobs ~4-5x.** A 1.7MB activity log now uploads as a 397KB AES-GCM blob. New `MEMORY_BLOB_VERSION_GZIP = 2` byte tags compressed blobs; v=1 plaintext blobs remain readable for legacy data. Cuts the Galileo-sandbox `/sync` 15-min timeout exposure proportionally.
+- **AutoTopup `insufficient-wallet` events now suppress for 10 min instead of spamming every 60s.** Operator hit a 30+ event flood in the TUI when the agent EOA fell below the threshold. AutoTopup remembers the last `insufficient-wallet` failure timestamp and short-circuits subsequent poll ticks until the cool-down elapses; a successful wallet check clears the cool-down so a future drop refires immediately.
+- **`memory.read` paraphrased queries hit a token-overlap fallback.** Brain frequently recalls memory titles with reordered or extra tokens (e.g. "tool test run" → "Tool test session"). Read tool now scores entries by non-stopword token overlap when exact + substring lookup miss; matches when at least half the query tokens appear in the entry's title+file+hook. New `read-tool-fallback.test.ts` covers the path.
+- **`permission/service.ts` dangerous-pattern `allow-session` signature now keys on the pattern class, not the literal command.** One operator "Allow Session" approval on `rm -rf /tmp/foo` now covers all subsequent `rm -rf <path>` matching the same dangerous pattern, instead of re-prompting per unique path. Reduces approval fatigue without widening security envelope (operator still chooses `Allow Once` for one-shot authorization). Verified via custom test: 3 different `rm -rf` paths → 1 prompter invocation.
+- **`browser.*` tools register on enigma sandbox.** `findAgentBrowser` now probes `cwd/anima/node_modules` in addition to `cwd` and `process.cwd()`, catching the case where the harness daemon boots from `$HOME` while the cloned repo (and `node_modules/.bin/agent-browser`) lives under `$HOME/anima`. Plugin loader resolves the binary once at register time and passes `binPath` through to each `make<Browser>` factory so per-call spawns don't re-search PATH.
+- **`chain.tx` no longer skipped on operator-supplied hashes.** Added anti-skip guidance to the tool description; brain was previously inspecting the hash bytes and deciding it "looks fake" without calling the RPC. The RPC's `tx not found` is the operator-facing source of truth.
+- **TG callback chain instrumented with diagnostic logs.** `[telegram] callback_query received/dropped/resolved` and `[tg-approval] prompter invoked / inline keyboard sent / resolver fired / timeout` log lines added to `listener.ts` + `build-runtime.ts`. Confirmed end-to-end approval flow works when click is delivered via real pointer events; synthetic JS `el.click()` on web TG inline keyboard buttons is silently dropped by the React handler, which masked the flow as "broken" in prior agent-browser drives.
+- **`/sync` client timeout extended to 15 min** to accommodate large activity-log uploads on Galileo before the gzip shrink lands fully across deployments.
+
 ## [0.21.13] - 2026-05-08
 
 ### Fixed
@@ -1585,6 +1599,8 @@ Drove every Phase 10 modal kind end-to-end on specter mainnet in `prompt` mode (
 - 31 unit tests covering memory ops, tool registry, event queue, wallet encryption, runtime boot, frozen prefix.
 - End-to-end verified on 0G mainnet: agent init → GLM-5 chat → `memory.save` tool call → memory file + index persisted, with ~57% prompt-cache hit on follow-up turns.
 
+[0.21.14]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.14
+[0.21.13]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.13
 [0.21.10]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.10
 [0.21.9]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.9
 [0.21.8]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.8

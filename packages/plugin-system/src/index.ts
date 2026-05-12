@@ -9,7 +9,7 @@
 
 import { LocalBackend, type NativePlugin, type ToolDef } from '@s0nderlabs/anima-core'
 import {
-  isBrowserAvailable,
+  findAgentBrowserOrNull,
   makeBrowserBack,
   makeBrowserClick,
   makeBrowserConsole,
@@ -123,19 +123,26 @@ const plugin: NativePlugin = {
       }) as ToolDef,
     ]
     // Skip browser.* registration when the agent-browser binary is absent
-    // (dev installs that skipped `bun install`).
-    if (isBrowserAvailable()) {
+    // (dev installs that skipped `bun install`). Pass workspaceRoot so the
+    // detector looks under the agent's actual checkout dir — enigma's
+    // harness daemon boots from $HOME, not the anima workspace, so without
+    // the override `findAgentBrowser` misses the colocated node_modules
+    // and the brain falls back to web.fetch every time. Resolve the bin
+    // path ONCE here and pass it through `binPath` so per-call spawns
+    // don't re-search PATH (which would re-miss for the same reason).
+    const browserBin = findAgentBrowserOrNull(workspaceRoot)
+    if (browserBin) {
       tools.push(
-        makeBrowserNavigate({}) as ToolDef,
-        makeBrowserSnapshot({}) as ToolDef,
-        makeBrowserClick({}) as ToolDef,
-        makeBrowserType({}) as ToolDef,
-        makeBrowserScroll({}) as ToolDef,
-        makeBrowserBack({}) as ToolDef,
-        makeBrowserPress({}) as ToolDef,
-        makeBrowserGetImages({}) as ToolDef,
-        makeBrowserConsole({}) as ToolDef,
-        makeBrowserVision({ visionInfer: ctx.visionInfer ?? null }) as ToolDef,
+        makeBrowserNavigate({ binPath: browserBin }) as ToolDef,
+        makeBrowserSnapshot({ binPath: browserBin }) as ToolDef,
+        makeBrowserClick({ binPath: browserBin }) as ToolDef,
+        makeBrowserType({ binPath: browserBin }) as ToolDef,
+        makeBrowserScroll({ binPath: browserBin }) as ToolDef,
+        makeBrowserBack({ binPath: browserBin }) as ToolDef,
+        makeBrowserPress({ binPath: browserBin }) as ToolDef,
+        makeBrowserGetImages({ binPath: browserBin }) as ToolDef,
+        makeBrowserConsole({ binPath: browserBin }) as ToolDef,
+        makeBrowserVision({ binPath: browserBin, visionInfer: ctx.visionInfer ?? null }) as ToolDef,
       )
     }
     if (ctx.delegateFactory) {
