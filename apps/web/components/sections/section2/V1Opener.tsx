@@ -10,7 +10,7 @@ import {
 } from 'framer-motion'
 import Image from 'next/image'
 import Link from 'next/link'
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 type Chapter = {
   numeral: string
@@ -140,47 +140,37 @@ export function V1Opener() {
                 progress={progress}
               />
             ))}
-            <RunPanel
-              index={CHAPTERS.length + 1}
-              total={PANEL_COUNT}
-              progress={progress}
-            />
+            <RunPanel index={CHAPTERS.length + 1} total={PANEL_COUNT} progress={progress} />
           </div>
         </div>
       </div>
+      {/* Anchor target for Hero CTA `href="#run"`. Positioned at ~87.5% of the
+          800vh sticky section so smooth-scroll lands at the moment the Run
+          panel becomes fully visible (progress ≈ 7/8). scroll-margin-top of
+          0 because the absolute position already accounts for landing. */}
+      <div
+        id="run"
+        aria-hidden
+        className="pointer-events-none absolute left-0 right-0 h-px"
+        style={{ top: '87.5%' }}
+      />
     </section>
   )
 }
 
-function usePanelStyle(
-  progress: MotionValue<number>,
-  index: number,
-  total: number,
-) {
+function usePanelStyle(progress: MotionValue<number>, index: number, total: number) {
   const start = index / total
   const end = (index + 1) / total
   const fade = 0.04
-  const opacity = useTransform(
-    progress,
-    [start - fade, start, end - fade, end],
-    [0, 1, 1, 0],
-  )
+  const opacity = useTransform(progress, [start - fade, start, end - fade, end], [0, 1, 1, 0])
   const y = useTransform(progress, [start - fade, end], [22, -22])
   return { opacity, y }
 }
 
-function useFinalPanelStyle(
-  progress: MotionValue<number>,
-  index: number,
-  total: number,
-) {
+function useFinalPanelStyle(progress: MotionValue<number>, index: number, total: number) {
   const start = index / total
   const fade = 0.05
-  const opacity = useTransform(
-    progress,
-    [start - fade, start + fade * 0.4, 1.05],
-    [0, 1, 1],
-  )
+  const opacity = useTransform(progress, [start - fade, start + fade * 0.4, 1.05], [0, 1, 1])
   const y = useTransform(progress, [start - fade, 1], [22, 0])
   return { opacity, y }
 }
@@ -268,10 +258,7 @@ function ChapterPanel({
       style={{ opacity, y }}
       className="absolute inset-0 flex flex-col justify-center"
     >
-      <motion.div
-        style={numeralStage}
-        className="font-display font-light"
-      >
+      <motion.div style={numeralStage} className="font-display font-light">
         <span
           style={{
             fontVariationSettings: '"opsz" 144, "SOFT" 0, "WONK" 0',
@@ -283,10 +270,7 @@ function ChapterPanel({
           {ch.numeral}
         </span>
       </motion.div>
-      <motion.h3
-        style={headlineStage}
-        className="font-display mt-8 font-light"
-      >
+      <motion.h3 style={headlineStage} className="font-display mt-8 font-light">
         <span
           style={{
             fontVariationSettings: '"opsz" 96, "SOFT" 30, "WONK" 0',
@@ -299,10 +283,7 @@ function ChapterPanel({
           {ch.headline}
         </span>
       </motion.h3>
-      <motion.p
-        style={bodyStage}
-        className="font-body mt-7 max-w-[44ch]"
-      >
+      <motion.p style={bodyStage} className="font-body mt-7 max-w-[44ch]">
         <span style={{ fontSize: 17, lineHeight: 1.75, color: 'var(--color-ink-2)' }}>
           {ch.body}
         </span>
@@ -330,53 +311,132 @@ function RunPanel({
   return (
     <motion.article
       style={{ opacity, y }}
-      className="absolute inset-0 flex flex-col justify-center"
+      className="absolute inset-y-0 left-0 right-0 flex items-center md:right-auto md:w-[172.5%] lg:w-[192.3%]"
     >
-      <motion.h3
-        style={headlineStage}
-        className="font-display font-light"
-      >
-        <span
-          style={{
-            fontVariationSettings: '"opsz" 144, "SOFT" 30, "WONK" 0',
-            fontSize: 'clamp(80px, 9vw, 152px)',
-            lineHeight: 0.94,
-            letterSpacing: '-0.03em',
-            color: 'var(--color-ink)',
-          }}
-        >
-          Run.
-        </span>
-      </motion.h3>
-      <motion.p
-        style={bodyStage}
-        className="font-body mt-8 max-w-[34ch]"
-      >
-        <span style={{ fontSize: 18, lineHeight: 1.7, color: 'var(--color-ink-2)' }}>
-          Mint once. Walk away. The agent persists.
-        </span>
-      </motion.p>
-      <motion.div style={ctaStage} className="mt-11">
-        <Link
-          href="/console"
-          className="group inline-flex w-fit items-center gap-2 rounded-full bg-[var(--color-ink)] px-7 py-3.5 text-[15px] font-medium tracking-tight text-[var(--color-cream)] shadow-[0_20px_44px_-24px_rgba(16,15,9,0.7)] transition-transform hover:-translate-y-0.5"
-        >
-          <span>Run an agent</span>
-          <span aria-hidden className="transition-transform group-hover:translate-x-1">
-            →
+      <div className="flex w-full flex-col items-center text-center">
+        <motion.h3 style={headlineStage} className="font-display font-light">
+          <span
+            style={{
+              fontVariationSettings: '"opsz" 144, "SOFT" 30, "WONK" 0',
+              fontSize: 'clamp(80px, 9vw, 152px)',
+              lineHeight: 0.94,
+              letterSpacing: '-0.03em',
+              color: 'var(--color-ink)',
+            }}
+          >
+            Mint.
           </span>
-        </Link>
-      </motion.div>
+        </motion.h3>
+        <motion.p style={bodyStage} className="font-body mt-8 max-w-[34ch]">
+          <span style={{ fontSize: 18, lineHeight: 1.7, color: 'var(--color-ink-2)' }}>
+            Mint once. Walk away. The agent persists.
+          </span>
+        </motion.p>
+        <motion.div style={ctaStage} className="mt-7 flex flex-col items-center gap-4">
+          <CommandPill command="bun add -g @s0nderlabs/anima" />
+          <DocsLink />
+        </motion.div>
+      </div>
     </motion.article>
+  )
+}
+
+function DocsLink() {
+  return (
+    <Link
+      href="/docs"
+      className="font-body group inline-flex items-center gap-1.5 text-[var(--color-ink-3)] transition-colors hover:text-[var(--color-ink-2)]"
+      style={{ fontSize: 13, letterSpacing: '-0.005em' }}
+    >
+      <span>Read the full docs</span>
+      <span aria-hidden className="transition-transform group-hover:translate-x-0.5">
+        →
+      </span>
+    </Link>
+  )
+}
+
+function CommandPill({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    },
+    [],
+  )
+
+  function handleCopy() {
+    navigator.clipboard
+      .writeText(command)
+      .then(() => {
+        setCopied(true)
+        if (timerRef.current) clearTimeout(timerRef.current)
+        timerRef.current = setTimeout(() => setCopied(false), 1500)
+      })
+      .catch(() => {})
+  }
+
+  return (
+    <div
+      className="inline-flex items-baseline gap-2.5 font-mono"
+      style={{ fontSize: 14, letterSpacing: '-0.005em' }}
+    >
+      <span aria-hidden style={{ color: 'var(--color-ink-3)' }}>
+        $
+      </span>
+      <span style={{ color: 'var(--color-ink-2)' }}>{command}</span>
+      <button
+        type="button"
+        onClick={handleCopy}
+        aria-label={copied ? 'Copied' : 'Copy install command'}
+        className="ml-0.5 flex h-6 w-6 shrink-0 translate-y-1 items-center justify-center rounded-full text-[var(--color-ink-3)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-ink)_4%,transparent)] hover:text-[var(--color-ink-2)]"
+      >
+        {copied ? <CheckIcon /> : <CopyIcon />}
+      </button>
+    </div>
+  )
+}
+
+function CopyIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className="h-[13px] w-[13px]"
+    >
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1.6" />
+      <path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className="h-[13px] w-[13px]"
+    >
+      <path d="M3 8.5l3 3 7-7" />
+    </svg>
   )
 }
 
 function StackedFallback() {
   return (
-    <section
-      id="section-layers"
-      className="relative bg-[var(--color-cream)] py-24 sm:py-32"
-    >
+    <section id="section-layers" className="relative bg-[var(--color-cream)] py-24 sm:py-32">
       <div className="mx-auto max-w-[var(--container-wrap)] space-y-24 px-6 sm:px-10">
         <div
           className="font-display flex flex-col gap-1 font-light text-[var(--color-ink)]"
@@ -397,7 +457,7 @@ function StackedFallback() {
             <span aria-hidden>.</span>
           </div>
         </div>
-        {CHAPTERS.map((ch) => (
+        {CHAPTERS.map(ch => (
           <article key={ch.numeral}>
             <div
               className="font-display font-light"
@@ -430,7 +490,11 @@ function StackedFallback() {
             </p>
           </article>
         ))}
-        <article>
+        <article
+          id="run"
+          className="flex flex-col items-center text-center"
+          style={{ scrollMarginTop: '24px' }}
+        >
           <h3
             className="font-display font-light"
             style={{
@@ -441,7 +505,7 @@ function StackedFallback() {
               color: 'var(--color-ink)',
             }}
           >
-            Run.
+            Mint.
           </h3>
           <p
             className="font-body mt-6 max-w-[36ch]"
@@ -449,13 +513,10 @@ function StackedFallback() {
           >
             Mint once. Walk away. The agent persists.
           </p>
-          <Link
-            href="/console"
-            className="mt-8 inline-flex items-center gap-2 rounded-full bg-[var(--color-ink)] px-7 py-3.5 text-[15px] font-medium tracking-tight text-[var(--color-cream)]"
-          >
-            <span>Run an agent</span>
-            <span aria-hidden>→</span>
-          </Link>
+          <div className="mt-8 flex flex-col items-center gap-4">
+            <CommandPill command="bun add -g @s0nderlabs/anima" />
+            <DocsLink />
+          </div>
         </article>
       </div>
     </section>

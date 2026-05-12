@@ -9,6 +9,12 @@ if (typeof window !== 'undefined') {
   gsap.registerPlugin(ScrollTrigger)
 }
 
+declare global {
+  interface Window {
+    __lenis?: Lenis
+  }
+}
+
 export function MotionProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -20,6 +26,8 @@ export function MotionProvider({ children }: { children: ReactNode }) {
       wheelMultiplier: 1,
       touchMultiplier: 1.4,
     })
+
+    window.__lenis = lenis
 
     // Single rAF source: GSAP's ticker drives Lenis, Lenis fires scroll events
     // that ScrollTrigger picks up. Avoid a separate requestAnimationFrame loop;
@@ -38,6 +46,7 @@ export function MotionProvider({ children }: { children: ReactNode }) {
       lenis.destroy()
       window.removeEventListener('resize', onResize)
       ScrollTrigger.killAll()
+      window.__lenis = undefined
     }
   }, [])
 

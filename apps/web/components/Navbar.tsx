@@ -13,7 +13,6 @@ import { useEffect, useState } from 'react'
 
 const NAV_ITEMS = [
   { label: 'Architecture', href: '#section-layers' },
-  { label: 'Live', href: '/console' },
   { label: 'Docs', href: '/docs' },
 ]
 
@@ -146,7 +145,7 @@ export function Navbar() {
   const chromeOpacity = useTransform(smoothScroll, [morphStart, morphEnd], [0, 0.62])
   const chromeBlur = useTransform(smoothScroll, [morphStart, morphEnd], [0, 18])
   const chromeShadowAlpha = useTransform(smoothScroll, [morphStart, morphEnd], [0, 0.22])
-  const chromeBorderAlpha = useTransform(smoothScroll, [morphStart, morphEnd], [0, 0.10])
+  const chromeBorderAlpha = useTransform(smoothScroll, [morphStart, morphEnd], [0, 0.1])
 
   const chromeBg = useMotionTemplate`rgba(249, 248, 246, ${chromeOpacity})`
   const chromeBorder = useMotionTemplate`1px solid rgba(16, 15, 9, ${chromeBorderAlpha})`
@@ -167,7 +166,12 @@ export function Navbar() {
       >
         <motion.nav
           className="pointer-events-auto relative flex h-[56px] w-full items-center"
-          style={{ y: navY, maxWidth: PILL_WIDTH, paddingLeft: PILL_INSET, paddingRight: PILL_INSET }}
+          style={{
+            y: navY,
+            maxWidth: PILL_WIDTH,
+            paddingLeft: PILL_INSET,
+            paddingRight: PILL_INSET,
+          }}
           aria-label="primary"
         >
           {/* Pill chrome , anchored to nav bounds, fades in via opacity + blur.
@@ -202,7 +206,10 @@ export function Navbar() {
           {/* CTA , natural right of pill, translates further right at top of page.
               On phones the CTA shrinks (compact variant) so it fits alongside
               the wordmark + hamburger without overlap. */}
-          <motion.div className="ml-auto flex shrink-0 items-center gap-2 pr-4 md:ml-0 md:pr-1" style={{ x: ctaX }}>
+          <motion.div
+            className="ml-auto flex shrink-0 items-center gap-2 pr-4 md:ml-0 md:pr-1"
+            style={{ x: ctaX }}
+          >
             <PrimaryCta />
             <HamburgerButton open={menuOpen} onClick={() => setMenuOpen(v => !v)} />
           </motion.div>
@@ -280,17 +287,18 @@ function Brand({ size = 'default' }: { size?: 'default' | 'large' }) {
 }
 
 function PrimaryCta() {
-  // Compact text at < md (just "Run agent", no leading "an", no trailing arrow)
-  // so the pill + hamburger + wordmark all fit on a ~360px phone width.
-  // Full label "Run an agent →" returns at md+.
+  // Compact text at < md so the pill + hamburger + wordmark all fit on phone.
   return (
     <Link
       href="/console"
       className="group inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[var(--color-ink)] px-3 py-1.5 text-[12.5px] font-medium tracking-tight text-[var(--color-cream)] shadow-[0_10px_24px_-14px_rgba(16,15,9,0.6)] transition-transform hover:-translate-y-[1px] active:translate-y-0 md:px-5 md:py-2.5 md:text-[13.5px]"
     >
-      <span className="md:hidden">Run agent</span>
-      <span className="hidden md:inline">Run an agent</span>
-      <span aria-hidden className="hidden transition-transform group-hover:translate-x-0.5 md:inline">
+      <span className="md:hidden">Console</span>
+      <span className="hidden md:inline">Open console</span>
+      <span
+        aria-hidden
+        className="hidden transition-transform group-hover:translate-x-0.5 md:inline"
+      >
         →
       </span>
     </Link>
@@ -409,7 +417,11 @@ function MenuLink({
     'font-display block text-[clamp(40px,11vw,64px)] font-light leading-[1.05] tracking-[-0.02em] text-[var(--color-ink)] transition-opacity hover:opacity-70'
   const initial = { y: 14, opacity: 0 }
   const animate = { y: 0, opacity: 1 }
-  const transition = { delay: 0.08 + index * 0.06, duration: 0.45, ease: [0.22, 1, 0.36, 1] as [number, number, number, number] }
+  const transition = {
+    delay: 0.08 + index * 0.06,
+    duration: 0.45,
+    ease: [0.22, 1, 0.36, 1] as [number, number, number, number],
+  }
   if (isAnchor) {
     return (
       <motion.a

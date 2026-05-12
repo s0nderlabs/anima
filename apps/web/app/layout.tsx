@@ -1,8 +1,9 @@
-import type { Metadata, Viewport } from 'next'
-import { Fraunces, Instrument_Serif, Outfit, Geist_Mono } from 'next/font/google'
-import localFont from 'next/font/local'
 import { MotionProvider } from '@/components/MotionProvider'
 import { PaperNoise } from '@/components/PaperNoise'
+import type { Metadata, Viewport } from 'next'
+import { Fraunces, Geist_Mono, Instrument_Serif, Outfit } from 'next/font/google'
+import localFont from 'next/font/local'
+import { Providers } from './providers'
 import './globals.css'
 
 const fraunces = Fraunces({
@@ -61,15 +62,13 @@ export const metadata: Metadata = {
   openGraph: {
     type: 'website',
     title: 'anima · a fully sovereign agentic harness',
-    description:
-      'No host. No central operator. Fully on 0G. Mint once. Anima keeps running.',
+    description: 'No host. No central operator. Fully on 0G. Mint once. Anima keeps running.',
     siteName: 'anima',
   },
   twitter: {
     card: 'summary_large_image',
     title: 'anima · a fully sovereign agentic harness',
-    description:
-      'No host. No central operator. Fully on 0G. Mint once. Anima keeps running.',
+    description: 'No host. No central operator. Fully on 0G. Mint once. Anima keeps running.',
     creator: '@s0nderlabs',
   },
 }
@@ -87,10 +86,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       className={`${fraunces.variable} ${instrumentSerif.variable} ${outfit.variable} ${geistMono.variable} ${calSans.variable}`}
     >
       <body>
-        <MotionProvider>
-          <PaperNoise />
-          {children}
-        </MotionProvider>
+        <Providers>
+          <MotionProvider>
+            <PaperNoise />
+            {children}
+          </MotionProvider>
+        </Providers>
       </body>
     </html>
   )

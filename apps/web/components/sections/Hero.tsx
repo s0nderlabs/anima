@@ -1,7 +1,7 @@
 'use client'
 
-import Link from 'next/link'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { HeroCanvas } from './HeroCanvas'
 
@@ -25,7 +25,7 @@ export function Hero() {
   useEffect(() => {
     if (reduceMotion) return
     const id = window.setInterval(() => {
-      setWordIndex((i) => (i + 1) % SWAP_WORDS.length)
+      setWordIndex(i => (i + 1) % SWAP_WORDS.length)
     }, SWAP_INTERVAL_MS)
     return () => window.clearInterval(id)
   }, [reduceMotion])
@@ -81,7 +81,19 @@ export function Hero() {
           className="mt-6 flex items-center justify-center sm:mt-8 lg:mt-9"
         >
           <Link
-            href="/console"
+            href="#run"
+            onClick={e => {
+              const target = document.getElementById('run')
+              if (!target) return
+              const lenis = window.__lenis
+              if (lenis) {
+                e.preventDefault()
+                lenis.scrollTo(target, {
+                  duration: 2.2,
+                  easing: t => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2),
+                })
+              }
+            }}
             className="group inline-flex items-center gap-2 rounded-full bg-[var(--color-ink)] px-8 py-3.5 text-[15px] font-medium tracking-tight text-[var(--color-cream)] shadow-[0_18px_40px_-22px_rgba(16,15,9,0.7)] transition-transform hover:-translate-y-0.5 hover:scale-[1.01] active:scale-[0.99]"
           >
             <span>Run an agent</span>
