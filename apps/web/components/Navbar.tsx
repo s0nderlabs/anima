@@ -13,7 +13,7 @@ import { useEffect, useState } from 'react'
 
 const NAV_ITEMS = [
   { label: 'Architecture', href: '#section-layers' },
-  { label: 'Live', href: '#section-sovereignty' },
+  { label: 'Live', href: '/console' },
   { label: 'Docs', href: '/docs' },
 ]
 

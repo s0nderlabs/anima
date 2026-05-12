@@ -15,7 +15,7 @@ export function ClosingCta() {
       style={{ boxShadow: '0 60px 120px -70px rgba(50,35,18,0.42)' }}
     >
       <Image
-        src="/aurelia/grove.jpg"
+        src="/aurelia/grove.png"
         alt=""
         fill
         aria-hidden

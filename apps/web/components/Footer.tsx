@@ -23,7 +23,7 @@ const ON_CHAIN: Array<{ name: string; address: string; label: string }> = [
 export function Footer() {
   return (
     <footer className="relative z-10 border-t border-[var(--color-border)] bg-[var(--color-cream)]">
-      <div className="mx-auto w-full max-w-[var(--container-wrap)] px-6 py-20 sm:px-8">
+      <div className="mx-auto w-full max-w-[var(--container-wrap)] px-6 pt-20 pb-6 sm:px-8">
         <div className="grid grid-cols-1 gap-12 md:grid-cols-12">
           <div className="md:col-span-3">
             <Link
@@ -75,13 +75,8 @@ export function Footer() {
           </FooterColumn>
         </div>
 
-        <div className="mt-16 flex flex-col items-start justify-between gap-3 border-t border-[var(--color-border)] pt-6 text-[12px] text-[var(--color-ink-3)] sm:flex-row sm:items-center">
-          <span className="font-mono uppercase tracking-[0.18em]">
-            © 2026 · BUILT BY S0NDERLABS · 0G APAC HACKATHON
-          </span>
-          <span className="font-mono tracking-tight">
-            anima.s0nderlabs.xyz
-          </span>
+        <div className="mt-10 border-t border-[var(--color-border)] pt-6 font-mono text-[12px] text-[var(--color-ink-3)]">
+          © 2026 · Built by s0nderlabs
         </div>
       </div>
     </footer>
