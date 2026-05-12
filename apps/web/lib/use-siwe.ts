@@ -4,12 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createSiweMessage } from 'viem/siwe'
 import { useAccount, useDisconnect, useSignMessage } from 'wagmi'
 
-export type SiweStatus =
-  | 'loading'
-  | 'unauthenticated'
-  | 'signing'
-  | 'authenticated'
-  | 'error'
+export type SiweStatus = 'loading' | 'unauthenticated' | 'signing' | 'authenticated' | 'error'
 
 export type SiweAuth = {
   status: SiweStatus
@@ -18,6 +13,8 @@ export type SiweAuth = {
   signIn: () => Promise<boolean>
   signOut: () => Promise<void>
 }
+
+const SIGN_TIMEOUT_MS = 60_000
 
 /**
  * Single-step SIWE auth: wallet-connect kicks the sign automatically.
@@ -37,7 +34,7 @@ export function useSiweAuth(): SiweAuth {
   useEffect(() => {
     let alive = true
     fetch('/api/auth/me', { credentials: 'include' })
-      .then((r) => r.json())
+      .then(r => r.json())
       .then((d: { address?: `0x${string}` | null }) => {
         if (!alive) return
         if (d?.address) {
@@ -64,6 +61,7 @@ export function useSiweAuth(): SiweAuth {
     inFlight.current = true
     setError(null)
     setStatus('signing')
+    let timer: ReturnType<typeof setTimeout> | null = null
     try {
       const nonceResp = await fetch('/api/auth/nonce', { credentials: 'include' })
       const { nonce } = (await nonceResp.json()) as { nonce: string }
@@ -80,7 +78,14 @@ export function useSiweAuth(): SiweAuth {
         chainId: chainId ?? 16661,
         nonce,
       })
-      const signature = await signMessageAsync({ message })
+      const signaturePromise = signMessageAsync({ message })
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('signing timed out, wallet did not respond')),
+          SIGN_TIMEOUT_MS,
+        )
+      })
+      const signature = await Promise.race([signaturePromise, timeoutPromise])
 
       const verifyResp = await fetch('/api/auth/verify', {
         method: 'POST',
@@ -104,6 +109,7 @@ export function useSiweAuth(): SiweAuth {
       setStatus('unauthenticated')
       return false
     } finally {
+      if (timer) clearTimeout(timer)
       inFlight.current = false
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

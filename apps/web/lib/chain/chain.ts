@@ -39,6 +39,10 @@ export const SANN_RESOLVER = '0x6D3B3F99177FB2A5de7F9E928a9BD807bF7b5BAD' as con
 export const SANN_TLD_IDENTIFIER =
   449205675366457712613706471770511817162982777845754732038879201565074548n
 
+// Permissionless `<label>.anima.0g` subname registrar.
+// Mirrors packages/core/src/naming/registrar.ts.
+export const ANIMA_REGISTRAR_ADDRESS = '0x33d9f4ec2bd7e7cb4e288c3bbc3a76be472fdd98' as const
+
 // Earliest known activity block on mainnet. Set just below the first known
 // anima mint (block 31_560_769 for specter). 0G RPC caps `eth_getLogs` ranges
 // so going wider triggers silent failures; keep the floor tight.

@@ -16,6 +16,14 @@ export function formatBigInt(n: bigint): string {
   return new Intl.NumberFormat('en-US').format(n)
 }
 
+export function formatRelativeTime(secondsAgo: number): string {
+  if (secondsAgo < 0) return 'just now'
+  if (secondsAgo < 60) return `${secondsAgo}s ago`
+  if (secondsAgo < 3600) return `${Math.floor(secondsAgo / 60)}m ago`
+  if (secondsAgo < 86400) return `${Math.floor(secondsAgo / 3600)}h ago`
+  return `${Math.floor(secondsAgo / 86400)}d ago`
+}
+
 export function formatBalanceOG(weiBigInt: bigint, decimals = 4): string {
   // 0G has 18 decimals like ETH.
   const negative = weiBigInt < 0n

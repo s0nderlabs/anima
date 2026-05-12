@@ -4,11 +4,9 @@
 
 import { type Address, type Hex, type PublicClient, parseAbiItem } from 'viem'
 import { SANN_RESOLVER_ABI } from './abi'
-import { ANIMA_FIRST_MINT_BLOCK, SANN_RESOLVER } from './chain'
+import { ANIMA_FIRST_MINT_BLOCK, ANIMA_REGISTRAR_ADDRESS, SANN_RESOLVER } from './chain'
 
-export const ANIMA_REGISTRAR_ADDRESS = '0x33d9f4ec2bd7e7cb4e288c3bbc3a76be472fdd98' as const
-
-const subnameClaimedEvent = parseAbiItem(
+export const subnameClaimedEvent = parseAbiItem(
   'event SubnameClaimed(string label, bytes32 indexed subnameNode, address indexed owner, address indexed claimer)',
 )
 

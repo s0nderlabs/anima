@@ -61,8 +61,7 @@ export function ConnectGate() {
             fontSize: 'clamp(34px, 4vw, 56px)',
           }}
         >
-          Sign once to see{' '}
-          <span className="font-italic-serif italic text-[var(--color-ink-2)]">your agents</span>.
+          Connect to see your agents.
         </h2>
         <p className="mt-3 max-w-[44ch] text-[15.5px] leading-[1.65] text-[var(--color-ink-2)]">
           Only you ever hold the key. The signature stays in your browser. Nothing leaves after.

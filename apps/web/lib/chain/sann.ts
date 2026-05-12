@@ -12,7 +12,13 @@ import {
   toHex,
 } from 'viem'
 import { SANN_RESOLVER_ABI } from './abi'
-import { SANN_RESOLVER, SANN_TLD_IDENTIFIER } from './chain'
+import {
+  ANIMA_FIRST_MINT_BLOCK,
+  ANIMA_REGISTRAR_ADDRESS,
+  SANN_RESOLVER,
+  SANN_TLD_IDENTIFIER,
+} from './chain'
+import { subnameClaimedEvent } from './registrar'
 
 export function sannNamehash(tldIdentifier: bigint, tld: string, sub: string[]): Hex {
   const idBytes = pad(toHex(tldIdentifier), { size: 32 })
@@ -98,4 +104,25 @@ export async function readSubnameAddr(
   } catch {
     return null
   }
+}
+
+/**
+ * Scan every `SubnameClaimed` event on the AnimaSubnameRegistrar.
+ * The CLI funds the agent EOA and has it call `claim(label, agent.address)`,
+ * so `owner === claimer === agentEOA`. Returns `agentEoa → label` map.
+ */
+export async function getLabelByAgentEoa(client: PublicClient): Promise<Map<string, string>> {
+  const logs = await client.getLogs({
+    address: ANIMA_REGISTRAR_ADDRESS,
+    event: subnameClaimedEvent,
+    fromBlock: ANIMA_FIRST_MINT_BLOCK,
+    toBlock: 'latest',
+  })
+  const map = new Map<string, string>()
+  for (const log of logs) {
+    const label = log.args.label as string
+    const owner = log.args.owner as Address | undefined
+    if (label && owner) map.set(owner.toLowerCase(), label)
+  }
+  return map
 }

@@ -181,6 +181,82 @@ export async function fetchTransferHistory(
   return sorted.slice(0, limit)
 }
 
+export type AgentChainMeta = {
+  agentEoa: Address
+  firstSyncAt: number // unix seconds, earliest Updated event block timestamp
+  lastSyncAt: number // unix seconds, most recent Updated event block timestamp
+  syncCount: number
+}
+
+/**
+ * Scan Updated events on AnimaAgentNFT once, grouped by tokenId. For each
+ * wanted tokenId we capture the first tx (whose sender is the agent EOA), the
+ * earliest block (first sync timestamp), the latest block (most recent sync),
+ * and the total event count. Resolves the tx senders + block timestamps in
+ * parallel. Fresh agents (no Updated events) are absent from the result.
+ */
+export async function getAgentChainMetaByTokenId(
+  client: PublicClient,
+  tokenIds: bigint[],
+): Promise<Map<bigint, AgentChainMeta>> {
+  if (tokenIds.length === 0) return new Map()
+  const event = parseAbiItem(
+    'event Updated(uint256 indexed tokenId, uint256[] slots, bytes32[] newHashes)',
+  )
+  const logs = await client.getLogs({
+    address: ANIMA_AGENT_NFT_ADDRESS,
+    event,
+    fromBlock: ANIMA_FIRST_MINT_BLOCK,
+    toBlock: 'latest',
+  })
+  const wanted = new Set(tokenIds.map(t => t.toString()))
+  type Probe = { firstTx?: Hex; firstBlock?: bigint; latestBlock?: bigint; count: number }
+  const probes = new Map<string, Probe>()
+  for (const log of logs) {
+    const tid = (log.args.tokenId as bigint).toString()
+    if (!wanted.has(tid)) continue
+    const blk = log.blockNumber ?? 0n
+    const probe = probes.get(tid) ?? { count: 0 }
+    probe.count += 1
+    if (!probe.firstBlock || blk < probe.firstBlock) {
+      probe.firstBlock = blk
+      if (log.transactionHash) probe.firstTx = log.transactionHash as Hex
+    }
+    if (!probe.latestBlock || blk > probe.latestBlock) probe.latestBlock = blk
+    probes.set(tid, probe)
+  }
+  if (probes.size === 0) return new Map()
+  const entries = await Promise.allSettled(
+    Array.from(probes.entries()).map(async ([tid, probe]) => {
+      if (!probe.firstTx || !probe.firstBlock || !probe.latestBlock) return null
+      const [tx, firstBlock, lastBlock] = await Promise.all([
+        client.getTransaction({ hash: probe.firstTx }),
+        client.getBlock({ blockNumber: probe.firstBlock }),
+        probe.firstBlock === probe.latestBlock
+          ? client.getBlock({ blockNumber: probe.firstBlock })
+          : client.getBlock({ blockNumber: probe.latestBlock }),
+      ])
+      return [
+        BigInt(tid),
+        {
+          agentEoa: tx.from as Address,
+          firstSyncAt: Number(firstBlock.timestamp),
+          lastSyncAt: Number(lastBlock.timestamp),
+          syncCount: probe.count,
+        },
+      ] as const
+    }),
+  )
+  const out = new Map<bigint, AgentChainMeta>()
+  for (const r of entries) {
+    if (r.status === 'fulfilled' && r.value) {
+      const [tid, meta] = r.value
+      out.set(tid, meta)
+    }
+  }
+  return out
+}
+
 /**
  * Updated events for a tokenId (data anchor updates). Most-recent first.
  */
