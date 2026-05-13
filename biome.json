@@ -41,6 +41,7 @@
       "dist",
       "build",
       ".claude",
+      ".vercel",
       "apps/web",
       "bun.lock",
       ".changeset",

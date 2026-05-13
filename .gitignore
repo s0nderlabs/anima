@@ -60,3 +60,4 @@ mock/
 apps/web/.next/
 apps/web/.vercel/
 apps/web/out/
+.vercel

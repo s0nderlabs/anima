@@ -43,20 +43,22 @@ export async function fetchBlobByRootHash(
       const direct = await fetchBlobDirect(indexerUrl, rootHash)
       useProxyMode = false
       return direct
-    } catch (err) {
-      const msg = (err as Error).message
-      if (/cors|fetch|network|aborted/i.test(msg)) {
-        useProxyMode = true
-      } else {
-        // Genuine "not found" or other error — surface up.
-        throw err
-      }
+    } catch {
+      // Cross-origin probes against individual storage nodes are blocked on
+      // prod origins (the nodes don't set Access-Control-Allow-Origin). The
+      // /api/blob proxy runs server-side, no CORS. Always fall back; cache
+      // the proxy decision for the session.
+      useProxyMode = true
     }
   }
   if (useProxyMode) {
     return fetchBlobViaProxy(rootHash)
   }
-  return fetchBlobDirect(indexerUrl, rootHash)
+  try {
+    return await fetchBlobDirect(indexerUrl, rootHash)
+  } catch {
+    return fetchBlobViaProxy(rootHash)
+  }
 }
 
 async function fetchBlobViaProxy(rootHash: Hex): Promise<Uint8Array> {
