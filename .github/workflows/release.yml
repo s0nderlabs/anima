@@ -226,7 +226,23 @@ jobs:
           PKG_VERSION="$(node -p "require('./package.json').version")"
           SMOKE_DIR=$(mktemp -d)
           cd "$SMOKE_DIR"
-          bun add -g "@s0nderlabs/anima@${PKG_VERSION}"
+          # npm CDN edges occasionally lag the publish API by a few seconds, so
+          # `bun add -g` can race and fail to resolve sibling tarballs (e.g.
+          # @s0nderlabs/anima-core) that were just published. Retry up to 3
+          # times with 15s sleeps before giving up. Matches the propagation
+          # guard /seal Step 7d uses operator-side. Hit live on v0.21.20 ship.
+          for attempt in 1 2 3; do
+            if bun add -g "@s0nderlabs/anima@${PKG_VERSION}"; then
+              break
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "::warning::install attempt $attempt failed (likely npm CDN propagation lag); sleeping 15s before retry"
+              sleep 15
+            else
+              echo "::error::install failed after 3 attempts at ${PKG_VERSION}"
+              exit 1
+            fi
+          done
           # Bun puts directly-installed bins at ~/.bun/bin/<name> and
           # transitive-dep bins at ~/.bun/install/global/node_modules/.bin/<name>.
           # `anima` is direct (the CLI package), `anima-gateway` is transitive.
