@@ -604,9 +604,10 @@ export function ChatApp(props: AppProps) {
           {'  ·  '}
         </text>
         {/* v0.22.0: perms label unifies with /yolo. When mode is 'off', show
-            "YOLO" in yellow so operators don't have to translate "perms: off"
-            into "auto-approve". Strict/prompt keep the literal mode for clarity. */}
-        <text fg={props.state.approvalsMode() === 'off' ? '#fbbf24' : '#9ca3af'} flexShrink={0}>
+            "YOLO" in red so operators read it as a danger signal — modals are
+            disabled, dangerous tool calls run without prompting. Strict/prompt
+            keep the literal mode in gray for clarity. */}
+        <text fg={props.state.approvalsMode() === 'off' ? '#ef4444' : '#9ca3af'} flexShrink={0}>
           {props.state.approvalsMode() === 'off' ? 'YOLO' : `perms: ${props.state.approvalsMode()}`}
         </text>
         {/* opentui's <Show> renders in resolution order, not JSX order; matching

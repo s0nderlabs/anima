@@ -4,7 +4,46 @@ import {
   formatMarkdownV2,
   isMarkdownParseError,
   stripMarkdownV2,
+  wrapGfmTablesInCodeBlocks,
 } from './markdown'
+
+describe('wrapGfmTablesInCodeBlocks (v0.22.1)', () => {
+  it('wraps a basic 3x3 GFM table in fences', () => {
+    const input = `Here you go:
+
+| Mode   | Behavior | Modal |
+|--------|----------|-------|
+| yolo   | auto     | no    |
+| prompt | approve  | yes   |
+| strict | deny     | no    |
+
+That's the table.`
+    const out = wrapGfmTablesInCodeBlocks(input)
+    expect(out).toContain('```\n| Mode')
+    expect(out).toContain('| strict | deny     | no    |\n```')
+    expect(out).toContain("That's the table.")
+  })
+
+  it('passes through text with no tables unchanged', () => {
+    expect(wrapGfmTablesInCodeBlocks('just prose')).toBe('just prose')
+    expect(wrapGfmTablesInCodeBlocks('| not | a table without separator')).toBe(
+      '| not | a table without separator',
+    )
+  })
+
+  it('handles alignment colons in separator row', () => {
+    const input = `| a | b |
+|:--|--:|
+| 1 | 2 |`
+    const out = wrapGfmTablesInCodeBlocks(input)
+    expect(out.startsWith('```')).toBe(true)
+    expect(out.endsWith('```')).toBe(true)
+  })
+
+  it('keeps non-table pipes intact', () => {
+    expect(wrapGfmTablesInCodeBlocks('use | as separator')).toBe('use | as separator')
+  })
+})
 
 describe('escapeMarkdownV2', () => {
   it('escapes all reserved characters', () => {

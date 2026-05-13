@@ -94,6 +94,15 @@ export class ProgressTracker {
   private canEdit = true
   private pendingTimer: ReturnType<typeof setTimeout> | null = null
   private finalized = false
+  /**
+   * Serialize all flush operations so the start-event's sendMessage finishes
+   * (assigning messageId) before any end-event's flush runs. Without this
+   * lock, fast tools that fire start+end within ~5ms (e.g. strict-deny path)
+   * would race two parallel sendMessage calls, producing a duplicate "tool
+   * starting" message followed by a separate "tool ended ✗" message instead
+   * of one in-place edit. v0.22.1 fix.
+   */
+  private flushLock: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly bot: Bot,
@@ -118,7 +127,13 @@ export class ProgressTracker {
       if (idx == null || this.lines[idx] == null) return
       this.lines[idx] = `${this.lines[idx]} ${ev.ok === false ? '✗' : '✓'}`
     }
-    await this.flush()
+    // Serialize: subsequent flushes wait for any in-flight sendMessage to
+    // resolve so the second flush sees the assigned messageId and routes to
+    // editMessageText, not a second sendMessage. v0.22.1 fix for fast-tool
+    // double-message regression.
+    const previous = this.flushLock
+    this.flushLock = previous.then(() => this.flush()).catch(() => {})
+    await this.flushLock
   }
 
   /**
@@ -131,7 +146,12 @@ export class ProgressTracker {
       clearTimeout(this.pendingTimer)
       this.pendingTimer = null
     }
-    await this.flush(true)
+    // Serialize through the lock so finalize doesn't race a still-flying
+    // push from the brain. Important for fast tools where end-event flush
+    // and finalize() race the same scratch message edit.
+    const previous = this.flushLock
+    this.flushLock = previous.then(() => this.flush(true)).catch(() => {})
+    await this.flushLock
     this.finalized = true
   }
 

@@ -4,6 +4,17 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.1] - 2026-05-13
+
+### Fixed
+
+- **TUI statusbar now shows `perms: strict` when strict mode is set.** Previously the statusbar collapsed strict to `prompt` for display (`state.setApprovalsMode(next === 'strict' ? 'prompt' : next)` in chat-sandbox.tsx + chat.tsx) which left operators thinking they were in prompt mode when the gateway was actually denying every dangerous call. Mapping dropped; statusbar reflects the real mode in all three modes.
+- **TG markdown tables now render readable on Telegram.** GFM `| col | col |` tables were sent raw to TG, which has no MarkdownV2 table syntax; pipes showed literally and columns drifted depending on TG client font. The plugin-telegram message formatter now detects GFM table blocks and wraps them in triple-backtick fences so TG renders them in monospace with the brain's space-padding preserved. New `wrapGfmTablesInCodeBlocks` helper at `packages/plugin-telegram/src/markdown.ts:168`.
+- **TG tool-call double-message race eliminated.** Fast tools (e.g. strict-deny path where start+end events fire within ~5ms) used to race two parallel `bot.api.sendMessage` calls because the second event saw `messageId === null` before the first send's promise resolved. Result: a "tool starting" message followed by a duplicate "tool ended ✗" message instead of one in-place edit. Added a promise-chain lock (`flushLock`) in `ProgressTracker.push` and `ProgressTracker.finalize` so all flushes are serialized.
+- **Brain ASCII-hyphen rule promoted to HARD CONSTRAINT.** Em-dash and en-dash compliance was previously a bullet under "Tone and style" the model occasionally slipped past. Moved to a dedicated `# HARD CONSTRAINTS (non-negotiable)` section at the top of the system prompt with concrete (correct → wrong) examples, the kind weak models actually internalize.
+
+[0.22.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.22.1
+
 ## [0.22.0] - 2026-05-13
 
 ### Added

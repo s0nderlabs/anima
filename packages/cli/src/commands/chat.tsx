@@ -1372,8 +1372,7 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     if (cmd === '/perms' || cmd.startsWith('/perms ')) {
       const arg = cmd.split(/\s+/)[1]
       const result = applyPerms(permission, arg)
-      // Statusline doesn't render `strict`; collapse to prompt for display only.
-      state.setApprovalsMode(result.mode === 'strict' ? 'prompt' : result.mode)
+      state.setApprovalsMode(result.mode)
       state.pushRow({ role: 'system', text: result.message })
       return true
     }

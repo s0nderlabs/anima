@@ -64,6 +64,13 @@ export function isMarkdownParseError(err: unknown): boolean {
 export function formatMarkdownV2(content: string): string {
   if (!content) return content
 
+  // GFM tables don't render in MarkdownV2 — pipes show literally and columns
+  // misalign. Wrap detected table blocks in ``` fences so TG renders them
+  // monospace + preserves column alignment. Detection: a line starting with
+  // `|` followed by a separator row (`|---|---|`) makes the start of a table;
+  // contiguous `|...|` lines are pulled in until the first non-table line.
+  const wrapped = wrapGfmTablesInCodeBlocks(content)
+
   const placeholders: string[] = []
   const ph = (value: string): string => {
     const key = `\x00PH${placeholders.length}\x00`
@@ -71,7 +78,7 @@ export function formatMarkdownV2(content: string): string {
     return key
   }
 
-  let text = content
+  let text = wrapped
 
   text = text.replace(/```(?:[^\n]*\n)?[\s\S]*?```/g, raw => {
     const newlineIdx = raw.indexOf('\n', 3)
@@ -143,6 +150,48 @@ function escapeStrayParens(text: string): string {
       })
     })
     .join('')
+}
+
+/**
+ * Detect GFM table blocks in the brain's reply and wrap them in ``` fences.
+ * TG MarkdownV2 doesn't render tables; without the fence, pipes show literally
+ * and columns drift. With the fence, TG renders monospace + preserves the
+ * brain's space padding so columns line up.
+ *
+ * Table boundary: a `|...|` row immediately followed by a separator row
+ * `|---|---|` (or `:---:`, `---|---`, etc.) is the start. Contiguous `|...|`
+ * data rows are pulled into the same block. First non-pipe line ends it.
+ */
+const TABLE_SEPARATOR_RE = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/
+const TABLE_ROW_RE = /^\s*\|.+\|?\s*$/
+
+export function wrapGfmTablesInCodeBlocks(text: string): string {
+  const lines = text.split('\n')
+  const out: string[] = []
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i] ?? ''
+    if (
+      TABLE_ROW_RE.test(line) &&
+      i + 1 < lines.length &&
+      TABLE_SEPARATOR_RE.test(lines[i + 1] ?? '')
+    ) {
+      const block: string[] = [line, lines[i + 1] ?? '']
+      let j = i + 2
+      while (j < lines.length && TABLE_ROW_RE.test(lines[j] ?? '')) {
+        block.push(lines[j] ?? '')
+        j += 1
+      }
+      out.push('```')
+      out.push(...block)
+      out.push('```')
+      i = j
+      continue
+    }
+    out.push(line)
+    i += 1
+  }
+  return out.join('\n')
 }
 
 function isInsideLinkUrl(seg: string, closeIdx: number): boolean {

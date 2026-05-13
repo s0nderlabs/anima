@@ -182,7 +182,7 @@ export async function runChatSandbox(
     // the gateway's actual mode after auto-spawn / restart cycles. The
     // statusline subsequently updates locally via the /yolo and /perms
     // slash handlers below.
-    approvalsMode: initialPermsMode === 'strict' ? 'prompt' : initialPermsMode,
+    approvalsMode: initialPermsMode,
   })
 
   const renderer = await createCliRenderer({
@@ -445,7 +445,7 @@ export async function runChatSandbox(
         // Re-read healthz for ground truth; cheap (~5ms) and immune to brain reply parsing.
         const h = await client.health().catch(() => null)
         const next = h?.permsMode
-        if (next) state.setApprovalsMode(next === 'strict' ? 'prompt' : next)
+        if (next) state.setApprovalsMode(next)
       } catch (e) {
         state.pushRow({
           role: 'system',
