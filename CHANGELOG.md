@@ -4,6 +4,12 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.16] - 2026-05-13
+
+### Fixed
+
+- **CI release smoke test path detection.** v0.21.15 publish succeeded but the post-publish smoke test failed (false positive) because it checked `~/.bun/install/global/node_modules/.bin/anima` for the CLI bin. Bun puts directly-installed package bins at `~/.bun/bin/<name>` and only transitive-dep bins at the `.bin/` dir. Smoke test now PATH-walks both directories and verifies all 7 published packages by package.json version. Also widens version verification to include the CLI package itself (was only checking gateway + 5 plugins). v0.21.15 is published correctly on npm; v0.21.16 just re-validates the path expectations CI checks.
+
 ## [0.21.15] - 2026-05-13
 
 ### Added

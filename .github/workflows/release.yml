@@ -227,40 +227,36 @@ jobs:
           SMOKE_DIR=$(mktemp -d)
           cd "$SMOKE_DIR"
           bun add -g "@s0nderlabs/anima@${PKG_VERSION}"
-          GLOBAL_BIN="$HOME/.bun/install/global/node_modules/.bin"
-          GLOBAL_GATEWAY_PKG="$HOME/.bun/install/global/node_modules/@s0nderlabs/anima-gateway/package.json"
-          if [ ! -x "$GLOBAL_BIN/anima-gateway" ]; then
-            echo "::error::anima-gateway binary missing at $GLOBAL_BIN/anima-gateway after global install"
-            ls -la "$GLOBAL_BIN" || true
-            exit 1
-          fi
-          if [ ! -x "$GLOBAL_BIN/anima" ]; then
-            echo "::error::anima CLI binary missing at $GLOBAL_BIN/anima after global install"
-            exit 1
-          fi
-          if [ ! -f "$GLOBAL_GATEWAY_PKG" ]; then
-            echo "::error::anima-gateway package.json missing at $GLOBAL_GATEWAY_PKG"
-            exit 1
-          fi
-          INSTALLED_VERSION=$(node -p "require('$GLOBAL_GATEWAY_PKG').version")
-          if [ "$INSTALLED_VERSION" != "$PKG_VERSION" ]; then
-            echo "::error::installed anima-gateway version ($INSTALLED_VERSION) does not match published version ($PKG_VERSION)"
-            exit 1
-          fi
-          # Verify all sibling packages are present at the matching version.
-          for sub in anima-core anima-plugin-comms anima-plugin-onchain anima-plugin-system anima-plugin-telegram; do
-            SUB_PKG="$HOME/.bun/install/global/node_modules/@s0nderlabs/${sub}/package.json"
-            if [ ! -f "$SUB_PKG" ]; then
-              echo "::error::sibling package @s0nderlabs/${sub} not installed (missing $SUB_PKG)"
+          # Bun puts directly-installed bins at ~/.bun/bin/<name> and
+          # transitive-dep bins at ~/.bun/install/global/node_modules/.bin/<name>.
+          # `anima` is direct (the CLI package), `anima-gateway` is transitive.
+          # PATH-walk both dirs so bin lookups don't depend on layout knowledge.
+          export PATH="$HOME/.bun/bin:$HOME/.bun/install/global/node_modules/.bin:$PATH"
+          for bin in anima anima-gateway; do
+            if ! command -v "$bin" >/dev/null 2>&1; then
+              echo "::error::$bin not found on PATH after global install"
+              echo "~/.bun/bin contents:" && ls -la "$HOME/.bun/bin" || true
+              echo "~/.bun/install/global/node_modules/.bin contents:" && ls -la "$HOME/.bun/install/global/node_modules/.bin" || true
               exit 1
             fi
-            SUB_VERSION=$(node -p "require('$SUB_PKG').version")
-            if [ "$SUB_VERSION" != "$PKG_VERSION" ]; then
-              echo "::error::@s0nderlabs/${sub}@${SUB_VERSION} does not match expected ${PKG_VERSION}"
-              exit 1
-            fi
+            echo "  ✓ $bin → $(command -v "$bin")"
           done
-          echo "Smoke test passed: anima-gateway + 6 sibling packages all at ${PKG_VERSION}"
+          # Verify version of every installed @s0nderlabs/anima-* package.
+          # 6 packages total: cli + gateway + core + 3 plugins (telegram lives under deps).
+          for pkg in anima anima-gateway anima-core anima-plugin-comms anima-plugin-onchain anima-plugin-system anima-plugin-telegram; do
+            PKG_JSON="$HOME/.bun/install/global/node_modules/@s0nderlabs/${pkg}/package.json"
+            if [ ! -f "$PKG_JSON" ]; then
+              echo "::error::@s0nderlabs/${pkg} not installed (missing $PKG_JSON)"
+              exit 1
+            fi
+            INSTALLED_VERSION=$(node -p "require('$PKG_JSON').version")
+            if [ "$INSTALLED_VERSION" != "$PKG_VERSION" ]; then
+              echo "::error::@s0nderlabs/${pkg}@${INSTALLED_VERSION} does not match expected ${PKG_VERSION}"
+              exit 1
+            fi
+            echo "  ✓ @s0nderlabs/${pkg}@${INSTALLED_VERSION}"
+          done
+          echo "Smoke test passed: 7 packages installed + bins resolve at ${PKG_VERSION}"
 
       - name: Create GitHub release
         env:
