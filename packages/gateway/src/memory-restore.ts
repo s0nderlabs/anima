@@ -92,11 +92,31 @@ async function restoreSlot(
   if (await fileNonEmpty(path)) {
     return { slot: entry.dataDescription, path, status: 'skipped', reason: 'local-wins' }
   }
-  try {
-    const ciphertext = await downloadBlob(entry.dataHash)
-    if (!ciphertext) {
-      return { slot: entry.dataDescription, path, status: 'failed', reason: 'blob-not-found' }
+  // v0.22.0: 3-attempt retry with 2s backoff. 0G Storage's getFileLocations
+  // can return empty during transient indexer degradation, and the
+  // discovered-nodes fallback also returns null when no finalized=true node
+  // responds for a hash. A single shot at boot was the silent-failure mode
+  // that left enigma's identity/persona slots missing after a reprovision.
+  // Cap at 3 because the boot path is on the user's wait time.
+  let ciphertext: Uint8Array | null = null
+  let lastError: Error | null = null
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      ciphertext = await downloadBlob(entry.dataHash)
+      if (ciphertext) break
+    } catch (err) {
+      lastError = err as Error
     }
+    if (attempt < 3) await new Promise(resolve => setTimeout(resolve, 2000))
+  }
+  if (!ciphertext) {
+    const reason = lastError ? lastError.message.slice(0, 200) : 'blob-not-found'
+    console.warn(
+      `[memory-restore] slot=${entry.dataDescription} status=failed reason=${reason} root=${entry.dataHash.slice(0, 18)}...`,
+    )
+    return { slot: entry.dataDescription, path, status: 'failed', reason }
+  }
+  try {
     const plaintext = decryptMemoryBytes(ciphertext, memoryKey)
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, plaintext)
@@ -107,11 +127,17 @@ async function restoreSlot(
       bytes: plaintext.length,
     }
   } catch (e) {
+    const reason = (e as Error).message.slice(0, 200)
+    // v0.22.0: surface decrypt failures (wrong key, truncated blob) too — they
+    // were silently swallowed by events.publish before.
+    console.warn(
+      `[memory-restore] slot=${entry.dataDescription} status=failed reason=${reason} (decrypt) root=${entry.dataHash.slice(0, 18)}...`,
+    )
     return {
       slot: entry.dataDescription,
       path,
       status: 'failed',
-      reason: (e as Error).message.slice(0, 200),
+      reason,
     }
   }
 }

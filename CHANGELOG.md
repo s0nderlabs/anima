@@ -4,6 +4,39 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.0] - 2026-05-13
+
+### Added
+
+- **TUI markdown renderer now handles GFM tables.** Brain-emitted `| col | col |` blocks now render as aligned columns with a box-drawing divider under the header row instead of raw pipes. Single-column tables (`|---|`) are supported too. See `packages/cli/src/ui/markdown-parse.ts`.
+- **Statusline shows `sandbox` billing reserve** alongside `wallet` and `compute` for sandbox-deployed agents. Polls every 30s, refreshes after every chat turn.
+- **Per-turn lazy retry for memory-restore slots that failed at boot.** Transient 0G Storage indexer hiccups now self-heal on the next chat turn — `restoreMemoryFromChain` is fired (single-flight) before each `buildPrefix`, and identity/persona files are re-read from disk so recovered content lands in the brain's frozen prefix without a daemon restart.
+
+### Changed
+
+- **Statusline format unified.** New layout: `agent <name-or-id>  <full-EOA>  YOLO  ·  wallet X  ·  compute Y  ·  sandbox Z`. Drops the 0G Compute brain-provider address (operators never acted on it). Shows the registered `.0g` subname from `config.subname` when available; falls back to the 16-char agent ID hash. Uses the full agent EOA (no `shortAddr`) so chain explorers and auto-topup audits stay copy-paste friendly.
+- **"YOLO" replaces "perms: off"** in the statusline when permission mode is `off`. Same underlying state, clearer label. Rendered in amber (`#fbbf24`).
+- **System prompt now instructs the brain to use ASCII hyphens, not em-dashes** (U+2014 / U+2013). Project hard rule per global CLAUDE.md. Applies on every surface (TUI, Telegram, web).
+
+### Fixed
+
+- **TG bypass commands `/yolo`, `/perms`, `/reset` now actually fire from Telegram.** The channel envelope wrapping (`<channel source="telegram" ...>...</channel>`) was applied to inbound text BEFORE the bypass parser ran, and `parseBypassCommand` checks `startsWith('/')` — which the wrapped text doesn't. Now strips the envelope via the new `stripTelegramChannelEnvelope` helper before the bypass check. Brain dispatch still receives the wrapped text (channel context matters).
+- **TG turns no longer override a globally-set yolo or strict permission mode.** Previously every TG turn unconditionally called `permission.setMode('prompt')`, so `/yolo` (off) or `/perms strict` had no effect during TG turns — modals appeared anyway. Now guards the override behind `previousMode !== 'off' && previousMode !== 'strict'`.
+- **Boot-time memory restore now retries up to 3× per slot with 2s backoff** and surfaces failures via `console.warn` (visible in `anima-gateway.log`). Previously a transient 0G Storage indexer outage left identity/persona/MEMORY missing for the entire session with zero operator-visible signal — events.publish('log', ...) goes only to in-memory SSE subscribers which are zero at boot phase. Decryption failures also surface now.
+
+### CI
+
+- **`release.yml` smoke-test step busts `~/.bun/install/cache/@s0nderlabs` before each retry.** Earlier `bun install --frozen-lockfile` step warmed the packument cache BEFORE the publish steps; subsequent `bun add -g` reads cached packument and reports `No version matching <NEW>` indefinitely even though the registry has the version. Retries didn't help because bun re-reads the same poisoned cache. Manifests as v0.21.20 ("CDN-propagation-shaped failure") and v0.21.21 (3 retries failed identically). Diagnosed via local-peer collab, fixed in commit `3491c6b`.
+
+### Internal
+
+- New `stripTelegramChannelEnvelope(text)` helper exported from `@s0nderlabs/anima-plugin-telegram`. Lives next to its forward counterpart `formatTelegramChannel`.
+- `MemorySyncManager` boot path captures failed slots into a `pendingRestoreFailed` flag + single-flight `lazyRestoreInFlight` promise. `buildPrefix` triggers a non-blocking retry on every turn when any slot is still failed.
+- `chat-sandbox.tsx` now polls EOA + compute ledger + sandbox billing reserve directly from chain via `viem` + `getLedgerDetailReadOnly` + `getSandboxBillingReserve`. 30s interval, fires after every chat turn, cleaned up on exit.
+- Test count +12 across `format.test.ts` (5 strip + bypass cases), `markdown.test.ts` (4 table cases), `memory-restore.test.ts` (3 retry cases), `frozen-prefix.test.ts` (1 em-dash rule case).
+
+[0.22.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.22.0
+
 ## [0.21.21] - 2026-05-13
 
 ### Added

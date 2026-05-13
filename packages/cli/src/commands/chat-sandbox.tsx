@@ -2,17 +2,19 @@ import { spinner } from '@clack/prompts'
 import {
   type AnimaConfig,
   type AnimaNetwork,
+  NETWORK_RPC,
   type PermissionDecision,
   type PermissionRequest,
   SANDBOX_PROVIDER_URL_GALILEO,
   SandboxProviderClient,
+  getLedgerDetailReadOnly,
+  getSandboxBillingReserve,
   iNFTAgentId,
 } from '@s0nderlabs/anima-core'
 import type { GatewayEventKind } from '@s0nderlabs/anima-gateway'
-import type { Address } from 'viem'
+import { http, type Address, createPublicClient, formatEther } from 'viem'
 import { SandboxClient } from '../sandbox/client'
 import { summarizeApprovalSubject } from '../ui/approval-summary'
-import { shortAddr } from '../util/format'
 import { loadTelegramHandoffSecrets } from '../util/telegram-secrets'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 import { resumeArchivedSandbox, unlockAgentKeystore } from './init/sandbox-provision'
@@ -174,8 +176,8 @@ export async function runChatSandbox(
 
   const state = createChatState({
     initialSystem: `connected to sandbox ${sandboxId.slice(0, 8)} @ ${sandboxEndpoint}`,
-    identityLabel: `agent ${agentId}  ${shortAddr(agentAddress)}`,
-    brainLabel: shortAddr(config.brain.provider),
+    // v0.22.0: subname (if registered) + full EOA. Brain provider dropped.
+    identityLabel: `agent ${config.subname ?? agentId}  ${agentAddress}`,
     // v0.21.13: seeded from /healthz.permsMode so the statusline reflects
     // the gateway's actual mode after auto-spawn / restart cycles. The
     // statusline subsequently updates locally via the /yolo and /perms
@@ -345,6 +347,35 @@ export async function runChatSandbox(
     }
   })()
 
+  // v0.22.0: poll balances directly from chain. Sandbox-deployed agents still
+  // have their EOA + compute ledger on-chain (agent privkey signs from inside
+  // the container), and the sandbox billing reserve is read against the
+  // settlement contract using the operator's address. All three queries are
+  // read-only RPC and never touch the daemon, so they're safe at any moment.
+  const balanceRpcNetwork = config.network as AnimaNetwork
+  const balancePublicClient = createPublicClient({
+    transport: http(NETWORK_RPC[balanceRpcNetwork]),
+  })
+  const operatorAddressForBilling = config.identity?.operator as Address | undefined
+  const refreshBalances = (): void => {
+    balancePublicClient
+      .getBalance({ address: agentAddress })
+      .then(wei => state.setEoaBalance(Number(formatEther(wei))))
+      .catch(() => {})
+    getLedgerDetailReadOnly({ network: balanceRpcNetwork, agentAddress })
+      .then(detail => {
+        if (detail) state.setBalance(Number(formatEther(detail.totalBalance)))
+      })
+      .catch(() => {})
+    if (operatorAddressForBilling) {
+      getSandboxBillingReserve({ recipient: operatorAddressForBilling })
+        .then(wei => state.setSandboxBalance(Number(formatEther(wei))))
+        .catch(() => {})
+    }
+  }
+  refreshBalances()
+  const balanceTimer = setInterval(refreshBalances, 30_000)
+
   const handleSubmit = async (text: string): Promise<void> => {
     const trimmed = text.trim()
     if (trimmed.startsWith('/')) {
@@ -363,6 +394,8 @@ export async function runChatSandbox(
       if (r.syncTx) {
         state.pushRow({ role: 'system', text: `auto-sync → tx ${r.syncTx}` })
       }
+      // v0.22.0: chain ops drained balances; refresh statusline.
+      refreshBalances()
     } catch (err) {
       state.pushRow({
         role: 'system',
@@ -445,6 +478,7 @@ export async function runChatSandbox(
 
   const handleExit = (): void => {
     eventSignal.abort()
+    clearInterval(balanceTimer)
     void eventLoop.then(() => {})
     try {
       renderer.destroy()

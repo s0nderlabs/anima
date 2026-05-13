@@ -163,7 +163,7 @@ describe('restoreMemoryFromChain', () => {
     expect(outcomes[0]!.status).toBe('failed')
     expect(outcomes[0]!.reason).toBe('blob-not-found')
     expect(outcomes[1]!.status).toBe('failed')
-  })
+  }, 15_000)
 
   test('keystore + profile slots are filtered before download', async () => {
     const dir = await setupAgentDir()
@@ -198,4 +198,69 @@ describe('restoreMemoryFromChain', () => {
     )
     expect(outcomes).toEqual([])
   })
+
+  // v0.22.0: 3-attempt retry per slot with 2s backoff between attempts.
+  // Validates that transient indexer hiccups (null returned once, content
+  // returned on second poll) get recovered before we give up on the slot.
+  test('retries download up to 3 times when first attempt returns null', async () => {
+    const dir = await setupAgentDir()
+    const agentPrivkey = generatePrivateKey()
+    const key = deriveMemoryKey(agentPrivkey)
+    const ciphertext = encryptMemoryBytes(new TextEncoder().encode('# Persona\nrecovered'), key)
+    let attempts = 0
+    const outcomes = await restoreMemoryFromChain(
+      baseOpts(
+        dir,
+        async () => [{ dataDescription: 'persona', dataHash: HASH_A }],
+        async () => {
+          attempts++
+          // Fail first attempt, succeed second
+          return attempts >= 2 ? ciphertext : null
+        },
+        agentPrivkey,
+      ),
+    )
+    expect(attempts).toBe(2)
+    expect(outcomes[0]!.status).toBe('restored')
+    expect(await readFile(join(dir, 'memory/agent/persona.md'), 'utf8')).toBe(
+      '# Persona\nrecovered',
+    )
+  }, 10_000)
+
+  test('gives up after 3 attempts and reports blob-not-found', async () => {
+    const dir = await setupAgentDir()
+    let attempts = 0
+    const outcomes = await restoreMemoryFromChain(
+      baseOpts(
+        dir,
+        async () => [{ dataDescription: 'identity', dataHash: HASH_A }],
+        async () => {
+          attempts++
+          return null
+        },
+      ),
+    )
+    expect(attempts).toBe(3)
+    expect(outcomes[0]!.status).toBe('failed')
+    expect(outcomes[0]!.reason).toBe('blob-not-found')
+  }, 15_000)
+
+  test('thrown errors during download also count as a retry attempt', async () => {
+    const dir = await setupAgentDir()
+    let attempts = 0
+    const outcomes = await restoreMemoryFromChain(
+      baseOpts(
+        dir,
+        async () => [{ dataDescription: 'identity', dataHash: HASH_A }],
+        async () => {
+          attempts++
+          throw new Error(`network blip ${attempts}`)
+        },
+      ),
+    )
+    expect(attempts).toBe(3)
+    expect(outcomes[0]!.status).toBe('failed')
+    // Should surface the last error message, not 'blob-not-found'
+    expect(outcomes[0]!.reason).toContain('network blip 3')
+  }, 15_000)
 })

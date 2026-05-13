@@ -711,8 +711,13 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     initialSystem: opts?.yolo
       ? 'connected. YOLO mode: approval prompts disabled.'
       : 'connected. type messages and press enter.',
-    identityLabel: `agent ${agentId}  ${shortAddr(agentAddress)}`,
-    brainLabel: shortAddr(config.brain.provider!),
+    // v0.22.0: show .0g subname when registered, fall back to the 16-char
+    // agent ID hash. Use the FULL agent EOA (no shortAddr) so operators see
+    // the complete address — useful for chain explorers + auto-topup audits.
+    // Brain provider address dropped from statusline entirely; it had been
+    // visual noise nobody acted on. Brain identity surfaces via singletons
+    // in the frozen prefix and /healthz.brainProvider for operators.
+    identityLabel: `agent ${config.subname ?? agentId}  ${agentAddress}`,
     approvalsMode: initialMode,
   })
 

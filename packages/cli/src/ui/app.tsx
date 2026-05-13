@@ -603,14 +603,11 @@ export function ChatApp(props: AppProps) {
         <text fg="#374151" flexShrink={0}>
           {'  ·  '}
         </text>
-        <text fg="#9ca3af" flexShrink={0}>
-          {props.state.brainLabel}
-        </text>
-        <text fg="#374151" flexShrink={0}>
-          {'  ·  '}
-        </text>
+        {/* v0.22.0: perms label unifies with /yolo. When mode is 'off', show
+            "YOLO" in yellow so operators don't have to translate "perms: off"
+            into "auto-approve". Strict/prompt keep the literal mode for clarity. */}
         <text fg={props.state.approvalsMode() === 'off' ? '#fbbf24' : '#9ca3af'} flexShrink={0}>
-          {`perms: ${props.state.approvalsMode()}`}
+          {props.state.approvalsMode() === 'off' ? 'YOLO' : `perms: ${props.state.approvalsMode()}`}
         </text>
         {/* opentui's <Show> renders in resolution order, not JSX order; matching
             here keeps intent obvious. Wallet first because EOA gas starves first. */}
@@ -634,6 +631,17 @@ export function ChatApp(props: AppProps) {
           </text>
           <text fg={balanceColor(props.state.balance())} flexShrink={0}>
             {formatBalance(props.state.balance())}
+          </text>
+        </Show>
+        <Show when={props.state.sandboxBalance() != null}>
+          <text fg="#374151" flexShrink={0}>
+            {'  ·  '}
+          </text>
+          <text fg="#6b7280" flexShrink={0}>
+            {'sandbox '}
+          </text>
+          <text fg={balanceColor(props.state.sandboxBalance())} flexShrink={0}>
+            {formatBalance(props.state.sandboxBalance())}
           </text>
         </Show>
         <Show when={props.state.activeJobCount() > 0}>

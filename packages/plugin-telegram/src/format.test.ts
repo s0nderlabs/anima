@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test'
-import { formatInboundPreview, formatTelegramChannel } from './format'
+import { formatInboundPreview, formatTelegramChannel, stripTelegramChannelEnvelope } from './format'
+import { parseBypassCommand } from './session-state'
 
 describe('formatTelegramChannel', () => {
   it('wraps text in channel tags with username', () => {
@@ -41,6 +42,51 @@ describe('formatTelegramChannel', () => {
         text: 'x',
       }),
     ).toBe('<channel source="telegram" chat="1" user="&quot;quote">x</channel>')
+  })
+})
+
+describe('stripTelegramChannelEnvelope', () => {
+  it('strips the envelope and returns inner text', () => {
+    expect(
+      stripTelegramChannelEnvelope(
+        '<channel source="telegram" chat="42" user="el">hello world</channel>',
+      ),
+    ).toBe('hello world')
+  })
+  it('returns input unchanged when no envelope present', () => {
+    expect(stripTelegramChannelEnvelope('hello world')).toBe('hello world')
+    expect(stripTelegramChannelEnvelope('/yolo')).toBe('/yolo')
+  })
+  it('preserves multi-line + nested-bracket content', () => {
+    expect(
+      stripTelegramChannelEnvelope(
+        '<channel source="telegram" chat="1" user="a">line 1\nline 2 with &lt;br&gt; tag</channel>',
+      ),
+    ).toBe('line 1\nline 2 with &lt;br&gt; tag')
+  })
+  // v0.22.0 regression: TG bypass commands (/yolo /perms /reset) fell through
+  // to the brain because parseBypassCommand was given the wrapped string. The
+  // wrapped string starts with '<channel' not '/', so the bypass parser
+  // returns null. After the strip, parseBypassCommand intercepts correctly.
+  it('lets parseBypassCommand intercept after strip (regression)', () => {
+    const wrapped = '<channel source="telegram" chat="1" user="el">/yolo</channel>'
+    expect(parseBypassCommand(wrapped)).toBeNull()
+    expect(parseBypassCommand(stripTelegramChannelEnvelope(wrapped))).toEqual({
+      command: '/yolo',
+      args: [],
+    })
+  })
+  it('handles /perms strict and /reset the same way', () => {
+    const yolo = '<channel source="telegram" chat="1" user="el">/perms strict</channel>'
+    expect(parseBypassCommand(stripTelegramChannelEnvelope(yolo))).toEqual({
+      command: '/perms',
+      args: ['strict'],
+    })
+    const reset = '<channel source="telegram" chat="1" user="el">/reset</channel>'
+    expect(parseBypassCommand(stripTelegramChannelEnvelope(reset))).toEqual({
+      command: '/reset',
+      args: [],
+    })
   })
 })
 

@@ -63,6 +63,7 @@ import {
   formatInboundPreview as formatTelegramInboundPreview,
   makeApprovalIdFactory,
   parseBypassCommand,
+  stripTelegramChannelEnvelope,
 } from '@s0nderlabs/anima-plugin-telegram'
 import type { Address, Hex } from 'viem'
 import type { ApprovalRelay } from './approval-relay'
@@ -277,6 +278,43 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
         message: `memory-restore-failed: ${o.slot} (${o.reason})`,
       })
     }
+  }
+
+  // v0.22.0: lazy retry for boot-time restore failures. If any slot stayed
+  // 'failed' after the 3-attempt in-boot retry (transient 0G Storage indexer
+  // degradation), the next chat turn fires another `restoreMemoryFromChain`
+  // call (single-flight). `restoreMemoryFromChain` is idempotent — already-
+  // restored slots get `status: 'skipped', reason: 'local-wins'` and don't
+  // re-download. Brain self-heals on the next turn when storage recovers.
+  let pendingRestoreFailed = restoreOutcomes.some(o => o.status === 'failed')
+  let lazyRestoreInFlight: Promise<void> | null = null
+  const triggerLazyRestore = (): void => {
+    if (!pendingRestoreFailed) return
+    if (lazyRestoreInFlight) return
+    lazyRestoreInFlight = restoreMemoryFromChain({
+      network,
+      contractAddress,
+      tokenId,
+      agentPrivkey,
+      agentDir,
+    })
+      .then(outs => {
+        const stillFailed = outs.some(o => o.status === 'failed')
+        for (const o of outs) {
+          if (o.status === 'restored') {
+            console.warn(
+              `[memory-restore] lazy-recovered slot=${o.slot} → ${o.path} (${o.bytes} bytes)`,
+            )
+          }
+        }
+        pendingRestoreFailed = stillFailed
+      })
+      .catch(err => {
+        console.warn(`[memory-restore] lazy retry threw: ${(err as Error).message.slice(0, 200)}`)
+      })
+      .finally(() => {
+        lazyRestoreInFlight = null
+      })
   }
 
   // 1. ToolRegistry + memory tools
@@ -595,11 +633,19 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
   if (telegram) extraGuidance.push(TELEGRAM_GUIDANCE)
 
   const buildPrefix = async () => {
-    const idx = await readIndexFile(memoryIndexPath).catch(() => null)
+    // v0.22.0: re-read identity/persona/index each turn so a successful
+    // lazy-retry restore lands in the next prompt without a daemon restart.
+    // Also kick the lazy retry (single-flight) for any slot still missing.
+    triggerLazyRestore()
+    const [idx, identityFresh, personaFresh] = await Promise.all([
+      readIndexFile(memoryIndexPath).catch(() => null),
+      readMemoryFileOrNull(`${memoryDir}/agent/identity.md`),
+      readMemoryFileOrNull(`${memoryDir}/agent/persona.md`),
+    ])
     return buildFrozenPrefix({
       memoryIndex: idx,
-      identity: identityText,
-      persona: personaText,
+      identity: identityFresh ?? identityText,
+      persona: personaFresh ?? personaText,
       loadedToolNames,
       skills: skillsRef.current,
       promptAppend,
@@ -757,6 +803,15 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
     }
     slot.current = async input => {
       ensureApprovalCallback()
+      // Strip the channel envelope ONCE for preview + bypass parsing. The brain
+      // dispatch path further down still receives `input.text` with envelope
+      // intact (source/chat/user context matters for brain reasoning).
+      // v0.22.0: previously the strip lived inline in the preview build only,
+      // leaving parseBypassCommand to see the wrapped text. That text starts
+      // with `<channel ...>` not `/`, so `/yolo` `/perms` `/reset` from TG
+      // silently fell through to the brain instead of intercepting.
+      const innerText = stripTelegramChannelEnvelope(input.text)
+
       // Publish inbound event so chat-sandbox.tsx renders a row.
       events.publish('listener-event', {
         kind: 'telegram-inbound',
@@ -768,14 +823,14 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
           chatId: input.chatId,
           username: input.username,
           displayName: input.displayName,
-          text: input.text.replace(/^<channel[^>]*>([\s\S]*)<\/channel>$/, '$1'),
+          text: innerText,
         }),
       })
 
       // v0.20.0: bypass commands intercepted BEFORE brain.infer. Mirrors the
       // chat-telegram.ts handleBypass flow so /yolo, /perms, /reset work in
       // sandbox + gateway-local mode, not just the legacy in-process TUI path.
-      const bypass = parseBypassCommand(input.text)
+      const bypass = parseBypassCommand(innerText)
       if (bypass) {
         const reply = await dispatchTelegramBypass(bypass, input.sessionKey, permission, brain)
         return { response: reply }
@@ -829,8 +884,16 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
               })
           })
         })
-        permission.setMode('prompt')
-      } else {
+        // v0.22.0: respect a globally-set yolo (off) or strict mode. Previously
+        // every TG turn unconditionally forced 'prompt', clobbering whatever
+        // the operator set via /yolo or /perms strict. The finally-block at
+        // the bottom of this turn handler still restores `previousMode`, so
+        // the only effect of skipping the override here is honoring it during
+        // the turn itself.
+        if (previousMode !== 'off' && previousMode !== 'strict') {
+          permission.setMode('prompt')
+        }
+      } else if (previousMode !== 'off') {
         permission.setMode('off')
       }
       try {

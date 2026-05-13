@@ -21,6 +21,24 @@ export function formatTelegramChannel(input: FormatTelegramChannelInput): string
 }
 
 /**
+ * Inverse of `formatTelegramChannel`: strip the channel envelope and return
+ * the raw inner text. Used by the gateway's TG slot to feed bypass-command
+ * parsing the un-wrapped string (the wrapper would make `parseBypassCommand`'s
+ * `startsWith('/')` check fail and silently drop `/yolo` etc).
+ *
+ * v0.22.0: extracted into plugin-telegram so the regex source lives next to
+ * its forward counterpart `formatTelegramChannel`. If we ever change the
+ * envelope shape (add fields, swap quoting), both stay in sync.
+ *
+ * Returns the input unchanged when there is no envelope (idempotent — safe to
+ * call on already-stripped or non-TG input).
+ */
+const CHANNEL_ENVELOPE_RE = /^<channel[^>]*>([\s\S]*)<\/channel>$/
+export function stripTelegramChannelEnvelope(text: string): string {
+  return text.replace(CHANNEL_ENVELOPE_RE, '$1')
+}
+
+/**
  * One-line preview of an inbound TG message for TUI rows + activity log.
  * Truncated to 80 chars; never includes the bot token or any envelope bytes.
  */

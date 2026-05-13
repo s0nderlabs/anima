@@ -34,7 +34,11 @@ export {
   formatApprovalResolution,
 } from './listener'
 export { buildSessionKey, sanitizeAgentName } from './session-key'
-export { formatTelegramChannel, formatInboundPreview } from './format'
+export {
+  formatTelegramChannel,
+  formatInboundPreview,
+  stripTelegramChannelEnvelope,
+} from './format'
 export { RateLimiter } from './limits'
 export { sanitizeInbound, type SanitizeReason, type SanitizeResult } from './sanitize'
 export { formatPairingMessage } from './pairing-flow'

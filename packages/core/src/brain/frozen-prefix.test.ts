@@ -221,3 +221,15 @@ test('skill-shadow filter keeps anima-source skills with the same name', () => {
   const p = buildFrozenPrefix({ memoryIndex: null, timestamp: null, skills })
   expect(p.skillIndexText).toContain('anima:browser')
 })
+
+// v0.22.0: brain emitted em-dashes in prose + table separators, violating the
+// project hard rule (global CLAUDE.md). The system prompt now carries an
+// explicit ASCII-hyphen rule in the Tone and style section.
+test('system prompt instructs brain to use ASCII hyphens, not em-dashes', () => {
+  const p = buildFrozenPrefix({ memoryIndex: null, timestamp: null })
+  const rendered = renderFrozenPrefix(p)
+  expect(rendered).toMatch(/ASCII hyphens/)
+  expect(rendered).toMatch(/em-dashes/)
+  // Reference U+2014 explicitly so the brain knows the exact codepoint
+  expect(rendered).toMatch(/U\+2014/)
+})

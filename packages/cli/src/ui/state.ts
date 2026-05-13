@@ -44,7 +44,6 @@ export interface PendingApproval {
 interface CreateChatStateOpts {
   initialSystem: string
   identityLabel: string
-  brainLabel: string
   approvalsMode: PermissionMode
 }
 
@@ -65,6 +64,11 @@ export function createChatState(opts: CreateChatStateOpts) {
   // inbox.send, sync's updateSlots anchor). Typically starves before the
   // compute ledger in long sessions (~0.001 0G/send at 4 gwei).
   const [eoaBalance, setEoaBalance] = createSignal<number | null>(null)
+  // v0.22.0: 0G Sandbox billing reserve, in 0G. Sandbox-deployed agents only —
+  // local-mode TUI stays null and the statusline `<Show>` hides the segment.
+  // Auto-topup refills this when it dips below the configured threshold; the
+  // statusline mirror lets operators see the same balance without leaving TUI.
+  const [sandboxBalance, setSandboxBalance] = createSignal<number | null>(null)
   // ms epoch when current turn started (status flipped to 'thinking'). The
   // spinner row reads this and renders elapsed seconds. Cleared on idle.
   const [turnStartedAt, setTurnStartedAt] = createSignal<number | null>(null)
@@ -154,6 +158,7 @@ export function createChatState(opts: CreateChatStateOpts) {
     approvalsMode,
     balance,
     eoaBalance,
+    sandboxBalance,
     turnStartedAt,
     activeAbort,
     activeJobCount,
@@ -166,6 +171,7 @@ export function createChatState(opts: CreateChatStateOpts) {
     setApprovalsMode,
     setBalance,
     setEoaBalance,
+    setSandboxBalance,
     setTurnStartedAt,
     setActiveAbort,
     setSlashMatches,
@@ -174,7 +180,6 @@ export function createChatState(opts: CreateChatStateOpts) {
     pushRow,
     onStatusChange,
     identityLabel: opts.identityLabel,
-    brainLabel: opts.brainLabel,
   }
 }
 
