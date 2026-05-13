@@ -226,17 +226,23 @@ jobs:
           PKG_VERSION="$(node -p "require('./package.json').version")"
           SMOKE_DIR=$(mktemp -d)
           cd "$SMOKE_DIR"
-          # npm CDN edges occasionally lag the publish API by a few seconds, so
-          # `bun add -g` can race and fail to resolve sibling tarballs (e.g.
-          # @s0nderlabs/anima-core) that were just published. Retry up to 3
-          # times with 15s sleeps before giving up. Matches the propagation
-          # guard /seal Step 7d uses operator-side. Hit live on v0.21.20 ship.
+          # Bun's resolver caches the packument fetched during the earlier
+          # `Install deps` step (bun install). That cache predates the publish
+          # steps above, so `bun add -g` reads stale data and reports
+          # "No version matching <NEW_VERSION>" indefinitely — even though the
+          # registry has the version (the curl-based "Verify published deps"
+          # step passed). Plain retries don't help: bun re-reads the same
+          # poisoned cache. Bust the @s0nderlabs scope before each attempt so
+          # the next `bun add -g` re-fetches the fresh packument. Hit live on
+          # v0.21.20 (CDN-propagation-shaped failure, masked the real cause)
+          # and v0.21.21 (3 retries failed identically, exposing the cache).
           for attempt in 1 2 3; do
+            rm -rf "$HOME/.bun/install/cache/@s0nderlabs"
             if bun add -g "@s0nderlabs/anima@${PKG_VERSION}"; then
               break
             fi
             if [ "$attempt" -lt 3 ]; then
-              echo "::warning::install attempt $attempt failed (likely npm CDN propagation lag); sleeping 15s before retry"
+              echo "::warning::install attempt $attempt failed (likely bun packument cache poisoning); cleared @s0nderlabs cache, sleeping 15s before retry"
               sleep 15
             else
               echo "::error::install failed after 3 attempts at ${PKG_VERSION}"
