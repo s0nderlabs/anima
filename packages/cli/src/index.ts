@@ -58,6 +58,18 @@ async function main(): Promise<void> {
       await runRestore({ ref })
       return
     }
+    case 'transfer': {
+      const { parseTransferArgs, runTransfer } = await import('./commands/transfer')
+      const parsed = parseTransferArgs(argv.slice(1))
+      if ('error' in parsed) {
+        console.error(
+          `anima transfer: ${parsed.error}\n  usage: anima transfer <iNFT-ref> --to <addr> [--recipient-key 0x...] [--dry-run] [--yes] [--no-purge]`,
+        )
+        process.exit(1)
+      }
+      await runTransfer(parsed)
+      return
+    }
     case 'topup': {
       const agentIdx = argv.indexOf('--agent')
       const computeIdx = argv.indexOf('--compute')

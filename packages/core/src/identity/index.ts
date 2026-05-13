@@ -30,8 +30,16 @@ export { mintAgent, iNFTAgentId, type MintAgentOpts } from './mint'
 export { derivePubkeyHex } from './pubkey'
 export {
   persistKeystoreToStorage,
+  reEncryptKeystoreForRecipient,
   restoreKeystoreFromStorage,
 } from './keystore-storage'
+export {
+  type BuildTransferHashesArgs,
+  type TransferProofPreimageArgs,
+  buildTransferHashes,
+  signTransferProof,
+  transferProofPreimage,
+} from './transfer'
 export {
   uploadKeystore,
   saveKeystoreLocally,

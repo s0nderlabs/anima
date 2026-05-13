@@ -1,6 +1,13 @@
 import type { Address, Hex } from 'viem'
 import type { AnimaNetwork } from '../config'
+import type { OperatorSigner } from '../operator/signer'
 import { OGStorage, downloadBlobByRoot } from '../storage'
+import {
+  decodeKeystoreBytes,
+  decryptAgentKey,
+  encodeKeystoreBytes,
+  encryptAgentKey,
+} from '../wallet/operator-keystore-crypto'
 import { AnimaAgentNFTClient, AnimaAgentNFTReader, bootstrapHashFor } from './contract'
 
 /**
@@ -54,6 +61,81 @@ export async function persistKeystoreToStorage(opts: {
  * were live, so no blob exists to download). Caller should surface "this agent
  * predates the recovery path; supply a local keystore manually."
  */
+/**
+ * Re-encrypt the agent keystore for a new operator wallet and upload the new
+ * blob to 0G Storage. Returns the new root hash to use in `iTransferFrom`'s
+ * `newHashes[]` keystore slot.
+ *
+ * The agent EOA is unchanged — only the operator-derived AEAD key changes.
+ * Existing memory blobs (encrypted with the agent-key memory HKDF) remain
+ * decryptable by the recipient because they hold the agent privkey after
+ * decrypting the new keystore.
+ *
+ * Storage gas (~0.02 0G on Galileo, ~0.05 0G on mainnet) is paid by the agent
+ * EOA, mirroring the per-turn `MemorySyncManager` flush pattern. The OLD blob
+ * stays on 0G Storage (no delete primitive); only the on-chain anchor moves.
+ */
+export async function reEncryptKeystoreForRecipient(opts: {
+  /** Current owner's operator signer; decrypts the existing blob. */
+  oldOpSigner: OperatorSigner
+  /** Recipient's operator signer; encrypts the new blob. */
+  newOpSigner: OperatorSigner
+  /** Agent EOA address — the EIP-712 typed-data subject. */
+  agentAddress: Address
+  /** Current keystore root hash on chain (from `getIntelligentData(tokenId)[4]`). */
+  currentRootHash: Hex
+  /** Network for both download (read-only) and upload (agent EOA gas). */
+  network: AnimaNetwork
+  /** Agent's privkey hex — pays gas for the new blob upload. */
+  agentPrivkey: Hex
+}): Promise<Hex> {
+  const encryptedBytes = await downloadBlobByRoot(opts.network, opts.currentRootHash)
+  if (!encryptedBytes) {
+    throw new Error(
+      `reEncryptKeystoreForRecipient: cannot download current keystore blob (root ${opts.currentRootHash}). Aborting before any chain write.`,
+    )
+  }
+  const oldKeystore = decodeKeystoreBytes(encryptedBytes)
+  // Decrypt with old operator → recover agent privkey.
+  const recoveredPrivkey = await decryptAgentKey({
+    signer: opts.oldOpSigner,
+    agentAddress: opts.agentAddress,
+    keystore: oldKeystore,
+  })
+  if (recoveredPrivkey.toLowerCase() !== opts.agentPrivkey.toLowerCase()) {
+    throw new Error(
+      'reEncryptKeystoreForRecipient: decrypted agent privkey does not match the supplied agentPrivkey. Refusing to re-encrypt with mismatched material.',
+    )
+  }
+  // Re-encrypt with new operator → produce new keystore blob.
+  const newKeystore = await encryptAgentKey({
+    signer: opts.newOpSigner,
+    agentAddress: opts.agentAddress,
+    agentPrivkey: recoveredPrivkey,
+  })
+  // Round-trip verify: new blob must decrypt back to the same privkey via
+  // the recipient's signer. Catches HKDF/AEAD bugs before chain write.
+  const verified = await decryptAgentKey({
+    signer: opts.newOpSigner,
+    agentAddress: opts.agentAddress,
+    keystore: newKeystore,
+  })
+  if (verified.toLowerCase() !== recoveredPrivkey.toLowerCase()) {
+    throw new Error(
+      'reEncryptKeystoreForRecipient: round-trip decrypt of new keystore returned wrong privkey. Refusing to upload.',
+    )
+  }
+  const newBytes = encodeKeystoreBytes(newKeystore)
+  const storage = new OGStorage({ network: opts.network, privkeyHex: opts.agentPrivkey })
+  const rootHash = (await storage.putBlob(newBytes)) as Hex
+  if (!rootHash.startsWith('0x') || rootHash.length !== 66) {
+    throw new Error(
+      `reEncryptKeystoreForRecipient: 0G Storage returned non-bytes32 root (${rootHash.length} chars).`,
+    )
+  }
+  return rootHash
+}
+
 export async function restoreKeystoreFromStorage(opts: {
   network: AnimaNetwork
   contractAddress: Address
