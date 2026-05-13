@@ -127,6 +127,22 @@ async function main(): Promise<void> {
       await runSync()
       return
     }
+    case 'profile': {
+      // v0.23.0: `anima profile init` seeds user/profile.md if missing, derives
+      // the operator-scoped PROFILE AES key, and either (sandbox) POSTs it to
+      // /admin/profile-key or (local) runs a sync that anchors the slot.
+      const profileSub = argv[1]
+      if (profileSub === 'init') {
+        const { runProfileInit } = await import('./commands/profile')
+        await runProfileInit()
+        return
+      }
+      console.error(
+        `Unknown profile subcommand: ${profileSub ?? '(none)'} — try 'anima profile init'`,
+      )
+      process.exit(1)
+      return
+    }
     case 'migrate-keystore': {
       const { runMigrateKeystore } = await import('./commands/migrate-keystore')
       await runMigrateKeystore()

@@ -16,6 +16,18 @@ export const TelegramSecretsSchema = z.object({
 
 export const GatewaySecretsSchema = z.object({
   telegram: TelegramSecretsSchema.optional(),
+  /**
+   * v0.23.0: operator-derived AES key for the PROFILE iNFT slot (scope
+   * `anima-profile-v1`). 32-byte hex prefixed with 0x. Without this key the
+   * daemon can boot but profile slot stays in `no-profile-key` skipped state
+   * until the operator runs `anima profile init` (sandbox) or unlocks via
+   * the chat UI (local). The key is HKDF-derived on the operator host from
+   * a one-shot EIP-712 signature, NEVER from the agent privkey.
+   */
+  profileScopeKeyHex: z
+    .string()
+    .regex(/^0x[0-9a-fA-F]{64}$/, 'profileScopeKeyHex must be 0x-prefixed 32-byte hex')
+    .optional(),
 })
 
 export type TelegramSecrets = z.infer<typeof TelegramSecretsSchema>

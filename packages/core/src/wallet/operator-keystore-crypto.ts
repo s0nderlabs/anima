@@ -50,6 +50,7 @@ const HKDF_INFO_KEYSTORE = Buffer.from('anima-keystore-aead-v1', 'utf8')
 export const OPERATOR_BLOB_SCOPES = {
   KEYSTORE: 'anima-keystore-v1',
   TELEGRAM: 'anima-telegram-v1',
+  PROFILE: 'anima-profile-v1',
 } as const
 export type OperatorBlobScope =
   | (typeof OPERATOR_BLOB_SCOPES)[keyof typeof OPERATOR_BLOB_SCOPES]
@@ -211,12 +212,25 @@ export function decodeKeystoreBytes(bytes: Uint8Array): OperatorEncryptedKeystor
  * output. A phishing site that obtains one scope's sig cannot decrypt another.
  */
 export async function encryptOperatorBlob(opts: {
-  signer: OperatorSigner
+  signer?: OperatorSigner
   scope: OperatorBlobScope
-  agentAddress: Address
+  agentAddress?: Address
   plaintext: Uint8Array
+  /** Pre-derived scope key (32 bytes). When provided, skips signer derivation. */
+  precomputedKey?: Buffer
 }): Promise<OperatorEncryptedBlob> {
-  const key = await deriveScopedKey(opts.signer, opts.scope, opts.agentAddress)
+  let key: Buffer
+  if (opts.precomputedKey) {
+    if (opts.precomputedKey.length !== 32) {
+      throw new Error(`Precomputed key must be 32 bytes, got ${opts.precomputedKey.length}`)
+    }
+    key = opts.precomputedKey
+  } else {
+    if (!opts.signer || !opts.agentAddress) {
+      throw new Error('encryptOperatorBlob requires either signer+agentAddress or precomputedKey')
+    }
+    key = await deriveScopedKey(opts.signer, opts.scope, opts.agentAddress)
+  }
   const iv = randomBytes(12)
   const cipher = createCipheriv('aes-256-gcm', key, iv)
   const ct = Buffer.concat([cipher.update(Buffer.from(opts.plaintext)), cipher.final()])

@@ -126,6 +126,16 @@ const SCOPE_BLOB_FILES: ReadonlyArray<readonly [filename: string, scope: Operato
 ] as const
 
 /**
+ * Map memory-file path → required scope. Used the same way as
+ * `SCOPE_BLOB_FILES` but matches on a path under `<agentDir>/memory/` instead
+ * of `<agentDir>/`. v0.23.0: the PROFILE slot is operator-keyed, so its scope
+ * is required whenever profile.md exists (which is always after init).
+ */
+const SCOPE_MEMORY_FILES: ReadonlyArray<readonly [path: string, scope: OperatorBlobScope]> = [
+  ['memory/user/profile.md', OPERATOR_BLOB_SCOPES.PROFILE],
+] as const
+
+/**
  * Inspect the agent dir on disk and return the set of scopes the operator
  * session must contain to fully boot the daemon. Always includes 'keystore'
  * (the canonical legacy slot). Adds extra scopes when their corresponding
@@ -140,6 +150,11 @@ export function requiredScopesForAgent(agentId: string): Array<'keystore' | Oper
   const required: Array<'keystore' | OperatorBlobScope> = ['keystore']
   for (const [filename, scope] of SCOPE_BLOB_FILES) {
     if (existsSync(join(dir, filename))) {
+      required.push(scope)
+    }
+  }
+  for (const [relPath, scope] of SCOPE_MEMORY_FILES) {
+    if (existsSync(join(dir, relPath))) {
       required.push(scope)
     }
   }

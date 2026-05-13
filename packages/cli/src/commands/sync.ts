@@ -1,7 +1,9 @@
 import { cancel, intro, outro, spinner } from '@clack/prompts'
 import {
   MemorySyncManager,
+  OPERATOR_BLOB_SCOPES,
   agentPaths,
+  deriveBlobKey,
   explorerTxUrl,
   fetchAndDecryptKeystore,
   iNFTAgentId,
@@ -85,6 +87,7 @@ export async function runSync(): Promise<void> {
   const sUnlock = spinner()
   sUnlock.start('Fetching keystore + decrypting via operator')
   let agentPrivkey: Hex
+  let profileKey: Buffer
   try {
     const decrypted = await withSilencedConsole(() =>
       fetchAndDecryptKeystore({
@@ -97,6 +100,11 @@ export async function runSync(): Promise<void> {
       }),
     )
     agentPrivkey = decrypted.privkeyHex
+    // v0.23.0: derive PROFILE scope key alongside the keystore decrypt so the
+    // /sync flush can re-encrypt and anchor user/profile.md in the same batched
+    // updateSlots tx. One EIP-712 sign per scope; cheap because the operator
+    // is already on the live signing surface.
+    profileKey = await deriveBlobKey(operator, agentAddress, OPERATOR_BLOB_SCOPES.PROFILE)
     sUnlock.stop(`unlocked (source: ${decrypted.source})`)
   } catch (e) {
     sUnlock.stop(`unlock failed: ${(e as Error).message.slice(0, 160)}`)
@@ -116,6 +124,7 @@ export async function runSync(): Promise<void> {
         agentAddress,
         contractAddress,
         tokenId,
+        profileKey,
       })
       await sync.init()
       return await sync.flushAll()

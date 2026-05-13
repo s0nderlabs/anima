@@ -34,6 +34,7 @@ import {
   detectFetchEscalation,
   iNFTAgentId,
   loadPlugins,
+  makeMemoryListTool,
   makeMemoryReadTool,
   makeMemorySaveTool,
   makeToolSearchTool,
@@ -120,6 +121,18 @@ export interface BuiltRuntime {
   agentId: string
   /** v0.21.0: optional auto-topup manager. Null when economy.autoTopup.enabled === false. */
   autoTopup: AutoTopupManager | null
+  /**
+   * v0.23.0: snapshot of the latest restore/flush outcome per slot. Mutated
+   * by the boot-time restore, lazy retries, and successful flushes. Read by
+   * `/healthz.slots`.
+   */
+  slotStatus: Map<string, { status: string; reason?: string; bytes?: number }>
+  /**
+   * v0.23.0: flip the operator-scoped PROFILE key. Updates the live
+   * MemorySyncManager and re-triggers a one-shot restore for the profile
+   * slot so the new key's anchored blob (if any) lands on disk this turn.
+   */
+  setProfileKey: (keyHex: `0x${string}`) => Promise<{ ok: true } | { ok: false; reason: string }>
 }
 
 const PERMISSION_MODE_MAP: Record<NonNullable<RuntimeConfig['permissions']>, PermissionMode> = {
@@ -245,6 +258,13 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
   const tokenId = BigInt(config.identity.iNFT.tokenId)
   const agentId = iNFTAgentId({ contractAddress, tokenId })
   const agentDir = opts.agentDir
+  // v0.23.0: parse the operator-scoped PROFILE key out of the provision envelope.
+  // Stays undefined for backward-compat sandbox containers that never received
+  // a key — profile slot then stays in `no-profile-key` skipped state until
+  // `anima profile init` ships a fresh key via /admin/profile-key.
+  const profileKey: Buffer | undefined = opts.secrets?.profileScopeKeyHex
+    ? Buffer.from(opts.secrets.profileScopeKeyHex.slice(2), 'hex')
+    : undefined
   const memoryDir = `${agentDir}/memory`
   const memoryIndexPath = `${agentDir}/memory/MEMORY.md`
   const activityLogPath = `${agentDir}/activity.jsonl`
@@ -259,14 +279,23 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
   // before the brain reads its frozen prefix. Per-slot best-effort; missing
   // or failed slots log a warning but never block boot. Local non-empty
   // files always win, protecting writes that haven't flushed to chain yet.
+  // v0.23.0: a mutable profileKey ref so /admin/profile-key can flip it on
+  // mid-session without restarting the daemon. Captured by the lazy-restore
+  // closure + setProfileKey API exported on BuiltRuntime.
+  let profileKeyRef: Buffer | undefined = profileKey
   const restoreOutcomes = await restoreMemoryFromChain({
     network,
     contractAddress,
     tokenId,
     agentPrivkey,
     agentDir,
+    profileKey: profileKeyRef,
   })
+  // v0.23.0: track per-slot status so /healthz can show what's anchored, what
+  // restored, what's still pending. Mutated by lazy retries + successful flushes.
+  const slotStatus = new Map<string, { status: string; reason?: string; bytes?: number }>()
   for (const o of restoreOutcomes) {
+    slotStatus.set(o.slot, { status: o.status, reason: o.reason, bytes: o.bytes })
     if (o.status === 'restored') {
       events.publish('log', {
         level: 'info',
@@ -297,10 +326,12 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
       tokenId,
       agentPrivkey,
       agentDir,
+      profileKey: profileKeyRef,
     })
       .then(outs => {
         const stillFailed = outs.some(o => o.status === 'failed')
         for (const o of outs) {
+          slotStatus.set(o.slot, { status: o.status, reason: o.reason, bytes: o.bytes })
           if (o.status === 'restored') {
             console.warn(
               `[memory-restore] lazy-recovered slot=${o.slot} → ${o.path} (${o.bytes} bytes)`,
@@ -319,8 +350,17 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
 
   // 1. ToolRegistry + memory tools
   const tools = new ToolRegistry(config.tools as Record<string, boolean> | undefined)
-  tools.register(makeMemorySaveTool({ agentId }) as Parameters<typeof tools.register>[0])
-  tools.register(makeMemoryReadTool({ agentId }) as Parameters<typeof tools.register>[0])
+  tools.register(makeMemorySaveTool({ agentId, agentDir }) as Parameters<typeof tools.register>[0])
+  tools.register(makeMemoryReadTool({ agentId, agentDir }) as Parameters<typeof tools.register>[0])
+  tools.register(
+    makeMemoryListTool({
+      agentId,
+      agentDir,
+      network,
+      contractAddress,
+      tokenId,
+    }) as Parameters<typeof tools.register>[0],
+  )
   tools.register(makeToolSearchTool(tools) as Parameters<typeof tools.register>[0])
 
   // 2. Permission service. Default sandbox mode = 'off' (yolo) for autonomous
@@ -586,15 +626,19 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
 
   // 5. MemorySyncManager + activity log + frozen prefix
   //
-  // Path split that matters for /sync correctness:
-  //   - `activityLogPath` is the DAEMON's runtime log (under TMPDIR) — the
+  // Path split that matters for /sync correctness (v0.23.0):
+  //   - `activityLogPath` is the DAEMON's runtime log (under TMPDIR) - the
   //     gateway appends every wake/tool-call/brain-response there, so /sync
   //     must read from this path to capture the live history.
-  //   - `memoryDir` is intentionally OMITTED — memory.save + memory.read
-  //     (both registered by plugin-system) resolve via `agentPaths.agent(id)`
-  //     which lives under `~/.anima/agents/<id>/memory/`. Forcing the
-  //     sync-manager to look elsewhere would upload a stale daemon-side
-  //     snapshot and ignore the operator's actual saves.
+  //   - `memoryDir` MUST point at the same `${agentDir}/memory` that the
+  //     memory.save/read/list tools now write to (we override the legacy
+  //     `agentPaths.agent(id)` resolution via `agentDir` in makeMemory*Tool
+  //     args above). Without this override /sync uploads the stale
+  //     `~/.anima/agents/<id>/memory` snapshot and ignores the operator's
+  //     live saves under TMPDIR.
+  //   - `profileKey` (optional) keys the operator-scoped PROFILE slot. When
+  //     undefined (sandbox cold-start), profile flush is skipped silently
+  //     until `anima profile init` ships a key via /admin/profile-key.
   const sync = new MemorySyncManager({
     network,
     agentId,
@@ -603,6 +647,14 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
     contractAddress,
     tokenId,
     activityLogPath,
+    // v0.23.0: explicit memoryDir + profilePath because gateway writes to
+    // ${TMPDIR}/anima-gateway/<id>/... (TMPDIR is volatile across boots) while
+    // the default in MemorySyncManager resolves under ~/.anima/agents/<id>/...
+    // via `agentPaths.agent(agentId)`. Without these overrides /sync would
+    // anchor a different directory than what the daemon actually writes to.
+    memoryDir,
+    profileKey: profileKey ?? undefined,
+    profilePath: `${memoryDir}/user/profile.md`,
   })
   const activity = new ActivityLog(activityLogPath)
 
@@ -1093,6 +1145,48 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
     autoTopup.start()
   }
 
+  // v0.23.0: live-flip the operator-scoped PROFILE key. Called when the
+  // operator runs `anima profile init` against a sandbox endpoint and the
+  // gateway forwards the raw 32-byte key here. Updates the live sync manager
+  // + fires a one-shot restore so the profile blob (if anchored) lands on
+  // disk this turn.
+  const setProfileKey = async (
+    keyHex: `0x${string}`,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> => {
+    if (!/^0x[0-9a-fA-F]{64}$/.test(keyHex)) {
+      return { ok: false, reason: 'invalid-key-format' }
+    }
+    const buf = Buffer.from(keyHex.slice(2), 'hex')
+    profileKeyRef = buf
+    sync.setProfileKey(buf)
+    // Fire-and-forget restore. Don't await — caller doesn't need to wait for
+    // the blob fetch + decrypt. Next memory.list / next turn surfaces it.
+    void restoreMemoryFromChain({
+      network,
+      contractAddress,
+      tokenId,
+      agentPrivkey,
+      agentDir,
+      profileKey: profileKeyRef,
+    })
+      .then(outs => {
+        const profileOutcome = outs.find(o => o.slot === 'profile')
+        if (profileOutcome) {
+          slotStatus.set('profile', {
+            status: profileOutcome.status,
+            reason: profileOutcome.reason,
+            bytes: profileOutcome.bytes,
+          })
+        }
+      })
+      .catch(err => {
+        console.warn(
+          `[profile-key] post-set restore threw: ${(err as Error).message.slice(0, 200)}`,
+        )
+      })
+    return { ok: true }
+  }
+
   return {
     brain,
     tools,
@@ -1112,6 +1206,8 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
     dispose,
     agentId,
     autoTopup,
+    slotStatus,
+    setProfileKey,
   }
 }
 

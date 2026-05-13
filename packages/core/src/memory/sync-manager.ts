@@ -13,6 +13,7 @@ import { OGStorage } from '../storage/og'
 import { syncActivityLog } from './activity-sync'
 import { deriveMemoryKey, encryptMemoryBytes } from './encryption'
 import { readOrNull } from './fs-util'
+import { syncProfile } from './profile-sync'
 import { type SyncTarget, defaultMemorySyncTargets } from './sync'
 
 /**
@@ -58,6 +59,18 @@ export interface MemorySyncManagerOpts {
    * activityLogPath's parent dir (or the legacy agentPaths fallback).
    */
   syncStatePath?: string
+  /**
+   * Operator-scoped AES key for the PROFILE slot (32 bytes). When provided,
+   * `doFlush` includes the encrypted `user/profile.md` blob in the same
+   * batched updateSlots tx. When absent, profile sync is skipped silently
+   * (sandbox cold-start before operator unlock; pre-PROFILE-scope sessions).
+   */
+  profileKey?: Buffer
+  /**
+   * Override path to `user/profile.md`. Defaults to `<memoryDir>/user/profile.md`
+   * (or the agentPaths fallback when no memoryDir override given).
+   */
+  profilePath?: string
 }
 
 export interface FlushResult {
@@ -76,6 +89,12 @@ export class MemorySyncManager {
   private readonly fileTargets: SyncTarget[]
   private readonly activityLogPath: string
   private readonly syncStatePath: string
+  // v0.23.0: profileKey is NOT readonly so the gateway can flip it on
+  // mid-session via /admin/profile-key (operator runs `anima profile init`
+  // after the daemon is already up). setProfileKey() updates it; the next
+  // doFlush picks it up. No restart needed.
+  private profileKey: Buffer | null
+  private readonly profilePath: string
   private lastPlaintextHash: Map<IntelligentDataSlot, Hex> = new Map()
   private inFlight: Promise<FlushResult> | null = null
 
@@ -98,6 +117,29 @@ export class MemorySyncManager {
       (opts.activityLogPath
         ? `${dirname(opts.activityLogPath)}/sync-state.json`
         : `${agentPaths.agent(opts.agentId).dir}/sync-state.json`)
+    this.profileKey = opts.profileKey ?? null
+    this.profilePath =
+      opts.profilePath ??
+      (opts.memoryDir
+        ? `${opts.memoryDir}/user/profile.md`
+        : `${agentPaths.agent(opts.agentId).memoryDir}/user/profile.md`)
+  }
+
+  /**
+   * v0.23.0: live-flip the operator-scoped PROFILE key. Called by the gateway
+   * after `/admin/profile-key` succeeds (operator just ran `anima profile init`).
+   * The next doFlush picks up the new key and includes the profile slot in the
+   * batched updateSlots tx. No daemon restart needed.
+   *
+   * Pass `null` to clear (rare; only useful in tests).
+   */
+  setProfileKey(key: Buffer | null): void {
+    this.profileKey = key
+  }
+
+  /** True when an operator-scoped PROFILE key is wired in. */
+  hasProfileKey(): boolean {
+    return this.profileKey !== null
   }
 
   /**
@@ -243,6 +285,34 @@ export class MemorySyncManager {
       this.lastPlaintextHash.set('activity-log', activityRes.plaintextHash)
       changedSlots.push('activity-log')
       updates.push({ slot: 'activity-log', dataHash: activityRes.rootHash })
+    }
+
+    // v0.23.0: profile slot. Operator-scoped encryption (NOT agent-key).
+    // Only flushes when profileKey is provided (operator unlocked or
+    // sandbox handoff completed). The slot rides on the same batched
+    // updateSlots tx as the agent-key slots — one chain anchor per turn.
+    if (this.profileKey) {
+      try {
+        const profileRes = await syncProfile({
+          network: this.opts.network,
+          agentPrivkey: this.opts.agentPrivkey,
+          profileKey: this.profileKey,
+          profilePath: this.profilePath,
+          lastPlaintextHash: this.lastPlaintextHash.get('profile') ?? null,
+        })
+        if (profileRes.uploaded && profileRes.rootHash && profileRes.plaintextHash) {
+          uploads.profile = {
+            rootHash: profileRes.rootHash,
+            plaintextHash: profileRes.plaintextHash,
+          }
+          this.lastPlaintextHash.set('profile', profileRes.plaintextHash)
+          changedSlots.push('profile')
+          updates.push({ slot: 'profile', dataHash: profileRes.rootHash })
+        }
+      } catch {
+        // Non-fatal: profile flush failure shouldn't block the agent-key
+        // slot anchors. Next /sync retries.
+      }
     }
 
     let txHash: Hex | null = null

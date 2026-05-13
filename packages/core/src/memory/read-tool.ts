@@ -33,17 +33,31 @@ export type MemoryReadArgs = z.infer<typeof readSchema>
 
 export interface MakeMemoryReadToolArgs {
   agentId: string
+  /**
+   * Override the on-disk agent dir. Gateway daemon writes restored memory
+   * under `${TMPDIR}/anima-gateway/<id>/` while local-mode chat.tsx uses
+   * `~/.anima/agents/<id>/`. Pass the daemon's true agentDir so the brain's
+   * memory.read resolves against the same path the gateway just wrote to —
+   * otherwise files restored from chain return "not found" because the tool
+   * defaults to agentPaths (the legacy location).
+   */
+  agentDir?: string
 }
 
-export function makeMemoryReadTool({ agentId }: MakeMemoryReadToolArgs): ToolDef<MemoryReadArgs> {
+export function makeMemoryReadTool({
+  agentId,
+  agentDir,
+}: MakeMemoryReadToolArgs): ToolDef<MemoryReadArgs> {
   return {
     name: 'memory.read',
     description:
       'Read the full body of a memory file. Use to recall specific facts. Match by title from MEMORY.md, slug, or relative path. Tries multiple resolutions before giving up.',
     schema: readSchema,
     handler: async args => {
-      const memDir = agentPaths.agent(agentId).memoryDir
-      const memoryIndex = agentPaths.agent(agentId).memoryIndex
+      const memDir = agentDir ? `${agentDir}/memory` : agentPaths.agent(agentId).memoryDir
+      const memoryIndex = agentDir
+        ? `${agentDir}/memory/MEMORY.md`
+        : agentPaths.agent(agentId).memoryIndex
       const query = args.name.trim()
       const safeRead = makeSafeReader(memDir)
 

@@ -119,6 +119,12 @@ export function createGatewayServer(deps: ServerDeps): http.Server {
         // can sync its statusline. Pre-fix the TUI hardcoded `approvalsMode: 'off'`
         // and never reflected /perms or /yolo flips routed through dispatchBypass.
         const permsMode = session.runtime.permissionMode?.()
+        // v0.23.0: surface every iNFT slot's restore/flush status so operators
+        // (and /console) can see whether profile / identity / persona / MEMORY
+        // / activity-log are anchored, pending, or skipped. Missing field on
+        // pre-Ready containers — keep undefined rather than empty {} so tests
+        // can distinguish "not wired yet" from "wired but all skipped".
+        const slots = session.runtime.slotStatus?.()
         return send(res, 200, {
           state: session.state,
           sandboxId: session.sandboxId,
@@ -134,6 +140,7 @@ export function createGatewayServer(deps: ServerDeps): http.Server {
           pendingApprovals: session.approvals.pendingCount(),
           listeners,
           permsMode,
+          slots,
         })
       }
 
@@ -383,6 +390,64 @@ export function createGatewayServer(deps: ServerDeps): http.Server {
           return send(res, result.ok ? 200 : 503, result)
         } catch (e) {
           return send(res, 500, { error: 'tick-failed', detail: (e as Error).message })
+        }
+      }
+
+      // v0.23.0: ship the operator-scoped PROFILE AES key into the sandbox.
+      // Same EIP-191 auth shape as /admin/autotopup/tick — body must be
+      // signed by the operator over `adminTickHash('profile-key', ts, sandboxId)`.
+      // The key field is sent in the clear over an authenticated session;
+      // sandbox endpoints are operator-only via the sandbox provider's
+      // network policy. Once installed, MemorySyncManager picks it up on
+      // the next flush and the gateway fires a one-shot restore for the
+      // profile slot.
+      if (method === 'POST' && url === '/admin/profile-key') {
+        const body = (await readJson(req).catch(() => null)) as {
+          ts?: number
+          signature?: Hex
+          profileScopeKeyHex?: string
+        } | null
+        if (!body || typeof body.profileScopeKeyHex !== 'string') {
+          return send(res, 400, { error: 'missing-fields', need: 'profileScopeKeyHex' })
+        }
+        if (!/^0x[0-9a-fA-F]{64}$/.test(body.profileScopeKeyHex)) {
+          return send(res, 400, { error: 'bad-key-format' })
+        }
+        if (!trustLocal) {
+          const operator = session.operatorAddress
+          if (!operator) {
+            return send(res, 500, { error: 'operator-not-set' })
+          }
+          if (typeof body.ts !== 'number' || !body.signature) {
+            return send(res, 401, {
+              error: 'unauthorized',
+              reason: 'sandbox admin requires {ts, signature} body signed by operator',
+            })
+          }
+          const verify = await verifyAdminTickSig({
+            action: 'profile-key',
+            ts: body.ts,
+            sandboxId: session.sandboxId,
+            signature: body.signature,
+            expectedOperator: operator,
+          })
+          if (!verify.ok) {
+            return send(res, 401, { error: 'unauthorized', reason: verify.reason })
+          }
+        }
+        if (session.state !== 'Ready') {
+          return send(res, 409, { error: 'not-ready', state: session.state })
+        }
+        if (!session.runtime.setProfileKey) {
+          return send(res, 501, { error: 'not-supported' })
+        }
+        try {
+          const result = await session.runtime.setProfileKey(
+            body.profileScopeKeyHex as `0x${string}`,
+          )
+          return send(res, result.ok ? 200 : 503, result)
+        } catch (e) {
+          return send(res, 500, { error: 'set-failed', detail: (e as Error).message })
         }
       }
 

@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { z } from 'zod'
 import { agentPaths } from '../paths'
 import type { ToolDef } from '../tools/types'
@@ -36,9 +37,20 @@ export type MemorySaveArgs = z.infer<typeof saveSchema>
 
 export interface MakeMemorySaveToolArgs {
   agentId: string
+  /**
+   * Override the on-disk agent dir (e.g. `${TMPDIR}/anima-gateway/<id>`).
+   * Gateway daemon writes memory under tmpdir, not `~/.anima/agents/<id>/`.
+   * When provided, `topic` + `MEMORY.md` resolve against this root.
+   * When absent, fall back to `agentPaths.agent(agentId).dir` for local-mode
+   * callers (chat.tsx pre-gateway path).
+   */
+  agentDir?: string
 }
 
-export function makeMemorySaveTool({ agentId }: MakeMemorySaveToolArgs): ToolDef<MemorySaveArgs> {
+export function makeMemorySaveTool({
+  agentId,
+  agentDir,
+}: MakeMemorySaveToolArgs): ToolDef<MemorySaveArgs> {
   return {
     name: 'memory.save',
     description:
@@ -55,7 +67,7 @@ export function makeMemorySaveTool({ agentId }: MakeMemorySaveToolArgs): ToolDef
 
       const partition = partitionForType(args.type)
       const slug = toSlug(args.name, args.type)
-      const dir = agentPaths.agent(agentId).dir
+      const dir = agentDir ?? agentPaths.agent(agentId).dir
       const now = new Date().toISOString()
 
       const existing = await readTopic(dir, partition, slug)
@@ -74,7 +86,9 @@ export function makeMemorySaveTool({ agentId }: MakeMemorySaveToolArgs): ToolDef
       }
       await writeTopic(dir, topic)
 
-      const indexPath = agentPaths.agent(agentId).memoryIndex
+      const indexPath = agentDir
+        ? join(agentDir, 'memory', 'MEMORY.md')
+        : agentPaths.agent(agentId).memoryIndex
       let index = await readIndexFile(indexPath)
       const file = `${partition}/${slug}.md`
       if (!index.entries.has(file)) {

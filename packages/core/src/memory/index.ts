@@ -24,6 +24,18 @@ export { readTopic, writeTopic, topicPath } from './topic'
 export { makeMemorySaveTool, type MemorySaveArgs } from './save-tool'
 export { makeMemoryReadTool, type MemoryReadArgs } from './read-tool'
 export {
+  makeMemoryListTool,
+  type MemoryListArgs,
+  type MemoryListAgentFile,
+  type MemoryListSlotEntry,
+} from './list-tool'
+export {
+  ensureSyntheticIndexEntries,
+  STANDARD_SYNTHETIC_INDEX_FILES,
+  type SyntheticIndexFile,
+  type SyntheticIndexResult,
+} from './index-sync'
+export {
   syncMemory,
   defaultMemorySyncTargets,
   type SyncMemoryOpts,
@@ -46,4 +58,11 @@ export {
   type MemorySyncManagerOpts,
   type FlushResult,
 } from './sync-manager'
+export {
+  syncProfile,
+  restoreProfile,
+  type ProfileSyncOpts,
+  type ProfileSyncResult,
+  type RestoreProfileOpts,
+} from './profile-sync'
 export { readOrNull } from './fs-util'

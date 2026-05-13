@@ -231,6 +231,33 @@ export class SandboxClient {
   }
 
   /**
+   * v0.23.0: ship the operator-scoped PROFILE AES key into the sandbox. Same
+   * EIP-191 auth as `triggerAutoTopupTick` but with action='profile-key'.
+   * The 32-byte key is sent in the body — sandbox endpoints are operator-only
+   * via network policy.
+   */
+  async setProfileKey(
+    profileScopeKeyHex: `0x${string}`,
+  ): Promise<{ ok: boolean; reason?: string }> {
+    const ts = Date.now()
+    const hash = adminTickHash({ action: 'profile-key', ts, sandboxId: this.sandboxId })
+    const signature = await this.operator.signMessage({ message: { raw: hash } })
+    const r = await this.#fetch(`${this.endpoint}/admin/profile-key`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ts, signature, profileScopeKeyHex }),
+    })
+    if (r.status === 401) {
+      const detail = (await r.json().catch(() => null)) as { reason?: string } | null
+      throw new Error(`profile-key auth failed: ${detail?.reason ?? '401'}`)
+    }
+    if (r.status === 501) {
+      throw new Error('profile-key not supported (runtime missing setProfileKey)')
+    }
+    return (await r.json()) as { ok: boolean; reason?: string }
+  }
+
+  /**
    * Forward an operator approval decision to the harness. Maps anima's
    * `PermissionDecision` (`allow-once | allow-session | deny`) onto the
    * sandbox-server wire format (`allow | allow-session | deny`) since

@@ -131,6 +131,14 @@ export {
   type MemorySaveArgs,
   makeMemoryReadTool,
   type MemoryReadArgs,
+  makeMemoryListTool,
+  type MemoryListArgs,
+  type MemoryListAgentFile,
+  type MemoryListSlotEntry,
+  ensureSyntheticIndexEntries,
+  STANDARD_SYNTHETIC_INDEX_FILES,
+  type SyntheticIndexFile,
+  type SyntheticIndexResult,
   INDEX_LINE_LIMIT,
   INDEX_BYTE_LIMIT,
   syncMemory,
@@ -148,6 +156,11 @@ export {
   MemorySyncManager,
   type MemorySyncManagerOpts,
   type FlushResult,
+  syncProfile,
+  restoreProfile,
+  type ProfileSyncOpts,
+  type ProfileSyncResult,
+  type RestoreProfileOpts,
 } from './memory'
 
 export type { Storage } from './storage'

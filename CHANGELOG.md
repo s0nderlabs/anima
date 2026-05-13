@@ -4,6 +4,36 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.0] - 2026-05-14
+
+### Added
+
+- **`memory.list` brain tool.** Operator natural-language prompts like "show me all your memory" now have a deterministic target: the brain calls `memory.list` once, gets back the agent partition, user partition, AND chain slot status in a single call, then summarizes. Pre-fix the brain had to guess between `memory.read` and `fs.read` then walk paths manually, often resulting in partial answers or hallucination. New `MEMORY_LIST_GUIDANCE` in the frozen prefix bridges the prompt to the tool.
+- **Operator-scoped PROFILE slot (slot 3).** The iNFT's `profile` IntelligentData slot is now wired end-to-end with operator-derived AES (HKDF over EIP-712 sig, scope `anima-profile-v1`), distinct from the agent-key slots (0/1/2/4/5). Profile is the user-partition blob: encrypted with the OPERATOR's key, not the agent's. Property: `iTransferFrom` purges the profile slot, so a new operator never inherits the prior operator's profile. The agent privkey alone cannot decrypt — only the current operator can. Wired through:
+  - `restoreProfile` / `syncProfile` in `packages/core/src/memory/profile-sync.ts` (encrypt/decrypt/anchor)
+  - `MemorySyncManager` includes profile in the batched `updateSlots` tx when a profileKey is present
+  - `restoreMemoryFromChain` restores profile on boot when profileKey present, skips with `no-profile-key` otherwise
+  - `GatewaySecrets.profileScopeKeyHex` shipped via the secondary ECIES envelope for sandbox handoffs
+  - Local gateway entrypoint pulls the PROFILE scope key from the cached operator session (alongside `keystore` + `telegram`); `requiredScopesForAgent` now derives PROFILE whenever `user/profile.md` exists on disk
+  - `anima sync` derives the PROFILE key alongside the keystore decrypt so a single CLI sync flushes everything
+- **`anima profile init` CLI command.** Operator entry point: seeds `user/profile.md` if missing, derives the PROFILE scope key, then (sandbox) POSTs the key to `/admin/profile-key` or (local) runs a full sync that anchors the slot. Idempotent.
+- **`/admin/profile-key` sandbox endpoint.** Operator-signed POST (EIP-191 over `adminTickHash('profile-key', ts, sandboxId)`) ships the 32-byte AES key into a running daemon. The runtime adapter exposes `setProfileKey` which updates the live `MemorySyncManager` AND fires a one-shot restore so the slot is on disk this turn — no daemon restart required.
+- **`/healthz.slots` field.** Reports every IntelligentData slot's high-level status (restored / skipped / failed + reason + bytes). Operators (and `/console`) can probe what's anchored without parsing logs.
+- **MEMORY.md synthetic index entries.** Boot-time restore now appends entries for `agent/identity.md`, `agent/persona.md`, and `user/profile.md` to MEMORY.md whenever those files exist on disk. Existing agents from pre-v0.23 get auto-backfilled the first time their daemon restarts on v0.23.0. New `ensureSyntheticIndexEntries` helper in `packages/core/src/memory/index-sync.ts`.
+
+### Changed
+
+- **`memory.read` / `memory.save` accept an `agentDir` override.** Gateway daemon registers them with `agentDir = ${TMPDIR}/anima-gateway/<id>` so memory tools resolve the same volatile dir the daemon writes to, not the legacy `~/.anima/agents/<id>/memory/`. Pre-fix the brain could `memory.save` to TMPDIR but `memory.read` would read from `~/.anima` and see stale content (or nothing). Path drift closed.
+- **`MemorySyncManager` constructor accepts `memoryDir` + `profileKey` overrides.** Gateway passes both so `/sync` uploads the live TMPDIR snapshot, not the legacy on-disk copy.
+- **`encryptOperatorBlob` accepts `precomputedKey`.** Previously required a live `OperatorSigner`; gateway daemon doesn't have one. The pre-derived key path now works alongside the live-sign path.
+- **Bootstrap-placeholder hash skip in restore.** Slots that were minted with `keccak256('anima:bootstrap:<slot>')` (operator never uploaded a real blob) skip with `reason: 'bootstrap'` instead of looping the 3-attempt retry against a hash that will never resolve. Fixes the silent-restore failure mode where v0.22.x enigma's `identity` and `persona` slots chased the bootstrap hash for every boot.
+
+### Fixed
+
+- **Path drift between `memory.read/save` (agentPaths) and gateway-written files (TMPDIR).** See "Changed" above. Manifested as brain prose claiming "I don't have an identity.md" while the daemon was actively reading/writing to a TMPDIR copy of the file.
+
+[0.23.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.23.0
+
 ## [0.22.2] - 2026-05-13
 
 ### Fixed

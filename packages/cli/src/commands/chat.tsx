@@ -47,6 +47,7 @@ import {
   isOperatorSessionComplete,
   isOperatorSessionFresh,
   loadPlugins,
+  makeMemoryListTool,
   makeMemoryReadTool,
   makeMemorySaveTool,
   makeSandboxBackend,
@@ -257,6 +258,16 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
   const tools = new ToolRegistry(config.tools)
   tools.register(makeMemorySaveTool({ agentId }) as Parameters<typeof tools.register>[0])
   tools.register(makeMemoryReadTool({ agentId }) as Parameters<typeof tools.register>[0])
+  if (config.identity.iNFT) {
+    tools.register(
+      makeMemoryListTool({
+        agentId,
+        network: config.network,
+        contractAddress: config.identity.iNFT.contract as `0x${string}`,
+        tokenId: BigInt(config.identity.iNFT.tokenId),
+      }) as Parameters<typeof tools.register>[0],
+    )
+  }
   tools.register(makeToolSearchTool(tools) as Parameters<typeof tools.register>[0])
 
   const initialMode: PermissionMode = opts?.yolo ? 'off' : (config.approvals?.mode ?? 'prompt')

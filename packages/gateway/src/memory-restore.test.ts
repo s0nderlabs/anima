@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   type IntelligentDataEntry,
+  bootstrapHashFor,
   deriveMemoryKey,
   encryptMemoryBytes,
 } from '@s0nderlabs/anima-core'
@@ -83,6 +84,30 @@ describe('restoreMemoryFromChain', () => {
     expect(outcomes[0]!.reason).toBe('unset')
   })
 
+  // v0.23.0: a slot that was minted with the bootstrap placeholder hash
+  // (`keccak256("anima:bootstrap:<slot>")`) but never had a real blob uploaded
+  // must be skipped, NOT retried. Pre-v0.23 the restore code tried every turn
+  // and hit blob-not-found in an infinite loop. The fix is treating bootstrap-
+  // hash as "intentionally unset", same as ZERO_HASH.
+  test('skips bootstrap-placeholder slots without attempting download', async () => {
+    const dir = await setupAgentDir()
+    let downloadCalled = false
+    const outcomes = await restoreMemoryFromChain(
+      baseOpts(
+        dir,
+        async () => [{ dataDescription: 'identity', dataHash: bootstrapHashFor('identity') }],
+        async () => {
+          downloadCalled = true
+          return null
+        },
+      ),
+    )
+    expect(downloadCalled).toBe(false)
+    expect(outcomes.length).toBe(1)
+    expect(outcomes[0]!.status).toBe('skipped')
+    expect(outcomes[0]!.reason).toBe('bootstrap')
+  })
+
   test('restores memory-index, identity, and activity-log to correct paths', async () => {
     const dir = await setupAgentDir()
     const agentPrivkey = generatePrivateKey()
@@ -106,7 +131,13 @@ describe('restoreMemoryFromChain', () => {
     )
 
     expect(outcomes.filter(o => o.status === 'restored').length).toBe(3)
-    expect(await readFile(join(dir, 'memory/MEMORY.md'), 'utf8')).toBe('# MEMORY\n- index')
+    // v0.23.0: ensureSyntheticIndexEntries runs post-restore and adds an
+    // entry for agent/identity.md since the file now exists on disk. The
+    // base restored content is preserved and the synthetic line is appended.
+    const memoryIndex = await readFile(join(dir, 'memory/MEMORY.md'), 'utf8')
+    expect(memoryIndex).toContain('# MEMORY')
+    expect(memoryIndex).toContain('- index')
+    expect(memoryIndex).toContain('agent/identity.md')
     expect(await readFile(join(dir, 'memory/agent/identity.md'), 'utf8')).toBe(
       '# Identity\nname: enigma',
     )
@@ -165,7 +196,11 @@ describe('restoreMemoryFromChain', () => {
     expect(outcomes[1]!.status).toBe('failed')
   }, 15_000)
 
-  test('keystore + profile slots are filtered before download', async () => {
+  // v0.23.0: keystore stays filtered (Option 3 envelope path). profile is
+  // restorable now BUT only when a profileKey is provided; without one
+  // (sandbox cold-start before operator unlock) it is skipped with reason
+  // 'no-profile-key' rather than attempted with the agent key.
+  test('keystore is filtered; profile without profileKey skips with no-profile-key', async () => {
     const dir = await setupAgentDir()
     let downloadCalled = false
     const outcomes = await restoreMemoryFromChain(
@@ -182,7 +217,10 @@ describe('restoreMemoryFromChain', () => {
       ),
     )
     expect(downloadCalled).toBe(false)
-    expect(outcomes).toEqual([])
+    expect(outcomes.length).toBe(1)
+    expect(outcomes[0]!.slot).toBe('profile')
+    expect(outcomes[0]!.status).toBe('skipped')
+    expect(outcomes[0]!.reason).toBe('no-profile-key')
   })
 
   test('chain read failure is swallowed, returns empty outcomes', async () => {

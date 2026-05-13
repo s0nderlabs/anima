@@ -356,6 +356,14 @@ export interface HandoffAgentToGatewayOpts {
    * field; older harnesses ignore it.
    */
   telegramSecrets?: TelegramHandoffSecrets
+  /**
+   * v0.23.0: operator-derived AES key for the PROFILE iNFT slot (32 bytes,
+   * hex-encoded with 0x prefix). Shipped via the same secondary envelope as
+   * telegramSecrets. Without it the sandbox skips profile flush + restore;
+   * the operator can ship one later via `anima profile init`. v0.23.0+
+   * harness picks it up; older harnesses ignore unknown fields.
+   */
+  profileScopeKeyHex?: `0x${string}`
   /** Default 60_000. */
   pubkeyTimeoutMs?: number
   /** Default 180_000. */
@@ -378,14 +386,21 @@ export async function handoffAgentToGateway(
     plaintext: agentPrivkeyBytes,
   })
   let secretsEnvelope: import('@s0nderlabs/anima-core').Option3Envelope | undefined
-  if (opts.telegramSecrets) {
-    const secretsJson = JSON.stringify({ telegram: opts.telegramSecrets })
+  if (opts.telegramSecrets || opts.profileScopeKeyHex) {
+    const secretsPayload: Record<string, unknown> = {}
+    if (opts.telegramSecrets) secretsPayload.telegram = opts.telegramSecrets
+    if (opts.profileScopeKeyHex) secretsPayload.profileScopeKeyHex = opts.profileScopeKeyHex
+    const secretsJson = JSON.stringify(secretsPayload)
     const secretsBytes = new TextEncoder().encode(secretsJson)
     secretsEnvelope = encryptToPubkey({
       recipientPubkey: pubkeyRes.pubkeyHex,
       plaintext: secretsBytes,
     })
-    progress('shipping telegram secrets via secondary envelope')
+    const parts = [
+      opts.telegramSecrets && 'telegram',
+      opts.profileScopeKeyHex && 'profile-key',
+    ].filter(Boolean)
+    progress(`shipping ${parts.join(' + ')} via secondary envelope`)
   }
 
   progress('sending provision envelope to harness')

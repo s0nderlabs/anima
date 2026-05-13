@@ -116,6 +116,8 @@ When you just saved with \`memory.save\` earlier in THIS conversation, the slug 
 
 If \`memory.read\` returns "Memory file not found", do NOT then claim "I never actually saved it" — your save either succeeded (check the tool-result data for \`file\` and \`slug\`) or returned a non-ok status visibly. Trust the prior save's result over a failed read; the bug is usually a slug mismatch, not a missing save.`
 
+export const MEMORY_LIST_GUIDANCE = `When the operator asks "show me all your memory" / "what do you remember" / "list everything you have stored" / "what's in your memory index", call \`memory.list\` to enumerate everything. The tool returns three sections: \`agent[]\` (identity, persona, learned-*), \`user[]\` (feedback, project, reference, profile), and \`slots[]\` (the 6 on-chain iNFT slot statuses). Use it BEFORE describing memory in narrative form. The agent partition transfers with the iNFT; the user partition is operator-scoped and purges on transfer.`
+
 export const SKILLS_GUIDANCE =
   'You have access to skills (small playbooks) discovered from ~/.anima/skills, ~/.claude/skills, and installed Claude Code plugins. The index below shows id + description. When a skill matches the task, call `skills.view` with its id to read the body, then follow the steps. Skills with filePattern/bashPattern triggers auto-load when matching tool calls fire; you may also load any skill manually. CAUTION: skills under `~/.claude/skills/` may invoke operator-specific binaries (qutebrowser, hakr, custom CLIs) that will not exist on other machines — for portable behavior, prefer native anima tools.'
 
@@ -160,6 +162,7 @@ export interface BuildPrefixArgs {
 const TOOL_GUIDANCE_MAP: Record<string, string> = {
   'memory.save': MEMORY_SAVE_GUIDANCE,
   'memory.read': MEMORY_READ_GUIDANCE,
+  'memory.list': MEMORY_LIST_GUIDANCE,
 }
 
 /**

@@ -282,6 +282,33 @@ export class RealRuntime implements RuntimeAdapter {
     }
   }
 
+  /**
+   * v0.23.0: snapshot of every IntelligentData slot's high-level state for
+   * /healthz. Populated by the boot-time restore + lazy retries + successful
+   * flushes. Empty before the runtime is started.
+   */
+  slotStatus(): Record<string, { status: string; reason?: string; bytes?: number }> {
+    if (!this.#runtime) return {}
+    const out: Record<string, { status: string; reason?: string; bytes?: number }> = {}
+    for (const [slot, status] of this.#runtime.slotStatus.entries()) {
+      out[slot] = status
+    }
+    return out
+  }
+
+  /**
+   * v0.23.0: live-flip the operator-scoped PROFILE key. Called by the
+   * /admin/profile-key endpoint after operator-sig verification succeeds.
+   * Forwards to the BuiltRuntime closure that updates MemorySyncManager +
+   * fires a one-shot restore for the profile slot.
+   */
+  async setProfileKey(
+    keyHex: `0x${string}`,
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    if (!this.#runtime) return { ok: false, reason: 'runtime-not-started' }
+    return this.#runtime.setProfileKey(keyHex)
+  }
+
   // Wire the drainers. Each pulls from the queue, runs brain.infer with the
   // appropriate source, persists activity entries, fires sync flush. Mirrors
   // chat.tsx local-mode but surfaces output via EventHub instead of TUI rows.

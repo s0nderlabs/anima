@@ -178,10 +178,26 @@ async function main(): Promise<void> {
   // Load encrypted telegram secrets (if any) using the cached telegram scope
   // key. Same shape `loadTelegramSecrets` (CLI util) produces — we inline the
   // decrypt path to avoid pulling the CLI signer into the daemon.
-  const secrets: GatewaySecrets | undefined = await loadLocalTelegramSecrets({
+  const tgSecrets: GatewaySecrets | undefined = await loadLocalTelegramSecrets({
     agentId,
     agentAddress,
   })
+  // v0.23.0: pull the PROFILE scope key from the cached operator session so
+  // the daemon can flush profile.md every turn + restore the slot at boot.
+  // When missing (older sessions, or operator never unlocked PROFILE), the
+  // daemon boots without a key and profile slot stays in `no-profile-key`
+  // skipped state until `anima profile init` sends one via /admin/profile-key.
+  const profileKeyBuf = getSessionKey(agentId, OPERATOR_BLOB_SCOPES.PROFILE)
+  const profileScopeKeyHex: `0x${string}` | undefined = profileKeyBuf
+    ? (`0x${profileKeyBuf.toString('hex')}` as `0x${string}`)
+    : undefined
+  const secrets: GatewaySecrets | undefined =
+    profileScopeKeyHex || tgSecrets
+      ? {
+          ...(tgSecrets ?? {}),
+          ...(profileScopeKeyHex ? { profileScopeKeyHex } : {}),
+        }
+      : undefined
 
   // v0.21.5: proactively reap a zombie/crashed listener's bot-token lock so
   // TelegramListener.start() doesn't get stuck in scheduleStartRetry's 30s ×

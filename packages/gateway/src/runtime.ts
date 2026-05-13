@@ -138,4 +138,20 @@ export interface RuntimeAdapter {
    * yet wired its PermissionService (e.g. pre-Ready).
    */
   permissionMode?(): 'off' | 'prompt' | 'strict' | undefined
+  /**
+   * v0.23.0: snapshot of every IntelligentData slot's high-level status so
+   * `/healthz` can show whether profile/identity/persona/MEMORY are anchored,
+   * pending, or skipped. Same semantics as `restoreOutcomes` from boot, kept
+   * fresh as flushes + lazy restores complete.
+   */
+  slotStatus?(): Record<string, { status: string; reason?: string; bytes?: number }>
+  /**
+   * v0.23.0: live-flip the operator-scoped PROFILE key. Called when the
+   * operator runs `anima profile init` against a sandbox endpoint; the
+   * gateway forwards the raw 32-byte key (hex-encoded over a sealed channel
+   * verified by sig) here so the sync-manager picks it up on the next flush.
+   * Returns ok:false with reason='profile-unsupported' when the runtime
+   * doesn't have an active MemorySyncManager (e.g. pre-Ready or stub).
+   */
+  setProfileKey?(keyHex: `0x${string}`): Promise<{ ok: true } | { ok: false; reason: string }>
 }
