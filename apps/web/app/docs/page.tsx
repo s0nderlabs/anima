@@ -1,6 +1,6 @@
-import Link from 'next/link'
 import { DocsMobileNav } from '@/components/docs/DocsMobileNav'
 import { getNavTree } from '@/lib/docs'
+import Link from 'next/link'
 
 export const metadata = {
   title: 'docs · anima',
@@ -11,12 +11,7 @@ export default async function DocsOverviewPage() {
   const groups = await getNavTree()
   return (
     <article className="min-w-0">
-      <DocsMobileNav
-        groups={groups}
-        activeSlug={null}
-        activeTitle="Overview"
-        activeGroup="DOCS"
-      />
+      <DocsMobileNav groups={groups} activeSlug={null} activeTitle="Overview" activeGroup="DOCS" />
       <header className="mt-6 flex flex-col gap-5 md:mt-0">
         <h1
           className="font-display text-[clamp(40px,5vw,72px)] font-light leading-[1.04] tracking-[-0.018em] text-[var(--color-ink)]"
@@ -81,41 +76,35 @@ export default async function DocsOverviewPage() {
           The repo README is the GitHub-side companion to this site. Every page footers the source
           files it explains.
         </p>
-        <div className="mt-4 flex flex-wrap items-center gap-5 text-[12.5px]">
+        <div className="mt-4 flex flex-wrap items-center gap-5 text-[13px]">
           <a
             href="https://github.com/s0nderlabs/anima#readme"
             target="_blank"
             rel="noreferrer"
-            className="font-mono uppercase tracking-[0.18em] text-[var(--color-ink-2)] transition hover:text-[var(--color-ink)]"
+            className="font-mono text-[var(--color-ink-2)] transition hover:text-[var(--color-ink)]"
           >
-            full readme ↗
+            Full README ↗
           </a>
           <a
             href="https://github.com/s0nderlabs/anima/releases"
             target="_blank"
             rel="noreferrer"
-            className="font-mono uppercase tracking-[0.18em] text-[var(--color-ink-2)] transition hover:text-[var(--color-ink)]"
+            className="font-mono text-[var(--color-ink-2)] transition hover:text-[var(--color-ink)]"
           >
-            changelog ↗
+            Changelog ↗
           </a>
           <a
             href="/llms.txt"
-            className="font-mono uppercase tracking-[0.18em] text-[var(--color-ink-2)] transition hover:text-[var(--color-ink)]"
+            className="font-mono text-[var(--color-ink-2)] transition hover:text-[var(--color-ink)]"
           >
             llms.txt ↗
           </a>
           <a
             href="/llms-full.txt"
-            className="font-mono uppercase tracking-[0.18em] text-[var(--color-ink-2)] transition hover:text-[var(--color-ink)]"
+            className="font-mono text-[var(--color-ink-2)] transition hover:text-[var(--color-ink)]"
           >
             llms-full.txt ↗
           </a>
-          <Link
-            href="/"
-            className="font-mono uppercase tracking-[0.18em] text-[var(--color-ink-2)] transition hover:text-[var(--color-ink)]"
-          >
-            ← landing
-          </Link>
         </div>
       </footer>
     </article>

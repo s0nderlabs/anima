@@ -1,8 +1,8 @@
 'use client'
 
+import type { NavGroup } from '@/lib/docs'
 import Link from 'next/link'
 import { useId } from 'react'
-import type { NavGroup } from '@/lib/docs'
 
 interface Props {
   groups: NavGroup[]
@@ -46,6 +46,17 @@ export function DocsMobileNav({ groups, activeSlug, activeTitle, activeGroup }: 
       </summary>
       <div className="mt-2 rounded-md border border-[var(--color-border)] bg-[var(--color-paper)] p-4">
         <div className="flex flex-col gap-5">
+          <Link
+            href="/docs"
+            aria-current={activeSlug === null ? 'page' : undefined}
+            className={`block rounded-md px-3 py-2 text-[13.5px] leading-[1.4] transition ${
+              activeSlug === null
+                ? 'bg-[color-mix(in_oklab,var(--color-ink)_4%,transparent)] text-[var(--color-ink)]'
+                : 'text-[var(--color-ink-2)] hover:text-[var(--color-ink)]'
+            }`}
+          >
+            Overview
+          </Link>
           {groups.map(group => (
             <div key={group.name} className="flex flex-col gap-2">
               <div className="font-mono text-[10.5px] uppercase tracking-[0.24em] text-[var(--color-ink-3)]">

@@ -382,13 +382,21 @@ function MobileMenuOverlay({ onClose }: { onClose: () => void }) {
       exit={{ opacity: 0 }}
       transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
     >
-      {/* Top bar , same coordinates as the page navbar so brand + close X
-          line up with where the wordmark and hamburger were a moment ago. */}
-      <div className="flex items-center justify-between px-5 pt-5 sm:px-8 sm:pt-6">
-        <Brand />
-        <div className="flex items-center gap-2 pr-1">
-          <PrimaryCta />
-          <HamburgerButton open onClick={onClose} />
+      {/* Top bar , mirror the page navbar's exact coordinate system so the
+          wordmark, CTA pill, and morphing hamburger/X stay at the same x
+          positions when the menu opens (avoids a layout shift). */}
+      <div className="flex justify-center pt-5 sm:pt-6">
+        <div
+          className="relative flex h-[56px] w-full items-center"
+          style={{ maxWidth: PILL_WIDTH, paddingLeft: PILL_INSET, paddingRight: PILL_INSET }}
+        >
+          <div className="flex shrink-0 items-center pl-5 md:pl-3">
+            <Brand />
+          </div>
+          <div className="ml-auto flex shrink-0 items-center gap-2 pr-4 md:ml-0 md:pr-1">
+            <PrimaryCta />
+            <HamburgerButton open onClick={onClose} />
+          </div>
         </div>
       </div>
 
@@ -404,15 +412,6 @@ function MobileMenuOverlay({ onClose }: { onClose: () => void }) {
           ))}
         </ul>
       </nav>
-
-      {/* Footer attribution , Lovart had Theme switcher here; we have no dark
-          mode so this slot gets the same s0nderlabs credit shown in the page
-          footer. Keeps the overlay from feeling empty at the bottom. */}
-      <div className="border-t border-[var(--color-border)] p-5 sm:px-8 sm:py-6">
-        <p className="font-mono text-[11px] tracking-[0.04em] text-[var(--color-ink-3)]">
-          s0nderlabs · 2026
-        </p>
-      </div>
     </motion.div>
   )
 }
@@ -438,25 +437,21 @@ function MenuLink({
     duration: 0.45,
     ease: [0.22, 1, 0.36, 1] as [number, number, number, number],
   }
-  if (isAnchor) {
-    return (
-      <motion.a
-        href={href}
-        onClick={onClose}
-        className={className}
-        initial={initial}
-        animate={animate}
-        transition={transition}
-      >
-        {children}
-      </motion.a>
-    )
-  }
+  // Animate the wrapper, not the link itself — putting framer-motion on the
+  // same element that carries Tailwind's `transition-opacity` causes the two
+  // easings to fight over opacity per frame (visible jitter on the anchor
+  // item where motion.a was applied directly).
   return (
     <motion.span initial={initial} animate={animate} transition={transition} className="block">
-      <Link href={href} onClick={onClose} className={className}>
-        {children}
-      </Link>
+      {isAnchor ? (
+        <a href={href} onClick={onClose} className={className}>
+          {children}
+        </a>
+      ) : (
+        <Link href={href} onClick={onClose} className={className}>
+          {children}
+        </Link>
+      )}
     </motion.span>
   )
 }
