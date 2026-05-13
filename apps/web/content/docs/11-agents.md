@@ -27,7 +27,7 @@ bun add -g @s0nderlabs/anima
 anima init
 ```
 
-The published package is [`@s0nderlabs/anima`](https://www.npmjs.com/package/@s0nderlabs/anima). The bin name is `anima`. Requires bun >=1.1. Current release is v0.21.17, pre-alpha. Always have the user run `anima --version` so you know exactly what surface you are working against.
+The published package is [`@s0nderlabs/anima`](https://www.npmjs.com/package/@s0nderlabs/anima). The bin name is `anima`. Requires bun >=1.1. Current release is v0.21.19, pre-alpha. Always have the user run `anima --version` so you know exactly what surface you are working against.
 
 ## What you can do for the user
 
@@ -123,7 +123,7 @@ On macOS that path resolves under `/var/folders/...`. Use `anima logs --tail N` 
 
 ## CLI surface most agents need
 
-- `anima --version` — confirm the user is on the surface you expect (currently v0.21.17).
+- `anima --version` — confirm the user is on the surface you expect (currently v0.21.19).
 - `anima init` — interactive only, see above.
 - `anima` or `anima chat` — drop into the TUI. User types from there.
 - `anima status` — agent state, wallet positions, config snapshot.
