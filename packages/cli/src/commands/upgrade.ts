@@ -7,6 +7,7 @@ import {
   SandboxProviderClient,
 } from '@s0nderlabs/anima-core'
 import {
+  type BootstrapMode,
   UPGRADE_DONE_MARKER,
   UPGRADE_FAIL_KEYWORDS,
   UPGRADE_FAIL_MARKER,
@@ -18,6 +19,7 @@ import type { Address, Hex } from 'viem'
 import { findAndLoadConfig } from '../config/load'
 import { writeConfigTs } from '../config/render'
 import { SandboxClient } from '../sandbox/client'
+import { resolveCliVersion } from '../util/cli-version'
 import { checkTagExists } from '../util/github-releases'
 import {
   ANIMA_REPO_URL,
@@ -278,11 +280,28 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
     return
   }
 
-  sBox.message(`launching in-place upgrade to ref=${args.resolved.ref}`)
+  sBox.message('probing container bootstrap mode')
+  const probedMode = await probeContainerBootstrapMode(provider, args.sandboxId)
+  if (!probedMode) {
+    sBox.stop('cannot determine container bootstrap mode (no anima install detected)')
+    note(
+      [
+        'Container has neither $HOME/anima/.git/ nor a global anima-gateway binary.',
+        'The container may have been wiped or never bootstrapped successfully.',
+        'Try `anima upgrade --reprovision` to spin a fresh container.',
+      ].join('\n'),
+      'recoverable',
+    )
+    return
+  }
+  const cliVersion = probedMode === 'npm' ? await resolveCliVersion() : undefined
+  sBox.message(`launching in-place upgrade to ref=${args.resolved.ref} (mode=${probedMode})`)
   const { script } = buildUpgradeScript({
     sandboxId: args.sandboxId,
     operatorAddress: operatorAccount.address,
+    mode: probedMode,
     ref: args.resolved.ref,
+    packageVersion: cliVersion,
   })
   let launchOut: string
   try {
@@ -360,9 +379,11 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
   // from the container and compare. Skip for non-tag refs (no expectation).
   const expected = expectedVersionFromRef(args.resolved)
   if (expected !== null) {
-    const verifyOut = await execRead(
-      `grep '"version"' $HOME/anima/packages/gateway/package.json | head -1`,
-    )
+    const verifyPath =
+      probedMode === 'npm'
+        ? '$HOME/.bun/install/global/node_modules/@s0nderlabs/anima-gateway/package.json'
+        : '$HOME/anima/packages/gateway/package.json'
+    const verifyOut = await execRead(`grep '"version"' ${verifyPath} | head -1`)
     const m = verifyOut.match(/"version"\s*:\s*"([^"]+)"/)
     if (!m) {
       sBox.stop('post-flight verification failed: cannot parse package.json version')
@@ -591,4 +612,28 @@ function sliceAfter(s: string, marker: string): string {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms))
+}
+
+/**
+ * Single execInToolbox round-trip that probes the container's bootstrap mode
+ * by checking filesystem state. Returns 'git' if `$HOME/anima/.git/` exists,
+ * 'npm' if global anima-gateway binary exists, or null if neither.
+ *
+ * Used by `runInPlaceUpgrade` so the upgrade script ships only the path it
+ * actually needs (auto-detect inside the script blew the 5KB Daytona cap).
+ */
+async function probeContainerBootstrapMode(
+  provider: SandboxProviderClient,
+  sandboxId: string,
+): Promise<BootstrapMode | null> {
+  const probe = `if [ -d "$HOME/anima/.git" ]; then echo MODE=git; elif [ -x "$HOME/.bun/install/global/node_modules/.bin/anima-gateway" ]; then echo MODE=npm; else echo MODE=none; fi`
+  try {
+    const res = await provider.execInToolbox(sandboxId, { command: probe, timeout: 30 })
+    const out = extractExecOutput(res)
+    if (out.includes('MODE=git')) return 'git'
+    if (out.includes('MODE=npm')) return 'npm'
+    return null
+  } catch {
+    return null
+  }
 }

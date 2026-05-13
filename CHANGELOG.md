@@ -4,6 +4,19 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.15] - 2026-05-13
+
+### Added
+
+- **`npm`-mode sandbox bootstrap.** `bootstrap.ts`, `upgrade-script.ts`, and `relaunch-script.ts` now support an alternative install path that runs `bun add -g @s0nderlabs/anima@<version>` instead of cloning the monorepo from GitHub. ~30-60 sec cold start (vs 5-8 min for git mode). Opt-in via `ANIMA_BOOTSTRAP_MODE=npm anima deploy`. Git mode remains the default in v0.21.15 for zero-regression; npm becomes default in a follow-up.
+- **`BootstrapMode` type** exported from `@s0nderlabs/anima-gateway` (`'git' | 'npm'`).
+- **Relaunch script auto-detects bootstrap mode at runtime** by probing the container's filesystem (`$HOME/anima/.git/` for git mode, `$HOME/.bun/install/global/node_modules/.bin/anima-gateway` for npm mode). Backward-compatible: legacy git-bootstrapped containers keep working forever; new npm-bootstrapped containers also relaunch cleanly. Drops the hard `anima-dir-missing` failure that would have broken npm containers on archive/restore.
+- **CLI probes container mode before in-place upgrade** via a single ~150-byte `execInToolbox` shell stanza, then ships the mode-specific upgrade script. Mode-aware post-flight version verification reads `package.json` from the correct path. Cross-mode upgrade (git↔npm) still requires `anima upgrade --reprovision`.
+- **`findAgentBrowser` probes Bun's global install root** (`~/.bun/install/global/node_modules/.bin/agent-browser`) in addition to local `node_modules`. Browser tools resolve cleanly in npm-bootstrapped sandbox containers without PATH manipulation.
+- **CI release-workflow smoke test** in `.github/workflows/release.yml`. After publish + metadata verification, the workflow now `bun add -g`s the just-published `@s0nderlabs/anima@<version>` into a temp dir and asserts the gateway bin + all 6 sibling packages installed at the matching version. Catches broken bin entrypoints + transitive resolution failures before customers hit them.
+
+[0.21.15]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.15
+
 ## [0.21.14] - 2026-05-12
 
 ### Fixed

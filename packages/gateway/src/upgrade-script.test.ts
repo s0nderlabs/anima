@@ -201,4 +201,60 @@ describe('buildUpgradeScript', () => {
     const inner = decodeInner()
     expect(inner).toContain('git remote set-url origin')
   })
+
+  describe('mode=npm', () => {
+    const npmOpts = {
+      ...baseOpts,
+      mode: 'npm' as const,
+      packageVersion: '0.21.15',
+    }
+
+    test('inner subshell does `bun add -g` instead of git fetch+checkout+bun install', () => {
+      const inner = decodeInner(npmOpts)
+      expect(inner).toContain("bun add -g '@s0nderlabs/anima@0.21.15'")
+      expect(inner).not.toContain('git fetch')
+      expect(inner).not.toContain('git checkout')
+      expect(inner).not.toContain('bun install --frozen-lockfile')
+    })
+
+    test('inner subshell launches gateway from global bin', () => {
+      const inner = decodeInner(npmOpts)
+      expect(inner).toContain('nohup $HOME/.bun/install/global/node_modules/.bin/anima-gateway')
+      expect(inner).not.toContain('nohup bun "$HOME/anima/packages/gateway/bin/anima-gateway"')
+    })
+
+    test('throws when packageVersion is missing for npm mode', () => {
+      expect(() => decodeInner({ ...baseOpts, mode: 'npm' })).toThrow(
+        /packageVersion is required when mode=npm/,
+      )
+    })
+
+    test('outer script under 5KB cap (npm path is leaner than git)', () => {
+      const { script } = buildUpgradeScript(npmOpts)
+      expect(script.length).toBeLessThan(5000)
+    })
+
+    test('writes anima-install-failed marker on bun add failure', () => {
+      const inner = decodeInner(npmOpts)
+      expect(inner).toContain('anima-install-failed')
+    })
+
+    test('mode label is reported in upgrade-start log', () => {
+      const inner = decodeInner(npmOpts)
+      expect(inner).toContain('upgrade-start (mode=npm)')
+    })
+
+    test('still does the harness pkill + restart sequence', () => {
+      const inner = decodeInner(npmOpts)
+      expect(inner).toContain('pkill -f anima-gateway')
+      expect(inner).toContain('for h_attempt in 1 2 3; do')
+      expect(inner).toContain('clear stale agent locks')
+    })
+  })
+
+  test('default mode is git when not specified (zero-regression for legacy callers)', () => {
+    const inner = decodeInner()
+    expect(inner).toContain('upgrade-start (mode=git)')
+    expect(inner).toContain('git fetch')
+  })
 })

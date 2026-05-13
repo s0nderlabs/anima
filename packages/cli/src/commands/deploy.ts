@@ -133,7 +133,9 @@ export async function runDeploy(): Promise<void> {
         'Common causes:',
         '  - insufficient testnet 0G at operator wallet',
         '  - provider 504 / Daytona upstream timeout',
-        '  - bootstrap script git clone failed (pin a different ref via ANIMA_BOOTSTRAP_REF)',
+        '  - git mode: bootstrap script git clone failed (pin a different ref via ANIMA_BOOTSTRAP_REF)',
+        '  - npm mode: bun add -g failed (registry transient or missing version)',
+        '  - try the alternative bootstrap mode: ANIMA_BOOTSTRAP_MODE=npm anima deploy',
       ].join('\n'),
       'recoverable',
     )

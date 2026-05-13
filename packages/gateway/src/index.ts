@@ -63,6 +63,7 @@ export {
 export { type ServerDeps, createGatewayServer } from './server'
 
 export {
+  type BootstrapMode,
   type BuildBootstrapScriptOpts,
   type BuildBootstrapScriptResult,
   BOOTSTRAP_SUCCESS_MARKER_PREFIX,

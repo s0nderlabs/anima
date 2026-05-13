@@ -3,12 +3,16 @@
  * a 0G Sandbox container. Returned as a string the init/deploy/upgrade
  * commands feed to `provider-client.execInToolbox(id, { command })`.
  *
+ * Two modes:
+ *  - 'git': clones the monorepo + bun install. ~5-8 min cold start. Pins to
+ *    any branch/SHA.
+ *  - 'npm': `bun add -g @s0nderlabs/anima@<version>`. ~30-60 sec cold start.
+ *    Only published versions.
+ *
  * Design constraint: the Daytona toolbox `process/execute` endpoint caps each
- * exec call at ~60s. apt-get install (chromium + xvfb) plus bun install on
- * the anima monorepo blow that easily (3-5 min cold start). We solve this by
- * detaching the slow work into a background subshell via `nohup bash -c '...' &`
- * and returning exit 0 immediately. Progress is observable via two files the
- * background subshell writes:
+ * exec call at ~60s. Whatever install path runs blows that easily, so we
+ * detach the slow work into a background subshell via `nohup bash -c '...' &`
+ * and return exit 0 immediately. Progress is observable via two files:
  *
  *  - `/tmp/anima-bootstrap-progress.log` (tail-able, line-by-line stages)
  *  - `/tmp/anima-bootstrap-done` (created only on full success, contains harness pid)
@@ -19,29 +23,42 @@
  * Robustness rules:
  *  - All variables shell-quote-escaped to defeat injection from operator
  *    address or sandbox id (validated upstream, defense-in-depth).
- *  - Always-clone: the inner script `rm -rf "$ANIMA_DIR"` then `git clone`
- *    fresh. Daytona occasionally re-uses post-delete volumes whose stale
- *    git credential helpers break re-fetch, so we never trust an existing
- *    checkout. Cost is one extra clone per bootstrap (~5s).
+ *  - Git mode: always-clone fresh. Daytona occasionally re-uses post-delete
+ *    volumes whose stale git credential helpers break re-fetch.
+ *  - Npm mode: `bun add -g @s0nderlabs/anima@<exact-version>` is idempotent
+ *    and overwrites. Same version twice = no-op. Different version = clean
+ *    swap. Lower risk than git's stale-credential failure mode.
  */
+
+export type BootstrapMode = 'git' | 'npm'
 
 export interface BuildBootstrapScriptOpts {
   /** Sandbox UUID returned by provider's createSandbox. */
   sandboxId: string
   /** EIP-191 checksummed operator address. Stored in container env, used by `verifyChatSig`. */
   operatorAddress: string
-  /** Git tag to clone (e.g. 'v0.15.0'). Use 'main' or a SHA only for dev. */
+  /** Bootstrap mode. Defaults to 'git' for backward compat. */
+  mode?: BootstrapMode
+  /**
+   * Git mode: tag/branch/SHA to clone (e.g. 'v0.15.0', 'main', or commit SHA).
+   * Npm mode: ignored (use `packageVersion`).
+   */
   ref: string
   /**
+   * Npm mode: the exact published version to install (e.g. '0.21.15').
+   * Required when mode='npm'. Ignored in git mode.
+   */
+  packageVersion?: string
+  /**
    * Public git URL of anima. Defaults to the canonical hackathon repo.
-   * Override only when running against a fork / private mirror.
+   * Override only when running against a fork / private mirror. (Git mode only.)
    */
   repoUrl?: string
   /** Port the harness binds inside the container. Default 8080. */
   port?: number
   /**
-   * Extra `apt-get install` packages. Defaults to chromium + xvfb (for browser
-   * tools) + git + ca-certificates + curl + unzip. Caller can append.
+   * Extra `apt-get install` packages. Defaults to xvfb + git + ca-certificates
+   * + curl + unzip + psmisc. Caller can append.
    */
   extraAptPackages?: string[]
   /**
@@ -51,6 +68,7 @@ export interface BuildBootstrapScriptOpts {
    * base64-encoded into the outer command), and the inner script is written
    * to /tmp on the container; ensure the container is single-tenant (Daytona
    * containers are by-operator). Gets cleared from container env after clone.
+   * (Git mode only.)
    */
   githubToken?: string
 }
@@ -94,36 +112,23 @@ const PROGRESS_LOG = '/tmp/anima-bootstrap-progress.log'
 const DONE_MARKER = '/tmp/anima-bootstrap-done'
 const FAIL_MARKER = '/tmp/anima-bootstrap-failed'
 
-export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBootstrapScriptResult {
-  const port = opts.port ?? 8080
-  const repoUrl = opts.repoUrl ?? 'https://github.com/s0nderlabs/anima.git'
-  const aptPkgs = [...DEFAULT_APT_PACKAGES, ...(opts.extraAptPackages ?? [])]
-  const aptList = [...new Set(aptPkgs)].join(' ')
-  // Auth-injected URL when token is supplied. Falls back to anonymous clone
-  // for public repos.
-  const cloneUrl = opts.githubToken
-    ? repoUrl.replace(
-        'https://github.com/',
-        `https://x-access-token:${opts.githubToken}@github.com/`,
-      )
-    : repoUrl
+/**
+ * Shell literal (NOT a Node path). Where Bun symlinks third-party global bins
+ * after `bun add -g`. Don't pass to `path.join` — `$HOME` won't expand.
+ */
+export const BUN_GLOBAL_BIN_SHELL = '$HOME/.bun/install/global/node_modules/.bin'
 
-  // Inner subshell: the slow work. Runs nohup'd in background. Heredoc body
-  // single-quoted so all literal vars stay literal at the outer-shell layer;
-  // we inject runtime fields via shQuote'd env exports at the top of inner.
-  //
-  // Daytona transients seen in production: apt mirror 5xx, dpkg lock from
-  // unattended-upgrade, github 429/DNS, bun.sh redirect blip, npm registry
-  // hiccup mid bun-install. Every slow network step is wrapped in retry().
-  const inner = [
+function buildPreambleLines(
+  opts: BuildBootstrapScriptOpts,
+  modeLabel: string,
+  aptList: string,
+): string[] {
+  return [
     '#!/bin/bash',
     'set -uo pipefail',
     `exec > ${PROGRESS_LOG} 2>&1`,
-    'echo "[$(date -u +%FT%TZ)] bootstrap-start"',
-    `echo "  ref=${opts.ref}"`,
-    `echo "  repo=${repoUrl}"`,
+    `echo "[$(date -u +%FT%TZ)] bootstrap-start (mode=${modeLabel})"`,
     `echo "  sandbox=${opts.sandboxId}"`,
-    // 3-attempt linear-backoff retry. $1=label, $2..$N=command.
     'retry() {',
     '  local L=$1; shift',
     '  local n',
@@ -142,28 +147,12 @@ export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBoots
     `  retry 'bun binary' install_bun || { echo "bun-install-failed" > ${FAIL_MARKER}; exit 13; }`,
     'fi',
     'export PATH="$HOME/.bun/bin:$PATH"',
-    'ANIMA_DIR="$HOME/anima"',
-    `git_clone_one() { rm -rf "$ANIMA_DIR"; git clone --depth 1 --branch ${shQuote(opts.ref)} ${shQuote(cloneUrl)} "$ANIMA_DIR"; }`,
-    `retry 'git clone' git_clone_one || { echo "git-clone-failed" > ${FAIL_MARKER}; exit 14; }`,
-    `cd "$ANIMA_DIR" && git remote set-url origin ${shQuote(repoUrl)}`,
-    `retry 'bun deps' bun install --frozen-lockfile || { echo "bun-install-failed" > ${FAIL_MARKER}; exit 17; }`,
-    '',
-    // Install Chromium for browser.* tools. `agent-browser install` downloads
-    // a Chrome-for-Testing build + Linux system libs (`--with-deps`).
-    // `doctor` exits 0 only when the install state is healthy, so re-runs are
-    // no-ops on container restarts that share a persisted volume.
-    //
-    // Invoked via `node_modules/.bin/agent-browser` directly (not `bunx`)
-    // because Daytona's `curl bun.sh/install` install path doesn't always
-    // ship a `bunx` symlink. The npm-shipped binary uses `#!/usr/bin/env node`
-    // which Daytona already provides (Node v22.x in the slim sandbox image).
-    'echo "[browser deps]"',
-    'if node_modules/.bin/agent-browser doctor >/dev/null 2>&1; then',
-    '  echo "[browser deps] already installed, skipping"',
-    'else',
-    `  retry 'browser deps' node_modules/.bin/agent-browser install --with-deps || { echo "browser-install-failed" > ${FAIL_MARKER}; exit 19; }`,
-    'fi',
-    '',
+  ]
+}
+
+function buildLaunchLines(opts: BuildBootstrapScriptOpts, gatewayLaunchCmd: string): string[] {
+  const port = opts.port ?? 8080
+  return [
     'mkdir -p "$HOME/anima-logs" "$HOME/workspace"',
     '',
     `export SANDBOX_ID=${shQuote(opts.sandboxId)}`,
@@ -180,7 +169,7 @@ export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBoots
     '  echo "[launch attempt $h_attempt/3]"',
     `  fuser -k ${port}/tcp 2>/dev/null || true`,
     '  sleep 1',
-    '  nohup bun "$ANIMA_DIR/packages/gateway/bin/anima-gateway" > "$HOME/anima-logs/anima-gateway.log" 2>&1 &',
+    `  nohup ${gatewayLaunchCmd} > "$HOME/anima-logs/anima-gateway.log" 2>&1 &`,
     '  HARNESS_PID=$!',
     '  disown',
     '  sleep 10',
@@ -204,7 +193,83 @@ export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBoots
     `echo "anima-gateway-pid=$HARNESS_PID" > ${DONE_MARKER}`,
     'echo "[$(date -u +%FT%TZ)] bootstrap-done pid=$HARNESS_PID"',
     '',
-  ].join('\n')
+  ]
+}
+
+function buildGitInnerScript(opts: BuildBootstrapScriptOpts, aptList: string): string {
+  const repoUrl = opts.repoUrl ?? 'https://github.com/s0nderlabs/anima.git'
+  const cloneUrl = opts.githubToken
+    ? repoUrl.replace(
+        'https://github.com/',
+        `https://x-access-token:${opts.githubToken}@github.com/`,
+      )
+    : repoUrl
+  const preamble = buildPreambleLines(opts, 'git', aptList)
+  const installLines = [
+    `echo "  ref=${opts.ref}"`,
+    `echo "  repo=${repoUrl}"`,
+    'ANIMA_DIR="$HOME/anima"',
+    `git_clone_one() { rm -rf "$ANIMA_DIR"; git clone --depth 1 --branch ${shQuote(opts.ref)} ${shQuote(cloneUrl)} "$ANIMA_DIR"; }`,
+    `retry 'git clone' git_clone_one || { echo "git-clone-failed" > ${FAIL_MARKER}; exit 14; }`,
+    `cd "$ANIMA_DIR" && git remote set-url origin ${shQuote(repoUrl)}`,
+    `retry 'bun deps' bun install --frozen-lockfile || { echo "bun-install-failed" > ${FAIL_MARKER}; exit 17; }`,
+    '',
+    // Install Chrome-for-Testing for browser tools. `agent-browser install`
+    // pulls a Chromium build + Linux system libs (`--with-deps`). `doctor`
+    // exits 0 only when the install state is healthy, so re-runs are no-ops
+    // on container restarts that share a persisted volume.
+    //
+    // Invoked via `node_modules/.bin/agent-browser` directly (not `bunx`)
+    // because Daytona's `curl bun.sh/install` install path doesn't always
+    // ship a `bunx` symlink.
+    'echo "[browser deps]"',
+    'if node_modules/.bin/agent-browser doctor >/dev/null 2>&1; then',
+    '  echo "[browser deps] already installed, skipping"',
+    'else',
+    `  retry 'browser deps' node_modules/.bin/agent-browser install --with-deps || { echo "browser-install-failed" > ${FAIL_MARKER}; exit 19; }`,
+    'fi',
+    '',
+  ]
+  const launch = buildLaunchLines(opts, 'bun "$ANIMA_DIR/packages/gateway/bin/anima-gateway"')
+  return [...preamble, ...installLines, ...launch].join('\n')
+}
+
+function buildNpmInnerScript(opts: BuildBootstrapScriptOpts, aptList: string): string {
+  if (!opts.packageVersion) {
+    throw new Error('buildBootstrapScript: packageVersion is required when mode=npm')
+  }
+  const preamble = buildPreambleLines(opts, 'npm', aptList)
+  const installLines = [
+    `echo "  package=@s0nderlabs/anima@${opts.packageVersion}"`,
+    // Install anima from npm. `bun add -g <pkg>@<exact-version>` is idempotent
+    // and overwrites whatever is in the global store. Atomic on success; on
+    // failure the prior version remains (which may be empty on a fresh container).
+    `retry 'anima install' bun add -g ${shQuote(`@s0nderlabs/anima@${opts.packageVersion}`)} || { echo "anima-install-failed" > ${FAIL_MARKER}; exit 14; }`,
+    // Add Bun's global package binaries to PATH so anima-gateway + agent-browser
+    // resolve. ~/.bun/bin only contains bun's own binary, NOT third-party global
+    // package bins (those live at ~/.bun/install/global/node_modules/.bin/).
+    `export PATH="${BUN_GLOBAL_BIN_SHELL}:$PATH"`,
+    '',
+    // Browser deps (Chrome-for-Testing + Linux libs) installed via the global
+    // agent-browser binary. `doctor` is the idempotent guard.
+    'echo "[browser deps]"',
+    `if ${BUN_GLOBAL_BIN_SHELL}/agent-browser doctor >/dev/null 2>&1; then`,
+    '  echo "[browser deps] already installed, skipping"',
+    'else',
+    `  retry 'browser deps' ${BUN_GLOBAL_BIN_SHELL}/agent-browser install --with-deps || { echo "browser-install-failed" > ${FAIL_MARKER}; exit 19; }`,
+    'fi',
+    '',
+  ]
+  const launch = buildLaunchLines(opts, `${BUN_GLOBAL_BIN_SHELL}/anima-gateway`)
+  return [...preamble, ...installLines, ...launch].join('\n')
+}
+
+export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBootstrapScriptResult {
+  const mode: BootstrapMode = opts.mode ?? 'git'
+  const aptPkgs = [...DEFAULT_APT_PACKAGES, ...(opts.extraAptPackages ?? [])]
+  const aptList = [...new Set(aptPkgs)].join(' ')
+  const inner =
+    mode === 'npm' ? buildNpmInnerScript(opts, aptList) : buildGitInnerScript(opts, aptList)
 
   // Daytona's `process/execute` API does NOT run via a shell — it splits the
   // command string argv-style. Heredocs / pipes / `>` redirects fail because
@@ -251,6 +316,7 @@ export const BOOTSTRAP_FAIL_KEYWORDS = [
   'apt-install-failed',
   'bun-install-failed',
   'git-clone-failed',
+  'anima-install-failed',
   'browser-install-failed',
   'harness-died-early',
 ] as const

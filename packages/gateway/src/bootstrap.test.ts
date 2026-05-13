@@ -211,4 +211,73 @@ describe('buildBootstrapScript', () => {
     expect(inner).not.toContain('/opt/anima')
     expect(inner).toContain('rm -rf "$ANIMA_DIR"')
   })
+
+  describe('mode=npm', () => {
+    const npmOpts = {
+      ...baseOpts,
+      mode: 'npm' as const,
+      packageVersion: '0.21.15',
+    }
+
+    test('inner subshell does `bun add -g @s0nderlabs/anima@<version>` instead of git clone', () => {
+      const inner = decodeInner(npmOpts)
+      expect(inner).toContain("bun add -g '@s0nderlabs/anima@0.21.15'")
+      expect(inner).not.toContain('git clone')
+      expect(inner).not.toContain('bun install --frozen-lockfile')
+    })
+
+    test('inner subshell exports bun global bin to PATH so anima-gateway resolves', () => {
+      const inner = decodeInner(npmOpts)
+      expect(inner).toContain('export PATH="$HOME/.bun/install/global/node_modules/.bin:$PATH"')
+    })
+
+    test('inner subshell launches gateway from global bin (not via bun monorepo path)', () => {
+      const inner = decodeInner(npmOpts)
+      expect(inner).toContain('nohup $HOME/.bun/install/global/node_modules/.bin/anima-gateway')
+      expect(inner).not.toContain('bun "$ANIMA_DIR/packages/gateway/bin/anima-gateway"')
+    })
+
+    test('browser deps install uses global bin path', () => {
+      const inner = decodeInner(npmOpts)
+      expect(inner).toContain('$HOME/.bun/install/global/node_modules/.bin/agent-browser doctor')
+      expect(inner).toMatch(
+        /retry 'browser deps' \$HOME\/\.bun\/install\/global\/node_modules\/\.bin\/agent-browser install --with-deps/,
+      )
+    })
+
+    test('throws when packageVersion is missing for npm mode', () => {
+      expect(() => decodeInner({ ...baseOpts, mode: 'npm' })).toThrow(
+        /packageVersion is required when mode=npm/,
+      )
+    })
+
+    test('outer script under 5KB cap (npm path is leaner than git)', () => {
+      const { script } = buildBootstrapScript(npmOpts)
+      expect(script.length).toBeLessThan(5000)
+    })
+
+    test('preserves apt + retry helper + harness retry loop from preamble', () => {
+      const inner = decodeInner(npmOpts)
+      expect(inner).toContain('sudo -n apt-get update -qq')
+      expect(inner).toContain('retry() {')
+      expect(inner).toContain('for h_attempt in 1 2 3; do')
+      expect(inner).toContain(BOOTSTRAP_DONE_MARKER)
+    })
+
+    test('writes anima-install-failed marker on bun add failure', () => {
+      const inner = decodeInner(npmOpts)
+      expect(inner).toContain('anima-install-failed')
+    })
+
+    test('mode label is reported in bootstrap-start log', () => {
+      const inner = decodeInner(npmOpts)
+      expect(inner).toContain('bootstrap-start (mode=npm)')
+    })
+  })
+
+  test('default mode is git when not specified (zero-regression for legacy callers)', () => {
+    const inner = decodeInner()
+    expect(inner).toContain('bootstrap-start (mode=git)')
+    expect(inner).toContain('git clone --depth 1 --branch')
+  })
 })

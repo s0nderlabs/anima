@@ -215,6 +215,53 @@ jobs:
           cat "${RESULTS_DIR}"/*.ok
           echo "All published packages have correct sibling deps pinned at ${PKG_VERSION}."
 
+      # Smoke test: install the just-published @s0nderlabs/anima from the npm
+      # registry into a fresh tmp dir + verify the gateway binary is present
+      # and reports the right version. Catches broken bin entrypoints, missing
+      # runtime deps, or transitive resolution failures BEFORE customers hit
+      # them. Critical for the npm-bootstrap path (v0.21.15+) where sandbox
+      # containers do `bun add -g @s0nderlabs/anima` instead of git clone.
+      - name: Smoke test installed gateway binary
+        run: |
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          SMOKE_DIR=$(mktemp -d)
+          cd "$SMOKE_DIR"
+          bun add -g "@s0nderlabs/anima@${PKG_VERSION}"
+          GLOBAL_BIN="$HOME/.bun/install/global/node_modules/.bin"
+          GLOBAL_GATEWAY_PKG="$HOME/.bun/install/global/node_modules/@s0nderlabs/anima-gateway/package.json"
+          if [ ! -x "$GLOBAL_BIN/anima-gateway" ]; then
+            echo "::error::anima-gateway binary missing at $GLOBAL_BIN/anima-gateway after global install"
+            ls -la "$GLOBAL_BIN" || true
+            exit 1
+          fi
+          if [ ! -x "$GLOBAL_BIN/anima" ]; then
+            echo "::error::anima CLI binary missing at $GLOBAL_BIN/anima after global install"
+            exit 1
+          fi
+          if [ ! -f "$GLOBAL_GATEWAY_PKG" ]; then
+            echo "::error::anima-gateway package.json missing at $GLOBAL_GATEWAY_PKG"
+            exit 1
+          fi
+          INSTALLED_VERSION=$(node -p "require('$GLOBAL_GATEWAY_PKG').version")
+          if [ "$INSTALLED_VERSION" != "$PKG_VERSION" ]; then
+            echo "::error::installed anima-gateway version ($INSTALLED_VERSION) does not match published version ($PKG_VERSION)"
+            exit 1
+          fi
+          # Verify all sibling packages are present at the matching version.
+          for sub in anima-core anima-plugin-comms anima-plugin-onchain anima-plugin-system anima-plugin-telegram; do
+            SUB_PKG="$HOME/.bun/install/global/node_modules/@s0nderlabs/${sub}/package.json"
+            if [ ! -f "$SUB_PKG" ]; then
+              echo "::error::sibling package @s0nderlabs/${sub} not installed (missing $SUB_PKG)"
+              exit 1
+            fi
+            SUB_VERSION=$(node -p "require('$SUB_PKG').version")
+            if [ "$SUB_VERSION" != "$PKG_VERSION" ]; then
+              echo "::error::@s0nderlabs/${sub}@${SUB_VERSION} does not match expected ${PKG_VERSION}"
+              exit 1
+            fi
+          done
+          echo "Smoke test passed: anima-gateway + 6 sibling packages all at ${PKG_VERSION}"
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

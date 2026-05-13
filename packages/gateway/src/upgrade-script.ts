@@ -9,32 +9,50 @@
  * per upgrade + 60-90s downtime. In-place buys the same code-rolling-forward
  * for $0 + ~30s downtime. See `decision-upgrade-in-place-default.md`.
  *
+ * Two modes (mirror bootstrap.ts):
+ *  - 'git' (default): cd $HOME/anima && git fetch + checkout + bun install
+ *  - 'npm': bun add -g @s0nderlabs/anima@<version> (overwrites global install)
+ *
+ * Mode is set by the caller, NOT auto-detected (would push the script over
+ * Daytona's 5KB request-size cap). The CLI probes the container filesystem
+ * upfront and picks the appropriate mode. Cross-mode upgrade (git → npm or
+ * npm → git) requires `anima upgrade --reprovision`.
+ *
  * Same Daytona constraints as bootstrap:
- *  - `process/execute` caps each call at ~60s, so the slow work (git fetch,
- *    bun install, harness restart) detaches into a `nohup bash -c '...' &`
- *    background subshell.
+ *  - `process/execute` caps each call at ~60s, so the slow work detaches into
+ *    a `nohup bash -c '...' &` background subshell.
  *  - Progress via two files: `/tmp/anima-upgrade-progress.log` (tail-able),
  *    `/tmp/anima-upgrade-done` (success only, contains harness pid).
  *  - Failure markers in `/tmp/anima-upgrade-failed` for each step's distinct
- *    failure keyword (`git-fetch-failed`, `git-checkout-failed`, etc.).
- *
- * What it does NOT do (intentionally; these are bootstrap-only concerns):
- *  - apt-get update/install (already installed in the existing container)
- *  - bun binary install (already installed)
- *  - git clone (`~/anima` already exists; we git fetch + checkout instead)
+ *    failure keyword.
  */
+
+import { BUN_GLOBAL_BIN_SHELL, type BootstrapMode } from './bootstrap'
 
 export interface BuildUpgradeScriptOpts {
   /** Sandbox UUID. Stays the same across upgrade (same container). */
   sandboxId: string
   /** EIP-191 checksummed operator address. Re-exported into harness env. */
   operatorAddress: string
-  /** Git tag to checkout (e.g. 'v0.17.0'). Use 'main' or a SHA only for dev. */
+  /**
+   * Bootstrap mode of the existing container. CLI should probe this via a
+   * small `execInToolbox` call before invoking upgrade. Defaults to 'git'.
+   */
+  mode?: BootstrapMode
+  /**
+   * Git mode: tag/branch/SHA to checkout (e.g. 'v0.17.0', 'main', SHA).
+   * Npm mode: ignored (use `packageVersion`).
+   */
   ref: string
+  /**
+   * Npm mode: exact published version to install (e.g. '0.21.15').
+   * Required when mode='npm'. Ignored in git mode.
+   */
+  packageVersion?: string
   /**
    * Public git URL of anima. Defaults to canonical hackathon repo. Re-applied
    * via `git remote set-url origin` so a stale credential-helper URL doesn't
-   * break the fetch.
+   * break the fetch. (Git mode only.)
    */
   repoUrl?: string
   /** Port the harness binds. Default 8080 (matches bootstrap). */
@@ -55,18 +73,12 @@ const PROGRESS_LOG = '/tmp/anima-upgrade-progress.log'
 const DONE_MARKER = '/tmp/anima-upgrade-done'
 const FAIL_MARKER = '/tmp/anima-upgrade-failed'
 
-export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeScriptResult {
-  const port = opts.port ?? 8080
-  const repoUrl = opts.repoUrl ?? 'https://github.com/s0nderlabs/anima.git'
-
-  // Inner subshell: detached via nohup. Same `retry()` shape as bootstrap so
-  // future helper extraction across both scripts is mechanical. Different
-  // fail-keywords because in-place has different failure modes than first-cold.
-  const inner = [
+function buildPreambleLines(opts: BuildUpgradeScriptOpts, modeLabel: string): string[] {
+  return [
     '#!/bin/bash',
     'set -uo pipefail',
     `exec > ${PROGRESS_LOG} 2>&1`,
-    'echo "[$(date -u +%FT%TZ)] upgrade-start"',
+    `echo "[$(date -u +%FT%TZ)] upgrade-start (mode=${modeLabel})"`,
     `echo "  ref=${opts.ref}"`,
     `echo "  sandbox=${opts.sandboxId}"`,
     'retry() {',
@@ -80,26 +92,12 @@ export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeSc
     '  return 1',
     '}',
     'export PATH="$HOME/.bun/bin:$PATH"',
-    `cd "$HOME/anima" || { echo "anima-dir-missing" > ${FAIL_MARKER}; exit 20; }`,
-    `git remote set-url origin ${shQuote(repoUrl)} 2>/dev/null || true`,
-    'git reset --hard HEAD 2>/dev/null || true',
-    `retry 'git fetch' git fetch --tags --depth 50 origin || { echo "git-fetch-failed" > ${FAIL_MARKER}; exit 21; }`,
-    `retry 'git checkout' git checkout ${shQuote(opts.ref)} || { echo "git-checkout-failed" > ${FAIL_MARKER}; exit 22; }`,
-    `retry 'bun deps' bun install --frozen-lockfile || { echo "bun-install-failed" > ${FAIL_MARKER}; exit 23; }`,
-    '',
-    // Same browser-deps install as bootstrap. doctor probe makes upgrades
-    // a no-op on the common case (Chromium already installed in the
-    // container's persistent volume); only fresh provisions or a manual
-    // wipe trigger the slow apt + Chromium download path.
-    //
-    // Invoked via `node_modules/.bin/agent-browser` directly (not `bunx`).
-    // See bootstrap.ts comment for the rationale.
-    'echo "[browser deps]"',
-    'if node_modules/.bin/agent-browser doctor >/dev/null 2>&1; then',
-    '  echo "[browser deps] already installed, skipping"',
-    'else',
-    `  retry 'browser deps' node_modules/.bin/agent-browser install --with-deps || { echo "browser-install-failed" > ${FAIL_MARKER}; exit 25; }`,
-    'fi',
+  ]
+}
+
+function buildRestartLines(opts: BuildUpgradeScriptOpts, gatewayLaunchCmd: string): string[] {
+  const port = opts.port ?? 8080
+  return [
     '',
     'echo "[restart gateway]"',
     'pkill -f anima-harness 2>/dev/null || true',
@@ -126,7 +124,7 @@ export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeSc
     '  echo "[launch attempt $h_attempt/3]"',
     `  fuser -k ${port}/tcp 2>/dev/null || true`,
     '  sleep 1',
-    '  nohup bun "$HOME/anima/packages/gateway/bin/anima-gateway" > "$HOME/anima-logs/anima-gateway.log" 2>&1 &',
+    `  nohup ${gatewayLaunchCmd} > "$HOME/anima-logs/anima-gateway.log" 2>&1 &`,
     '  HARNESS_PID=$!',
     '  disown',
     '  sleep 10',
@@ -150,7 +148,57 @@ export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeSc
     `echo "anima-gateway-pid=$HARNESS_PID" > ${DONE_MARKER}`,
     'echo "[$(date -u +%FT%TZ)] upgrade-done pid=$HARNESS_PID"',
     '',
-  ].join('\n')
+  ]
+}
+
+function buildGitInnerScript(opts: BuildUpgradeScriptOpts): string {
+  const repoUrl = opts.repoUrl ?? 'https://github.com/s0nderlabs/anima.git'
+  const preamble = buildPreambleLines(opts, 'git')
+  const installLines = [
+    `cd "$HOME/anima" || { echo "anima-dir-missing" > ${FAIL_MARKER}; exit 20; }`,
+    `git remote set-url origin ${shQuote(repoUrl)} 2>/dev/null || true`,
+    'git reset --hard HEAD 2>/dev/null || true',
+    `retry 'git fetch' git fetch --tags --depth 50 origin || { echo "git-fetch-failed" > ${FAIL_MARKER}; exit 21; }`,
+    `retry 'git checkout' git checkout ${shQuote(opts.ref)} || { echo "git-checkout-failed" > ${FAIL_MARKER}; exit 22; }`,
+    `retry 'bun deps' bun install --frozen-lockfile || { echo "bun-install-failed" > ${FAIL_MARKER}; exit 23; }`,
+    '',
+    // doctor-guarded idempotent browser-deps install.
+    'echo "[browser deps]"',
+    'if node_modules/.bin/agent-browser doctor >/dev/null 2>&1; then',
+    '  echo "[browser deps] already installed, skipping"',
+    'else',
+    `  retry 'browser deps' node_modules/.bin/agent-browser install --with-deps || { echo "browser-install-failed" > ${FAIL_MARKER}; exit 25; }`,
+    'fi',
+  ]
+  const restart = buildRestartLines(opts, 'bun "$HOME/anima/packages/gateway/bin/anima-gateway"')
+  return [...preamble, ...installLines, ...restart].join('\n')
+}
+
+function buildNpmInnerScript(opts: BuildUpgradeScriptOpts): string {
+  if (!opts.packageVersion) {
+    throw new Error('buildUpgradeScript: packageVersion is required when mode=npm')
+  }
+  const preamble = buildPreambleLines(opts, 'npm')
+  const installLines = [
+    `echo "  package=@s0nderlabs/anima@${opts.packageVersion}"`,
+    // Idempotent: same version twice = no-op; new version = clean swap.
+    `retry 'anima install' bun add -g ${shQuote(`@s0nderlabs/anima@${opts.packageVersion}`)} || { echo "anima-install-failed" > ${FAIL_MARKER}; exit 21; }`,
+    `export PATH="${BUN_GLOBAL_BIN_SHELL}:$PATH"`,
+    '',
+    'echo "[browser deps]"',
+    `if ${BUN_GLOBAL_BIN_SHELL}/agent-browser doctor >/dev/null 2>&1; then`,
+    '  echo "[browser deps] already installed, skipping"',
+    'else',
+    `  retry 'browser deps' ${BUN_GLOBAL_BIN_SHELL}/agent-browser install --with-deps || { echo "browser-install-failed" > ${FAIL_MARKER}; exit 25; }`,
+    'fi',
+  ]
+  const restart = buildRestartLines(opts, `${BUN_GLOBAL_BIN_SHELL}/anima-gateway`)
+  return [...preamble, ...installLines, ...restart].join('\n')
+}
+
+export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeScriptResult {
+  const mode: BootstrapMode = opts.mode ?? 'git'
+  const inner = mode === 'npm' ? buildNpmInnerScript(opts) : buildGitInnerScript(opts)
 
   const innerPath = '/tmp/anima-upgrade-inner.sh'
   const innerB64 = Buffer.from(inner).toString('base64')
@@ -180,6 +228,7 @@ export const UPGRADE_FAIL_KEYWORDS = [
   'git-fetch-failed',
   'git-checkout-failed',
   'bun-install-failed',
+  'anima-install-failed',
   'browser-install-failed',
   'harness-died-early',
 ] as const

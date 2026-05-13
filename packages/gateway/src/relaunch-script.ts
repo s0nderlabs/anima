@@ -5,9 +5,14 @@
  * was terminated when archive happened. The harness daemon needs to be
  * relaunched.
  *
- * This is a SLIMMED version of `buildBootstrapScript`: no apt-get, no git
- * clone, no `bun install`. Just env-export + fuser-kill + nohup launch +
- * 10s wait for kill -0 to confirm the daemon is alive.
+ * This is a SLIMMED version of `buildBootstrapScript`: no apt-get, no install.
+ * Just env-export + fuser-kill + nohup launch + 10s wait for kill -0.
+ *
+ * Bootstrap-mode-agnostic: the script auto-detects whether the container was
+ * bootstrapped via git-clone (gateway at `$HOME/anima/packages/gateway/bin/`)
+ * or via npm (gateway at `~/.bun/install/global/node_modules/.bin/`). Whichever
+ * one exists is what we relaunch. Both paths supported indefinitely so legacy
+ * git-bootstrapped containers keep working forever after the npm path lands.
  *
  * Returns a single base64-wrapped `bash -c '...'` invocation (under
  * Daytona's 6KB execInToolbox payload cap).
@@ -64,25 +69,45 @@ export function buildGatewayRelaunchScript(
     `rm -f ${DONE_MARKER} ${FAIL_MARKER} ${PROGRESS_LOG}`,
     `exec > >(tee -a ${PROGRESS_LOG}) 2>&1`,
     'echo "[$(date -u +%FT%TZ)] relaunch-start"',
+    // Bootstrap-mode probe. Each container was bootstrapped one of two ways:
+    //  - git mode: $HOME/anima/ has the cloned monorepo
+    //  - npm mode: ~/.bun/install/global/node_modules/.bin/anima-gateway exists
+    // Whichever one is present is what we relaunch. If neither, the container
+    // snapshot must have lost its install (rare; usually means manual wipe).
     'ANIMA_DIR="$HOME/anima"',
-    'if [ ! -d "$ANIMA_DIR" ]; then',
-    `  echo "anima-dir-missing" > ${FAIL_MARKER}`,
-    '  echo "[fail] $ANIMA_DIR not found; sandbox snapshot may have been wiped"',
+    'GLOBAL_BIN="$HOME/.bun/install/global/node_modules/.bin"',
+    'GATEWAY_MODE=""',
+    'if [ -x "$GLOBAL_BIN/anima-gateway" ]; then',
+    '  GATEWAY_MODE="npm"',
+    '  echo "[mode=npm] launching $GLOBAL_BIN/anima-gateway"',
+    'elif [ -d "$ANIMA_DIR" ]; then',
+    '  GATEWAY_MODE="git"',
+    '  echo "[mode=git] launching bun $ANIMA_DIR/packages/gateway/bin/anima-gateway"',
+    'else',
+    `  echo "anima-not-installed" > ${FAIL_MARKER}`,
+    '  echo "[fail] no anima install found at $GLOBAL_BIN/anima-gateway nor $ANIMA_DIR; container snapshot may have been wiped"',
     '  exit 21',
     'fi',
     ...env,
     `fuser -k ${port}/tcp 2>/dev/null || true`,
     'sleep 2',
     'echo "[launch harness daemon]"',
+    'launch_gateway() {',
+    '  if [ "$GATEWAY_MODE" = "npm" ]; then',
+    '    nohup "$GLOBAL_BIN/anima-gateway" > "$HOME/anima-logs/anima-gateway.log" 2>&1 &',
+    '  else',
+    '    nohup bun "$ANIMA_DIR/packages/gateway/bin/anima-gateway" > "$HOME/anima-logs/anima-gateway.log" 2>&1 &',
+    '  fi',
+    '  HARNESS_PID=$!',
+    '  disown',
+    '}',
     'HARNESS_PID=""',
     'HARNESS_OK=0',
     'for h_attempt in 1 2 3; do',
     '  echo "[launch attempt $h_attempt/3]"',
     `  fuser -k ${port}/tcp 2>/dev/null || true`,
     '  sleep 1',
-    '  nohup bun "$ANIMA_DIR/packages/gateway/bin/anima-gateway" > "$HOME/anima-logs/anima-gateway.log" 2>&1 &',
-    '  HARNESS_PID=$!',
-    '  disown',
+    '  launch_gateway',
     '  sleep 10',
     '  if kill -0 "$HARNESS_PID" 2>/dev/null; then',
     '    HARNESS_OK=1',
@@ -102,7 +127,7 @@ export function buildGatewayRelaunchScript(
     '  exit 22',
     'fi',
     `echo "anima-gateway-pid=$HARNESS_PID" > ${DONE_MARKER}`,
-    'echo "[$(date -u +%FT%TZ)] relaunch-done pid=$HARNESS_PID"',
+    'echo "[$(date -u +%FT%TZ)] relaunch-done pid=$HARNESS_PID mode=$GATEWAY_MODE"',
   ].join('\n')
 
   // base64-wrapped bash -c so Daytona's argv-only execInToolbox handles it.

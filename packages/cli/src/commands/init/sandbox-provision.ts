@@ -36,6 +36,7 @@ import {
 import { type Address, type Hex, formatEther, hexToBytes, parseEther } from 'viem'
 import type { LocalAccount } from 'viem/accounts'
 import { SandboxClient } from '../../sandbox/client'
+import { resolveCliVersion } from '../../util/cli-version'
 import { withSilencedConsole } from '../../util/silence-console'
 import type { TelegramHandoffSecrets } from '../../util/telegram-secrets'
 
@@ -61,10 +62,23 @@ export interface SandboxProvisionOpts {
   iNFTNetwork: AnimaNetwork
   /** Sandbox name (sent to provider; surfaces in dashboards). */
   name: string
-  /** Git tag the bootstrap script clones (e.g. 'v0.15.0'). */
+  /** Git tag the bootstrap script clones (e.g. 'v0.15.0'). Used in git mode. */
   ref: string
-  /** Override repo URL (defaults to canonical anima repo). */
+  /** Override repo URL (defaults to canonical anima repo). Used in git mode. */
   repoUrl?: string
+  /**
+   * Bootstrap mode: 'git' clones monorepo from GitHub; 'npm' installs
+   * @s0nderlabs/anima via `bun add -g`. Defaults to ANIMA_BOOTSTRAP_MODE env
+   * or 'git'. Npm mode is ~10x faster (~30-60 sec vs 5-8 min cold start) but
+   * requires a published version (no branches/SHAs).
+   */
+  mode?: import('@s0nderlabs/anima-gateway').BootstrapMode
+  /**
+   * Npm mode: exact published version to install (e.g. '0.21.15'). Defaults
+   * to the CLI package's own version (so a v0.21.15 CLI deploys a v0.21.15
+   * gateway). Ignored in git mode.
+   */
+  packageVersion?: string
   /** Override snapshot. Default `daytonaio/sandbox:0.5.0-slim`. */
   snapshotName?: string
   /** Initial deposit to provider contract (testnet 0G). Default 1.0 0G. */
@@ -193,14 +207,23 @@ export async function runSandboxProvision(
   // the explicit `githubToken` opt). Token is embedded in the clone URL inside
   // the bootstrap script. Public repos skip auth entirely.
   const githubToken = opts.githubToken ?? process.env.ANIMA_GITHUB_TOKEN
+  const mode = opts.mode ?? (process.env.ANIMA_BOOTSTRAP_MODE === 'npm' ? 'npm' : 'git')
+  const packageVersion =
+    opts.packageVersion ?? (mode === 'npm' ? await resolveCliVersion() : undefined)
   const { script } = buildBootstrapScript({
     sandboxId,
     operatorAddress,
     ref: opts.ref,
     repoUrl,
     githubToken,
+    mode,
+    packageVersion,
   })
-  progress('launching bootstrap (apt + bun + git clone + harness daemon, runs ~3-5 min)')
+  const installLabel =
+    mode === 'npm'
+      ? 'apt + bun + npm install + harness daemon, runs ~30-60s'
+      : 'apt + bun + git clone + harness daemon, runs ~3-5 min'
+  progress(`launching bootstrap (${installLabel})`)
   const launchRes = await provider.execInToolbox(sandboxId, { command: script, timeout: 60 })
   if (launchRes.exitCode !== 0) {
     const launchOut = extractExecOutput(launchRes)

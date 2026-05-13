@@ -121,6 +121,35 @@ function findAgentBrowser(override?: string, cwdOverride?: string): string | nul
     if (statSync(localPkg, { throwIfNoEntry: false })?.isFile()) return localPkg
   }
 
+  // Bun global install layout (npm-bootstrapped sandbox containers + any
+  // `bun add -g @s0nderlabs/anima` install). Bun symlinks third-party bins
+  // here but does NOT add this dir to $PATH automatically, so the PATH walk
+  // below would miss it. Probe explicitly.
+  const homeDir = process.env.HOME
+  if (homeDir) {
+    const bunGlobalBin = join(
+      homeDir,
+      '.bun',
+      'install',
+      'global',
+      'node_modules',
+      '.bin',
+      'agent-browser',
+    )
+    if (statSync(bunGlobalBin, { throwIfNoEntry: false })?.isFile()) return bunGlobalBin
+    const bunGlobalPkg = join(
+      homeDir,
+      '.bun',
+      'install',
+      'global',
+      'node_modules',
+      'agent-browser',
+      'bin',
+      'agent-browser.js',
+    )
+    if (statSync(bunGlobalPkg, { throwIfNoEntry: false })?.isFile()) return bunGlobalPkg
+  }
+
   const pathEnv = process.env.PATH ?? ''
   const pathDirs = pathEnv.split(delimiter).filter(Boolean)
   const inPath = whichIn('agent-browser', pathDirs)
