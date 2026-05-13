@@ -15,6 +15,7 @@ import {
   reEncryptKeystoreForRecipient,
   signTransferProof,
   slotIndex,
+  waitForReceiptResilient,
 } from '@s0nderlabs/anima-core'
 import { type Address, type Hex, isAddress, toHex } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
@@ -28,6 +29,8 @@ export interface TransferOpts {
   to: Address
   /** Recipient's privkey for re-encryption sig. Falls back to ANIMA_RECIPIENT_PRIVKEY env, then interactive picker. */
   recipientKey?: Hex
+  /** Oracle privkey for signing the transfer proof when sender does not equal teeOracle. Falls back to ANIMA_ORACLE_PRIVKEY env. */
+  oracleKey?: Hex
   /** Re-encrypt + round-trip verify locally; do not write to chain. */
   dryRun?: boolean
   /** Skip the confirmation prompt. */
@@ -38,8 +41,18 @@ export interface TransferOpts {
 
 export type ParseTransferResult = TransferOpts | { error: string }
 
+function parsePrivkeyFlag(name: string, args: string[]): { value: Hex } | { error: string } {
+  const v = args.shift()
+  if (!v) return { error: `${name} requires a hex value` }
+  const norm = v.startsWith('0x') ? v : `0x${v}`
+  if (!/^0x[0-9a-fA-F]{64}$/.test(norm)) {
+    return { error: `${name} must be a 32-byte hex string` }
+  }
+  return { value: norm as Hex }
+}
+
 /**
- * `anima transfer <ref> --to <addr> [--recipient-key 0x...] [--dry-run] [--yes] [--no-purge]`
+ * `anima transfer <ref> --to <addr> [--recipient-key 0x...] [--oracle-key 0x...] [--dry-run] [--yes] [--no-purge]`
  *
  * Positional `<ref>` is the iNFT identifier (`eip155:<chainId>:<contract>:<tokenId>`
  * or shorthand). All other args are flags.
@@ -55,13 +68,13 @@ export function parseTransferArgs(argv: readonly string[]): ParseTransferResult 
       if (!isAddress(v)) return { error: `--to value '${v}' is not a valid address` }
       out.to = v as Address
     } else if (head === '--recipient-key') {
-      const v = args.shift()
-      if (!v) return { error: '--recipient-key requires a hex value' }
-      const norm = v.startsWith('0x') ? v : `0x${v}`
-      if (!/^0x[0-9a-fA-F]{64}$/.test(norm)) {
-        return { error: '--recipient-key must be a 32-byte hex string' }
-      }
-      out.recipientKey = norm as Hex
+      const r = parsePrivkeyFlag('--recipient-key', args)
+      if ('error' in r) return r
+      out.recipientKey = r.value
+    } else if (head === '--oracle-key') {
+      const r = parsePrivkeyFlag('--oracle-key', args)
+      if ('error' in r) return r
+      out.oracleKey = r.value
     } else if (head === '--dry-run') {
       out.dryRun = true
     } else if (head === '--yes' || head === '-y') {
@@ -266,29 +279,61 @@ export async function runTransfer(opts: TransferOpts): Promise<void> {
   const proofNonce = toHex(randomBytes(32))
   const chainId = NETWORK_CHAIN_ID[parsed.network]
 
-  // Determine oracle. Read on-chain teeOracle and require sender to match.
-  // In MVP the operator IS the oracle; in production this could be a TEE
-  // service exposed via a separate signer interface.
+  // Determine oracle. Read on-chain teeOracle. If sender == oracle (MVP path
+  // where operator is also the oracle), reuse the sender signer. Otherwise
+  // resolve a separate oracle signer from --oracle-key flag or
+  // ANIMA_ORACLE_PRIVKEY env. This unblocks back-transfers and any flow where
+  // the iNFT owner differs from the contract's TEE oracle.
   const oracleAddr = (await reader.publicClient.readContract({
     address: parsed.contract,
     abi: AGENT_NFT_ABI,
     functionName: 'teeOracle',
   })) as Address
+  let oracleSigner: OperatorSigner = sender
   if (oracleAddr.toLowerCase() !== senderAddr.toLowerCase()) {
-    await sender.close?.()
-    await recipient.close?.()
-    cancel(
-      [
-        'Oracle signer required but sender does not match teeOracle.',
-        `  teeOracle: ${oracleAddr}`,
-        `  sender:    ${senderAddr}`,
-        '',
-        'External oracle signer flow is not yet supported.',
-      ].join('\n'),
-    )
-    return
+    const oracleKey = opts.oracleKey ?? (process.env.ANIMA_ORACLE_PRIVKEY as Hex | undefined)
+    if (!oracleKey) {
+      await sender.close?.()
+      await recipient.close?.()
+      cancel(
+        [
+          'Oracle signer required (sender does not match teeOracle).',
+          `  teeOracle: ${oracleAddr}`,
+          `  sender:    ${senderAddr}`,
+          '',
+          'Provide an oracle privkey via:',
+          '  --oracle-key 0x<hex>',
+          '  ANIMA_ORACLE_PRIVKEY=0x<hex>',
+        ].join('\n'),
+      )
+      return
+    }
+    const candidate: OperatorSigner = new RawPrivkeyOperatorSigner({
+      privkey: oracleKey,
+      sourceLabel: opts.oracleKey ? 'flag' : 'env:ANIMA_ORACLE_PRIVKEY',
+    })
+    const candidateAddr = await candidate.address()
+    if (candidateAddr.toLowerCase() !== oracleAddr.toLowerCase()) {
+      await candidate.close?.()
+      await sender.close?.()
+      await recipient.close?.()
+      cancel(
+        [
+          'Oracle signer address does not match teeOracle.',
+          `  teeOracle:   ${oracleAddr}`,
+          `  signer addr: ${candidateAddr}`,
+        ].join('\n'),
+      )
+      return
+    }
+    oracleSigner = candidate
   }
-  const oracleSigner = sender
+
+  const closeSigners = async (): Promise<void> => {
+    if (oracleSigner !== sender) await oracleSigner.close?.()
+    await recipient.close?.()
+    await sender.close?.()
+  }
 
   const sOracle = spinner()
   sOracle.start('Signing transfer proof with oracle')
@@ -309,8 +354,7 @@ export async function runTransfer(opts: TransferOpts): Promise<void> {
     sOracle.stop('proof signed')
   } catch (e) {
     sOracle.stop(`oracle sign failed: ${(e as Error).message.slice(0, 200)}`)
-    await sender.close?.()
-    await recipient.close?.()
+    await closeSigners()
     return
   }
 
@@ -344,8 +388,7 @@ export async function runTransfer(opts: TransferOpts): Promise<void> {
   )
 
   if (opts.dryRun) {
-    await sender.close?.()
-    await recipient.close?.()
+    await closeSigners()
     outro(
       [
         '',
@@ -366,8 +409,7 @@ export async function runTransfer(opts: TransferOpts): Promise<void> {
     })
     if (isCancel(ok) || !ok) {
       cancel('aborted')
-      await sender.close?.()
-      await recipient.close?.()
+      await closeSigners()
       return
     }
   }
@@ -398,25 +440,69 @@ export async function runTransfer(opts: TransferOpts): Promise<void> {
       account: senderAccount,
       gas: BigInt(newHashes.length) * 60_000n + 200_000n,
     })) as Hex
-    // Wait for receipt via the reader's publicClient.
-    const receipt = await reader.publicClient.waitForTransactionReceipt({ hash: txHash })
-    if (receipt.status !== 'success') {
-      throw new Error(`iTransferFrom reverted in tx ${txHash}`)
-    }
-    sTx.stop(`tx confirmed: ${txHash}`)
   } catch (e) {
-    sTx.stop(`iTransferFrom failed: ${(e as Error).message.slice(0, 240)}`)
-    await sender.close?.()
-    await recipient.close?.()
+    sTx.stop(`submit failed: ${(e as Error).message.slice(0, 240)}`)
+    await closeSigners()
     return
   }
 
+  // 0G mainnet block time is variable; viem's default receipt timeout is too
+  // short and false-fails on transactions that actually succeed. Use the core
+  // resilient poll helper (75 tries x 4s = 5 min budget) so we don't bail on
+  // a slow block.
+  let receiptStatus: 'success' | 'reverted' | 'unknown' = 'unknown'
+  try {
+    const receipt = await waitForReceiptResilient(reader.publicClient, txHash, {
+      tries: 75,
+      delayMs: 4000,
+    })
+    receiptStatus = receipt.status
+  } catch {
+    receiptStatus = 'unknown'
+  }
+
+  if (receiptStatus === 'reverted') {
+    sTx.stop(`tx reverted: ${txHash}`)
+    await closeSigners()
+    return
+  }
+  if (receiptStatus === 'unknown') {
+    sTx.stop('tx submitted; receipt poll timed out after ~5 min')
+    await closeSigners()
+    note(
+      [
+        'Tx submitted but receipt has not surfaced yet.',
+        `  tx hash: ${txHash}`,
+        `  verify:  cast tx ${txHash} --rpc-url <0g-rpc>`,
+        '',
+        'If status=success, you can clean up local state with:',
+        `  rm -rf ${paths.dir}`,
+      ].join('\n'),
+      'verify manually',
+    )
+    return
+  }
+
+  sTx.stop(`tx confirmed: ${txHash}`)
+
   // -------------------------------------------------------------------------
-  // Step 8: cleanup + outro.
+  // Step 8: cleanup + outro. Only fires on confirmed-success receipt.
   // -------------------------------------------------------------------------
-  await sender.close?.()
-  await recipient.close?.()
+  const senderSource = sender.source
+  await closeSigners()
   await rm(paths.dir, { recursive: true, force: true }).catch(() => {})
+
+  if (senderSource.startsWith('raw-privkey:')) {
+    note(
+      [
+        `Sender ${senderAddr} was provided via raw privkey.`,
+        'It may hold residual gas; sweep with cast:',
+        `  cast balance --rpc-url <0g-rpc> ${senderAddr}`,
+        '  cast send --rpc-url <0g-rpc> --private-key 0x... <main-wallet-addr> --value <wei>',
+      ].join('\n'),
+      'sweep tip',
+    )
+  }
 
   outro(
     [

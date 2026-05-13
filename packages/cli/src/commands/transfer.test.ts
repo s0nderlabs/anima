@@ -48,6 +48,19 @@ describe('parseTransferArgs', () => {
     expect(r.recipientKey).toBe(KEY)
   })
 
+  test('--oracle-key with 0x prefix', () => {
+    const r = parseTransferArgs([REF, '--to', TO, '--oracle-key', KEY])
+    if ('error' in r) throw new Error(r.error)
+    expect(r.oracleKey).toBe(KEY)
+  })
+
+  test('--oracle-key without 0x prefix gets normalized', () => {
+    const stripped = KEY.slice(2)
+    const r = parseTransferArgs([REF, '--to', TO, '--oracle-key', stripped])
+    if ('error' in r) throw new Error(r.error)
+    expect(r.oracleKey).toBe(KEY)
+  })
+
   test('error: missing ref', () => {
     const r = parseTransferArgs(['--to', TO])
     expect('error' in r).toBe(true)
@@ -65,6 +78,16 @@ describe('parseTransferArgs', () => {
 
   test('error: invalid --recipient-key length', () => {
     const r = parseTransferArgs([REF, '--to', TO, '--recipient-key', '0xdeadbeef'])
+    expect('error' in r).toBe(true)
+  })
+
+  test('error: invalid --oracle-key length', () => {
+    const r = parseTransferArgs([REF, '--to', TO, '--oracle-key', '0xdeadbeef'])
+    expect('error' in r).toBe(true)
+  })
+
+  test('error: --oracle-key without value', () => {
+    const r = parseTransferArgs([REF, '--to', TO, '--oracle-key'])
     expect('error' in r).toBe(true)
   })
 

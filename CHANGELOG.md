@@ -4,6 +4,21 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.18] - 2026-05-13
+
+### Added
+
+- **`anima transfer --oracle-key <hex>` flag** (and `ANIMA_ORACLE_PRIVKEY` env fallback). Unblocks back-transfers and any flow where the iNFT owner differs from the contract's `teeOracle()`. The supplied signer's address is validated against the on-chain oracle before any signing. Closes the v0.21.17 gap where `senderAddr != teeOracle` was a hard cancel.
+- **`anima transfer` listed in `anima help`** with all flags.
+
+### Fixed
+
+- **`anima transfer` no longer false-fails on slow blocks.** v0.21.17 used viem's default `waitForTransactionReceipt` timeout, which was too short for 0G mainnet's variable block time and printed `iTransferFrom failed` while the tx had actually succeeded. Now uses the existing `waitForReceiptResilient` helper from anima-core (75 tries x 4s = 5 min budget). On true timeout, prints a `verify manually` note with the tx hash and a `cast tx` one-liner instead of a misleading failure.
+- **Local agent dir cleanup only fires on confirmed-success receipt.** Prevents losing local state when the receipt poll times out on a successful tx.
+- **Sweep tip in transfer outro** when sender was provided via raw-privkey flag/env, so operators who funded a throwaway wallet for a back-transfer get a `cast send` template to recover residual gas instead of stranding it.
+
+[0.21.18]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.18
+
 ## [0.21.17] - 2026-05-13
 
 ### Added
