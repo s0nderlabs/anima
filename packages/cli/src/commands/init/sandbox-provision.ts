@@ -58,6 +58,13 @@ export interface SandboxProvisionOpts {
   /** Optional .0g subname (e.g. "specter") forwarded into RuntimeConfig so the
    * harness's TG pairing greeting addresses the agent by registered name. */
   subname?: string | null
+  /**
+   * Optional telegram secrets (botToken + allowlist). Threaded into the
+   * secondary ECIES envelope inside `handoffAgentToGateway` so the freshly
+   * provisioned harness boots with `listeners.telegram: "active"`. Source
+   * via `loadTelegramHandoffSecrets` (util/telegram-secrets.ts).
+   */
+  telegramSecrets?: TelegramHandoffSecrets
   /** Network the iNFT lives on (mainnet for hybrid path 1). */
   iNFTNetwork: AnimaNetwork
   /** Sandbox name (sent to provider; surfaces in dashboards). */
@@ -300,6 +307,7 @@ export async function runSandboxProvision(
     plugins: opts.plugins,
     promptAppend: opts.promptAppend,
     subname: opts.subname,
+    telegramSecrets: opts.telegramSecrets,
     onProgress: progress,
   })
 

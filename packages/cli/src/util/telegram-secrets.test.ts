@@ -1,5 +1,16 @@
-import { describe, expect, it } from 'bun:test'
-import { looksLikeBotToken, parseAllowedUserIds } from './telegram-secrets'
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { RawPrivkeyOperatorSigner, agentPaths, iNFTAgentId } from '@s0nderlabs/anima-core'
+import { type Address, generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
+import {
+  loadTelegramHandoffSecrets,
+  looksLikeBotToken,
+  parseAllowedUserIds,
+  saveTelegramSecrets,
+  telegramSecretsPath,
+} from './telegram-secrets'
 
 describe('looksLikeBotToken', () => {
   it('accepts a real-shaped token', () => {
@@ -60,5 +71,106 @@ describe('parseAllowedUserIds', () => {
   it('rejects zero', () => {
     const r = parseAllowedUserIds('0')
     expect(r.ok).toBe(false)
+  })
+})
+
+describe('loadTelegramHandoffSecrets', () => {
+  // Each test gets a fresh ANIMA_ROOT tmpdir so `agentPaths.agent(id).dir`
+  // resolves somewhere isolated, and `afterEach` cleans it up even on failure.
+  const TEST_CONTRACT = '0x9e71d79f06f956d4d2666b5c93dafab721c84721' as Address
+  const TEST_TOKEN_ID = 6n
+  const TEST_AGENT_ID = iNFTAgentId({
+    contractAddress: TEST_CONTRACT,
+    tokenId: TEST_TOKEN_ID,
+  })
+
+  let prevAnimaRoot: string | undefined
+  let tmpRoot: string
+
+  beforeAll(() => {
+    prevAnimaRoot = process.env.ANIMA_ROOT
+  })
+  afterAll(() => {
+    if (prevAnimaRoot === undefined) Reflect.deleteProperty(process.env, 'ANIMA_ROOT')
+    else process.env.ANIMA_ROOT = prevAnimaRoot
+  })
+  beforeEach(() => {
+    tmpRoot = mkdtempSync(join(tmpdir(), 'anima-tg-secrets-test-'))
+    process.env.ANIMA_ROOT = tmpRoot
+  })
+  afterEach(() => {
+    rmSync(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('returns undefined when no blob exists on disk', async () => {
+    const operatorPrivkey = generatePrivateKey()
+    const signer = new RawPrivkeyOperatorSigner({ privkey: operatorPrivkey })
+    const agentAddress = privateKeyToAccount(generatePrivateKey()).address
+    let notices = 0
+    const result = await loadTelegramHandoffSecrets({
+      signer,
+      agentAddress,
+      contractAddress: TEST_CONTRACT,
+      tokenId: TEST_TOKEN_ID,
+      onNotice: () => {
+        notices += 1
+      },
+    })
+    expect(result).toBeUndefined()
+    expect(notices).toBe(0)
+  })
+
+  it('round-trips through saveTelegramSecrets and returns handoff subset', async () => {
+    const operatorPrivkey = generatePrivateKey()
+    const signer = new RawPrivkeyOperatorSigner({ privkey: operatorPrivkey })
+    const agentAddress = privateKeyToAccount(generatePrivateKey()).address
+    await saveTelegramSecrets({
+      signer,
+      agentAddress,
+      agentId: TEST_AGENT_ID,
+      plaintext: {
+        botToken: '8731160904:AAH8FQ3CLrE8-WAfZtDeOTqmpVgOFLg8GyU',
+        botUsername: 'anima_test_bot',
+        botId: 8731160904,
+        allowedUserIds: [1140813034, 222333444],
+      },
+    })
+    expect(existsSync(telegramSecretsPath(TEST_AGENT_ID))).toBe(true)
+
+    const result = await loadTelegramHandoffSecrets({
+      signer,
+      agentAddress,
+      contractAddress: TEST_CONTRACT,
+      tokenId: TEST_TOKEN_ID,
+    })
+    expect(result).toEqual({
+      botToken: '8731160904:AAH8FQ3CLrE8-WAfZtDeOTqmpVgOFLg8GyU',
+      allowedUserIds: [1140813034, 222333444],
+    })
+  })
+
+  it('swallows decrypt errors via onNotice and returns undefined', async () => {
+    const operatorPrivkey = generatePrivateKey()
+    const signer = new RawPrivkeyOperatorSigner({ privkey: operatorPrivkey })
+    const agentAddress = privateKeyToAccount(generatePrivateKey()).address
+    // Write a malformed blob: file exists but contents fail decode.
+    const path = telegramSecretsPath(TEST_AGENT_ID)
+    const agentDir = agentPaths.agent(TEST_AGENT_ID).dir
+    mkdirSync(agentDir, { recursive: true })
+    writeFileSync(path, 'not-a-valid-operator-blob-payload')
+
+    const notices: string[] = []
+    const result = await loadTelegramHandoffSecrets({
+      signer,
+      agentAddress,
+      contractAddress: TEST_CONTRACT,
+      tokenId: TEST_TOKEN_ID,
+      onNotice: msg => {
+        notices.push(msg)
+      },
+    })
+    expect(result).toBeUndefined()
+    expect(notices.length).toBe(1)
+    expect(notices[0]).toMatch(/telegram secrets read failed:/)
   })
 })

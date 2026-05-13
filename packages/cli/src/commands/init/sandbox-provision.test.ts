@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import type { SandboxRecord } from '@s0nderlabs/anima-core'
 import {
   type ResumeArchivedSandboxOpts,
+  type SandboxProvisionOpts,
   createSandboxWithOrphanRetry,
   ensureSandboxArchived,
   ensureSandboxStarted,
@@ -358,5 +359,24 @@ describe('ResumeArchivedSandboxOpts shape', () => {
     }
     expect(sample.botToken).toBe('123:abcdef')
     expect(sample.allowedUserIds).toEqual([42])
+  })
+})
+
+describe('SandboxProvisionOpts shape (v0.21.19 telegramSecrets plumbing)', () => {
+  // Regression guard for Bug 1 in feedback-reprovision-skips-tg-and-probe-bug.
+  // Before v0.21.19, runReprovisionUpgrade + runDeploy both called
+  // runSandboxProvision without passing telegramSecrets, so fresh containers
+  // booted TG-less. The reprovision path is the recovery sledgehammer
+  // operators reach for after canary cycles or stale-UUID 403s; it MUST
+  // produce a fully working agent, not a half-configured one missing TG.
+  // This test compiles only if the field is still on the opts.
+  test('telegramSecrets field is part of the public interface', () => {
+    type WithTg = Required<Pick<SandboxProvisionOpts, 'telegramSecrets'>>
+    const sample: WithTg['telegramSecrets'] = {
+      botToken: '456:zyxwvu',
+      allowedUserIds: [99],
+    }
+    expect(sample.botToken).toBe('456:zyxwvu')
+    expect(sample.allowedUserIds).toEqual([99])
   })
 })

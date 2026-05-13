@@ -13,6 +13,7 @@ import type { Address } from 'viem'
 import { SandboxClient } from '../sandbox/client'
 import { summarizeApprovalSubject } from '../ui/approval-summary'
 import { shortAddr } from '../util/format'
+import { loadTelegramHandoffSecrets } from '../util/telegram-secrets'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 import { resumeArchivedSandbox, unlockAgentKeystore } from './init/sandbox-provision'
 
@@ -131,6 +132,13 @@ export async function runChatSandbox(
       await operator.close?.()
       process.exit(1)
     }
+    const telegramSecretsPlain = await loadTelegramHandoffSecrets({
+      signer: operator,
+      agentAddress,
+      contractAddress,
+      tokenId,
+      onNotice: msg => sReady.message(msg),
+    })
     try {
       await resumeArchivedSandbox({
         provider,
@@ -142,6 +150,7 @@ export async function runChatSandbox(
         iNFTRef: { contract: contractAddress, tokenId },
         iNFTNetwork: config.network as AnimaNetwork,
         brain: { provider: config.brain.provider as Address, model: config.brain.model ?? '' },
+        telegramSecrets: telegramSecretsPlain,
         onProgress: msg => sReady.message(msg),
       })
       const health = await client.waitReady({ timeoutMs: 30_000, intervalMs: 1500 })

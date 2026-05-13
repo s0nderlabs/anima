@@ -31,6 +31,7 @@ import {
   decryptOperatorBlob,
   encodeOperatorBlobBytes,
   encryptOperatorBlob,
+  iNFTAgentId,
 } from '@s0nderlabs/anima-core'
 import type { Address } from 'viem'
 
@@ -84,6 +85,43 @@ export async function loadTelegramSecrets(opts: {
     throw new Error('telegram-secrets: malformed plaintext (missing botToken or allowedUserIds)')
   }
   return parsed
+}
+
+/**
+ * Load + project telegram secrets into the shape the gateway provision envelope
+ * expects. Used by every sandbox-handoff flow that ships TG (init/upgrade/
+ * resume/deploy/chat-sandbox auto-resume); centralises the try/decrypt/swallow
+ * pattern so future TG-secret schema changes touch one place.
+ *
+ * Errors are non-fatal: TG is opt-in. Failure fires `onNotice` (so the operator
+ * sees the reason in the spinner) and returns undefined.
+ *
+ * `chat.tsx` keeps its own loader because it needs the full plaintext (including
+ * `botUsername` for the unlock spinner UX).
+ */
+export async function loadTelegramHandoffSecrets(opts: {
+  signer: OperatorSigner
+  agentAddress: Address
+  contractAddress: Address
+  tokenId: bigint
+  onNotice?: (msg: string) => void
+}): Promise<TelegramHandoffSecrets | undefined> {
+  const agentId = iNFTAgentId({
+    contractAddress: opts.contractAddress,
+    tokenId: opts.tokenId,
+  })
+  try {
+    const tg = await loadTelegramSecrets({
+      signer: opts.signer,
+      agentAddress: opts.agentAddress,
+      agentId,
+    })
+    if (!tg) return undefined
+    return { botToken: tg.botToken, allowedUserIds: tg.allowedUserIds }
+  } catch (err) {
+    opts.onNotice?.(`telegram secrets read failed: ${(err as Error).message.slice(0, 120)}`)
+    return undefined
+  }
 }
 
 export async function saveTelegramSecrets(opts: {

@@ -4,6 +4,21 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.19] - 2026-05-13
+
+### Fixed
+
+- **`anima upgrade --reprovision` now carries telegram secrets.** Previously the reprovision flow called `runSandboxProvision` without passing `telegramSecrets`, so freshly reprovisioned containers always booted with `listeners.telegram: "disabled"`. Operators had to manually re-pair the bot or fall back to `anima upgrade` (in-place) to restore the listener. Same gap closed in `anima deploy` (Local→Sandbox migration) and `chat-sandbox.tsx` auto-resume.
+- **`anima upgrade --ref vX.Y.Z` works again on fresh `daytonaio/sandbox:0.5.0-slim` snapshots.** The bootstrap-mode probe was sending shell-conditional syntax (`if [ -d ... ]; then ...; fi`) to Daytona's argv-only exec endpoint, which couldn't interpret it and returned empty stdout → probe resolved to null → upgrade aborted with "cannot determine container bootstrap mode." Now wraps the probe in `bash -c '...'`, matching how `makeExecRead` and `buildGatewayRelaunchScript` already handle shell-syntax commands.
+
+### Internal
+
+- New `loadTelegramHandoffSecrets()` helper in `packages/cli/src/util/telegram-secrets.ts` consolidates the try/check/load/swallow pattern that previously lived copy-pasted in `upgrade.ts` (in-place), `resume.ts`, and the new reprovision/deploy/chat-sandbox sites. `chat.tsx` keeps its own loader for botUsername UX.
+- 9 new unit tests across `telegram-secrets.test.ts` (3, helper round-trip/empty/error), `upgrade.test.ts` (5, probe command shape + parsing branches), and `init/sandbox-provision.test.ts` (1, `SandboxProvisionOpts.telegramSecrets` regression guard).
+- `probeContainerBootstrapMode` is now exported so the wrap fix can be unit-tested directly without provisioning a real sandbox.
+
+[0.21.19]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.19
+
 ## [0.21.18] - 2026-05-13
 
 ### Added

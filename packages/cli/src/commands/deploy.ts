@@ -3,6 +3,7 @@ import { NETWORK_CHAIN_ID } from '@s0nderlabs/anima-core'
 import type { Address, Hex } from 'viem'
 import { findAndLoadConfig } from '../config/load'
 import { writeConfigTs } from '../config/render'
+import { loadTelegramHandoffSecrets } from '../util/telegram-secrets'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 import {
   publishSandboxEndpoint,
@@ -107,6 +108,13 @@ export async function runDeploy(): Promise<void> {
 
   const sBox = spinner()
   sBox.start('Provisioning 0G Sandbox container (Galileo testnet)')
+  const telegramSecretsPlain = await loadTelegramHandoffSecrets({
+    signer: operator,
+    agentAddress,
+    contractAddress,
+    tokenId,
+    onNotice: msg => sBox.message(msg),
+  })
   let sandboxResult: Awaited<ReturnType<typeof runSandboxProvision>>
   try {
     sandboxResult = await runSandboxProvision({
@@ -122,6 +130,7 @@ export async function runDeploy(): Promise<void> {
       name: config.subname || 'anima',
       ref: process.env.ANIMA_BOOTSTRAP_REF ?? 'main',
       subname: config.subname,
+      telegramSecrets: telegramSecretsPlain,
       onProgress: msg => sBox.message(msg),
     })
     sBox.stop(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`)

@@ -3,15 +3,10 @@ import {
   type AnimaNetwork,
   SANDBOX_PROVIDER_URL_GALILEO,
   SandboxProviderClient,
-  iNFTAgentId,
 } from '@s0nderlabs/anima-core'
 import type { Address, Hex } from 'viem'
 import { findAndLoadConfig } from '../config/load'
-import {
-  type TelegramHandoffSecrets,
-  loadTelegramSecrets,
-  telegramSecretsExist,
-} from '../util/telegram-secrets'
+import { loadTelegramHandoffSecrets } from '../util/telegram-secrets'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 import {
   preflightProviderDeposit,
@@ -117,35 +112,17 @@ export async function runResume(opts: ResumeOpts = {}): Promise<void> {
     operator: operatorAccount,
   })
 
-  // Phase 12 / B6 parity with `anima upgrade`: ship telegram secrets via
-  // secondary envelope so the resumed harness restores its grammY listener.
-  // Without this, every pause→resume cycle silently strips the bot — the
-  // gateway daemon comes back up with `plugins: ['telegram']` but no token,
-  // and `build-runtime.ts` skips listener registration. (May 5 2026 fix.)
-  const agentId = iNFTAgentId({ contractAddress, tokenId })
-  let telegramSecretsPlain: TelegramHandoffSecrets | undefined
-  if (telegramSecretsExist(agentId)) {
-    try {
-      const tg = await loadTelegramSecrets({
-        signer: operator,
-        agentAddress,
-        agentId,
-      })
-      if (tg) {
-        telegramSecretsPlain = {
-          botToken: tg.botToken,
-          allowedUserIds: tg.allowedUserIds,
-        }
-      }
-    } catch (err) {
-      // Non-fatal: harness comes up TG-less; operator can re-pair or
-      // `anima upgrade` to retry. Surface the reason so it isn't silent.
-      note(
-        `telegram secrets read failed (${(err as Error).message.slice(0, 120)}); resume continues without TG.`,
-        'warning',
-      )
-    }
-  }
+  // Ship telegram secrets via secondary envelope so the resumed harness
+  // restores its grammY listener. Without this, every pause→resume cycle
+  // silently strips the bot — gateway comes back with `plugins: ['telegram']`
+  // but no token, and `build-runtime.ts` skips listener registration.
+  const telegramSecretsPlain = await loadTelegramHandoffSecrets({
+    signer: operator,
+    agentAddress,
+    contractAddress,
+    tokenId,
+    onNotice: msg => note(`${msg}; resume continues without TG.`, 'warning'),
+  })
 
   const sBox = spinner()
   sBox.start('Resuming sandbox')

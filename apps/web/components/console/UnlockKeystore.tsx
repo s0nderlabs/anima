@@ -162,14 +162,13 @@ export function UnlockKeystore({
   }
 
   return (
-    <div className="grid gap-6 rounded-lg border border-[var(--color-border)] bg-[var(--color-paper)] px-6 py-7 shadow-sm sm:px-9 sm:py-10">
+    <div className="grid gap-6 pt-2">
       <div className="grid gap-3">
         <h2
           className="font-display text-[clamp(24px,2.6vw,38px)] font-light leading-[1.1] tracking-tight text-[var(--color-ink)]"
           style={{ fontVariationSettings: '"opsz" 96, "SOFT" 30, "WONK" 0' }}
         >
-          Sign to read this agent.{' '}
-          <span className="font-italic-serif italic text-[var(--color-ink-2)]">Once.</span>
+          Sign to read this agent.
         </h2>
         <p className="max-w-[44ch] text-[15.5px] leading-[1.65] text-[var(--color-ink-2)]">
           The signature derives an AES key, decrypts the keystore in this browser tab, and never

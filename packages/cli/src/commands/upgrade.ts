@@ -29,7 +29,7 @@ import {
   formatResolvedRef,
   resolveAnimaRef,
 } from '../util/ref-resolver'
-import type { TelegramHandoffSecrets } from '../util/telegram-secrets'
+import { loadTelegramHandoffSecrets } from '../util/telegram-secrets'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 import {
   ensureSandboxStarted,
@@ -420,35 +420,13 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
     sandboxId: args.sandboxId,
     operator: operatorAccount,
   })
-  // Phase 12 / B6: ship telegram secrets via secondary envelope if present.
-  // Operator decrypts the local blob; ECIES-encrypts to bootstrap pubkey
-  // happens inside handoffAgentToGateway.
-  let telegramSecretsPlain: TelegramHandoffSecrets | undefined
-  try {
-    const { iNFTAgentId } = await import('@s0nderlabs/anima-core')
-    const { telegramSecretsExist, loadTelegramSecrets } = await import('../util/telegram-secrets')
-    const agentId = iNFTAgentId({
-      contractAddress: args.contractAddress,
-      tokenId: args.tokenId,
-    })
-    if (telegramSecretsExist(agentId)) {
-      sBox.message('decrypting local telegram secrets for re-handoff')
-      const tg = await loadTelegramSecrets({
-        signer: args.operator,
-        agentAddress: args.agentAddress,
-        agentId,
-      })
-      if (tg) {
-        telegramSecretsPlain = {
-          botToken: tg.botToken,
-          allowedUserIds: tg.allowedUserIds,
-        }
-      }
-    }
-  } catch (err) {
-    sBox.message(`telegram-secrets read failed: ${(err as Error).message.slice(0, 120)}`)
-    // Continue without — non-fatal. The harness will run without telegram.
-  }
+  const telegramSecretsPlain = await loadTelegramHandoffSecrets({
+    signer: args.operator,
+    agentAddress: args.agentAddress,
+    contractAddress: args.contractAddress,
+    tokenId: args.tokenId,
+    onNotice: msg => sBox.message(msg),
+  })
   try {
     await handoffAgentToGateway({
       sandboxClient,
@@ -525,6 +503,13 @@ async function runReprovisionUpgrade(args: ReprovisionUpgradeArgs): Promise<void
 
   const sBox = spinner()
   sBox.start('Provisioning fresh sandbox container')
+  const telegramSecretsPlain = await loadTelegramHandoffSecrets({
+    signer: args.operator,
+    agentAddress: args.agentAddress,
+    contractAddress: args.contractAddress,
+    tokenId: args.tokenId,
+    onNotice: msg => sBox.message(msg),
+  })
   let sandboxResult: Awaited<ReturnType<typeof runSandboxProvision>>
   try {
     sandboxResult = await runSandboxProvision({
@@ -541,6 +526,7 @@ async function runReprovisionUpgrade(args: ReprovisionUpgradeArgs): Promise<void
       ref: args.resolved.ref,
       subname: args.config.subname,
       plugins: args.config.plugins,
+      telegramSecrets: telegramSecretsPlain,
       onProgress: msg => sBox.message(msg),
     })
     sBox.stop(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`)
@@ -622,18 +608,19 @@ function sleep(ms: number): Promise<void> {
  * Used by `runInPlaceUpgrade` so the upgrade script ships only the path it
  * actually needs (auto-detect inside the script blew the 5KB Daytona cap).
  */
-async function probeContainerBootstrapMode(
+export async function probeContainerBootstrapMode(
   provider: SandboxProviderClient,
   sandboxId: string,
 ): Promise<BootstrapMode | null> {
-  const probe = `if [ -d "$HOME/anima/.git" ]; then echo MODE=git; elif [ -x "$HOME/.bun/install/global/node_modules/.bin/anima-gateway" ]; then echo MODE=npm; else echo MODE=none; fi`
-  try {
-    const res = await provider.execInToolbox(sandboxId, { command: probe, timeout: 30 })
-    const out = extractExecOutput(res)
-    if (out.includes('MODE=git')) return 'git'
-    if (out.includes('MODE=npm')) return 'npm'
-    return null
-  } catch {
-    return null
-  }
+  // Routed through makeExecRead so the `if [...]; then ...; fi` runs under
+  // a real bash. Daytona's exec is argv-only; without the wrap the probe
+  // tokenises `if` as argv[0] and returns empty. makeExecRead also swallows
+  // exec errors, returning '' on failure — matches the previous catch arm.
+  const execRead = makeExecRead(provider, sandboxId)
+  const out = await execRead(
+    `if [ -d "$HOME/anima/.git" ]; then echo MODE=git; elif [ -x "$HOME/.bun/install/global/node_modules/.bin/anima-gateway" ]; then echo MODE=npm; else echo MODE=none; fi`,
+  )
+  if (out.includes('MODE=git')) return 'git'
+  if (out.includes('MODE=npm')) return 'npm'
+  return null
 }
