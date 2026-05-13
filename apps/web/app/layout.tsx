@@ -71,6 +71,14 @@ export const metadata: Metadata = {
     description: 'No host. No central operator. Fully on 0G. Mint once. Anima keeps running.',
     creator: '@s0nderlabs',
   },
+  alternates: {
+    types: {
+      'text/plain': [
+        { url: '/llms.txt', title: 'llms.txt' },
+        { url: '/llms-full.txt', title: 'llms-full.txt' },
+      ],
+    },
+  },
 }
 
 export const viewport: Viewport = {

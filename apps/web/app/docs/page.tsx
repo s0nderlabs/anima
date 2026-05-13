@@ -98,6 +98,18 @@ export default async function DocsOverviewPage() {
           >
             changelog ↗
           </a>
+          <a
+            href="/llms.txt"
+            className="font-mono uppercase tracking-[0.18em] text-[var(--color-ink-2)] transition hover:text-[var(--color-ink)]"
+          >
+            llms.txt ↗
+          </a>
+          <a
+            href="/llms-full.txt"
+            className="font-mono uppercase tracking-[0.18em] text-[var(--color-ink-2)] transition hover:text-[var(--color-ink)]"
+          >
+            llms-full.txt ↗
+          </a>
           <Link
             href="/"
             className="font-mono uppercase tracking-[0.18em] text-[var(--color-ink-2)] transition hover:text-[var(--color-ink)]"

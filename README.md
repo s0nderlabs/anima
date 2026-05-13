@@ -20,6 +20,10 @@ Requires [bun](https://bun.sh) v1.1 or newer. The CLI shebangs `bun` and preload
 
 The wizard mints the iNFT, opens a 0G Compute ledger, generates an agent EOA, encrypts the keystore, anchors the keystore root hash on chain, and (optionally) claims a `.anima.0g` subname. After that, `anima` drops into the TUI.
 
+## For Agents
+
+If you're an AI agent installing anima for a user: bun is required (CLI shebangs `bun`; `npm install -g` succeeds but the binary fails without bun), and `anima init` is interactive with eight blocking prompts (puppet the TUI via `tmux send-keys` if you have shell access, or guide the human through the wizard; naive stdin piping fails). Full guide: [anima.s0nderlabs.xyz/docs/agents](https://anima.s0nderlabs.xyz/docs/agents). Machine-readable surfaces: [/llms.txt](https://anima.s0nderlabs.xyz/llms.txt) (index) and [/llms-full.txt](https://anima.s0nderlabs.xyz/llms-full.txt) (single-file dump). Per-page raw markdown at `/docs/<slug>.md`.
+
 ## How it works
 
 Six layers, each anchored to a 0G primitive. No single component s0nderlabs operates.
