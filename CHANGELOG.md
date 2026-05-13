@@ -4,6 +4,14 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.22.2] - 2026-05-13
+
+### Fixed
+
+- **Brain em-dashes now stripped at the source (programmatic backstop).** v0.22.1 promoted the ASCII-hyphen rule to a HARD CONSTRAINT in the system prompt, but the qwen3.6-plus flagship still slipped em-dashes (U+2014) and en-dashes (U+2013) through on edge prompts. Added `sanitizeDashes()` in `packages/core/src/brain/sanitize.ts`, wired into `brain.infer` at the single return point in `og-compute.ts:380` so every surface (TUI, TG, A2A, market) sees clean text regardless of what the model emitted. Replacement rules: em-dash to comma+space, en-dash to ASCII hyphen. Defense-in-depth alongside the prompt rule.
+
+[0.22.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.22.2
+
 ## [0.22.1] - 2026-05-13
 
 ### Fixed

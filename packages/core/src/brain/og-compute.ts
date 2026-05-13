@@ -18,6 +18,7 @@ import {
 } from './compaction'
 import { type FrozenPrefix, renderFrozenPrefix, renderUserContext } from './frozen-prefix'
 import type { HistoryPersist } from './history-persist'
+import { sanitizeDashes } from './sanitize'
 import type { Brain, BrainInferInput, BrainMessage, BrainTurn } from './types'
 
 type Broker = Awaited<ReturnType<typeof createZGComputeNetworkBroker>>
@@ -377,6 +378,13 @@ export class OGComputeBrain implements Brain {
       }
     }
 
+    // v0.22.1: backstop em-dash/en-dash hard rule. Frozen-prefix forbids
+    // these characters but qwen3.6-plus occasionally slips. Sanitize at the
+    // single brain-output point so every surface (TUI/TG/A2A/market) gets
+    // clean text without per-surface duplication.
+    if (turnResult?.content) {
+      turnResult.content = sanitizeDashes(turnResult.content)
+    }
     return turnResult ?? { content: null, toolCalls: [] }
   }
 
