@@ -310,8 +310,24 @@ function NavLink({ href, children }: { href: string; children: React.ReactNode }
   const className =
     'relative text-[14px] font-medium tracking-[-0.005em] text-[var(--color-ink)] transition-colors duration-200 hover:text-[var(--color-ink-2)]'
   if (isAnchor) {
+    const id = href.slice(1)
     return (
-      <a href={href} className={className}>
+      <a
+        href={href}
+        className={className}
+        onClick={e => {
+          const target = document.getElementById(id)
+          if (!target) return
+          const lenis = window.__lenis
+          if (lenis) {
+            e.preventDefault()
+            lenis.scrollTo(target, {
+              duration: 1.8,
+              easing: t => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2),
+            })
+          }
+        }}
+      >
         {children}
       </a>
     )

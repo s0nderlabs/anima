@@ -97,10 +97,21 @@ export function V1Opener() {
   return (
     <section
       ref={sectionRef}
-      id="section-layers"
       className="relative bg-[var(--color-cream)]"
       style={{ height: `${PANEL_COUNT * 100}vh` }}
     >
+      {/* Anchor for the Navbar `Architecture` link. Positioned ~7% into the
+          800vh section so the smooth-scroll lands when the TrioPanel
+          (`No host. No central operator. Fully on 0G.`) has finished its
+          per-line reveal sequence (l1 ends at 0.025, l2 at 0.045, l3 at
+          0.065). Jumping to the section TOP lands at progress=0 where the
+          three lines are still at opacity 0 and the panel looks empty. */}
+      <div
+        id="section-layers"
+        aria-hidden
+        className="pointer-events-none absolute left-0 right-0 h-px"
+        style={{ top: '7%' }}
+      />
       <div className="sticky top-0 flex h-screen items-center overflow-hidden">
         <motion.div
           aria-hidden
