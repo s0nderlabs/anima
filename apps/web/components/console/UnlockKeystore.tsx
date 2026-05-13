@@ -19,6 +19,12 @@ type UnlockState =
   | { kind: 'decrypting' }
   | { kind: 'error'; message: string }
 
+type Eip1193Provider = {
+  request: (args: { method: string; params: unknown[] }) => Promise<unknown>
+}
+
+type WagmiConnector = { getProvider: () => Promise<unknown> }
+
 export function UnlockKeystore({
   agentAddress,
   onUnlocked,
@@ -28,7 +34,7 @@ export function UnlockKeystore({
 }) {
   const ctx = useAgentContext()
   const client = usePublicClient({ chainId: zgMainnet.id })
-  const { address: operator } = useAccount()
+  const account = useAccount()
   const config = useConfig()
   const { connectAsync, connectors } = useConnect()
   const { signTypedDataAsync } = useSignTypedData()
@@ -39,7 +45,8 @@ export function UnlockKeystore({
       setState({ kind: 'error', message: 'no chain client' })
       return
     }
-    let signer = operator
+    let signer = account.address
+    let activeConnector = account.connector as WagmiConnector | undefined
     if (!signer) {
       const recent =
         typeof window === 'undefined' ? null : localStorage.getItem('wagmi.recentConnectorId')
@@ -56,6 +63,7 @@ export function UnlockKeystore({
         setState({ kind: 'signing' })
         const result = await connectAsync({ connector, chainId: config.chains[0].id })
         signer = result.accounts[0]
+        activeConnector = connector as unknown as WagmiConnector
       } catch (err) {
         const msg =
           (err as { shortMessage?: string; message?: string }).shortMessage ||
@@ -70,14 +78,7 @@ export function UnlockKeystore({
       return
     }
     try {
-      setState({ kind: 'signing' })
       const typed = keystoreTypedData(agentAddress)
-      const sig = (await signTypedDataAsync({
-        domain: typed.domain,
-        types: typed.types,
-        primaryType: typed.primaryType,
-        message: typed.message,
-      })) as Hex
 
       setState({ kind: 'fetching' })
       const slots = await fetchSlots(client, ctx.tokenId)
@@ -90,11 +91,64 @@ export function UnlockKeystore({
       }
       const blob = await fetchBlobByRootHash(keystoreSlot.hash)
 
-      setState({ kind: 'decrypting' })
-      const ksKey = await deriveKeystoreKey(sig)
-      const agentPrivkey = await decryptKeystoreBlob(blob, ksKey)
-      const memoryKey = await deriveMemoryKey(agentPrivkey)
+      // Attempt 1: canonical EIP-712 sig via wagmi/viem. viem auto-adds
+      // `EIP712Domain: [{name},{version}]` to types before sending the
+      // typed-data to the wallet, producing the standard EIP-712 domain
+      // separator. Decrypts every keystore encrypted by a LocalAccount
+      // operator signer (raw-privkey, keychain, keystore-file).
+      setState({ kind: 'signing' })
+      const canonicalSig = (await signTypedDataAsync({
+        domain: typed.domain,
+        types: typed.types,
+        primaryType: typed.primaryType,
+        message: typed.message,
+      })) as Hex
 
+      setState({ kind: 'decrypting' })
+      let agentPrivkey: Hex | null = null
+      try {
+        const ksKey = await deriveKeystoreKey(canonicalSig)
+        agentPrivkey = await decryptKeystoreBlob(blob, ksKey)
+      } catch (canonicalErr) {
+        // Attempt 2: WC-legacy variant. Agents init'd via the v0.8.x
+        // WalletConnect operator signer (packages/core/src/operator/
+        // walletconnect.ts) bypassed viem's hashTypedData entirely and
+        // shipped typed-data verbatim through `eth_signTypedData_v4`
+        // without an `EIP712Domain` types entry. MetaMask's `sanitizeData`
+        // then inserted `EIP712Domain: []` (empty), so the wallet hashed
+        // the domain separator over a typeHash of `keccak256("EIP712Domain()")`
+        // with no field values — a different hash than the canonical path.
+        // Reproduce that by talking to the connector's raw EIP-1193
+        // provider directly, sending types without EIP712Domain.
+        console.warn('[unlock] canonical decrypt failed, trying WC-legacy variant')
+        if (!activeConnector) {
+          throw canonicalErr instanceof Error
+            ? canonicalErr
+            : new Error('canonical decrypt failed and no connector for fallback')
+        }
+        setState({ kind: 'signing' })
+        const provider = (await activeConnector.getProvider()) as Eip1193Provider
+        const wcLegacyPayload = JSON.stringify({
+          domain: typed.domain,
+          types: typed.types,
+          primaryType: typed.primaryType,
+          message: typed.message,
+        })
+        const wcLegacySig = (await provider.request({
+          method: 'eth_signTypedData_v4',
+          params: [signer, wcLegacyPayload],
+        })) as Hex
+        setState({ kind: 'decrypting' })
+        const ksKey = await deriveKeystoreKey(wcLegacySig)
+        agentPrivkey = await decryptKeystoreBlob(blob, ksKey)
+        console.log('[unlock] decrypted with WC-legacy empty-EIP712Domain variant')
+      }
+
+      if (!agentPrivkey) {
+        throw new Error('keystore decrypt failed on every known variant')
+      }
+
+      const memoryKey = await deriveMemoryKey(agentPrivkey)
       ctx.setUnlocked({ agentPrivkey, memoryKey, unlockedAt: Date.now() })
       setState({ kind: 'idle' })
       onUnlocked?.()

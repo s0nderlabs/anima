@@ -5,14 +5,14 @@ import { AgentDetailHeader } from '@/components/console/AgentDetailHeader'
 import { ConnectGate } from '@/components/console/ConnectGate'
 import { AgentContextProvider, useAgentContext } from '@/components/console/agent-context'
 import { readAgentEoa } from '@/lib/agent-eoa-cache'
-import { ANIMA_AGENT_NFT_ADDRESS, zgMainnet } from '@/lib/chain/chain'
-import { fetchOwner } from '@/lib/chain/inft'
-import { findAgentSubnameForToken, listSubnamesClaimedBy } from '@/lib/chain/registrar'
+import { zgMainnet } from '@/lib/chain/chain'
+import { type AgentChainMeta, fetchOwner, getAgentChainMetaByTokenId } from '@/lib/chain/inft'
+import { getLabelByAgentEoa } from '@/lib/chain/sann'
 import { useRouter } from 'next/navigation'
 import { type ReactNode, useEffect, useState } from 'react'
 import { use as usePromise } from 'react'
 import type { Address } from 'viem'
-import { useAccount, usePublicClient } from 'wagmi'
+import { usePublicClient } from 'wagmi'
 
 type Params = { tokenId: string }
 
@@ -31,11 +31,12 @@ export default function AgentDetailLayout(props: {
 
 function DetailShell({ tokenId, children }: { tokenId: bigint; children: ReactNode }) {
   const router = useRouter()
-  const { address } = useAccount()
+  const siwe = useSiwe()
+  const address = siwe.address
   const client = usePublicClient({ chainId: zgMainnet.id })
   const ctx = useAgentContext()
-  const siwe = useSiwe()
   const [error, setError] = useState<string | null>(null)
+  const [meta, setMeta] = useState<AgentChainMeta | null>(null)
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: ctx setters are stable
   useEffect(() => {
@@ -59,22 +60,24 @@ function DetailShell({ tokenId, children }: { tokenId: bigint; children: ReactNo
           setTimeout(() => router.replace('/console'), 1500)
           return
         }
-        // Reverse-lookup subname (best-effort, won't block render).
-        try {
-          const claimed = await listSubnamesClaimedBy(client, address as Address)
-          if (claimed.length === 0) return
-          const match = await findAgentSubnameForToken(
-            client,
-            claimed,
-            ANIMA_AGENT_NFT_ADDRESS as Address,
-            tokenId,
-          )
-          if (!alive || !match) return
-          ctx.setSubname(match.label)
-          ctx.setAgentEOA(match.agentEOA)
-        } catch {
-          // Best-effort only.
+        // Chain meta + subname registry scan in parallel (both best-effort).
+        const [metaResult, labelByEoaResult] = await Promise.allSettled([
+          getAgentChainMetaByTokenId(client, [tokenId]),
+          getLabelByAgentEoa(client),
+        ])
+        if (!alive) return
+
+        let resolvedEoa: Address | null = null
+        if (metaResult.status === 'fulfilled') {
+          const m = metaResult.value.get(tokenId) ?? null
+          setMeta(m)
+          if (m) resolvedEoa = m.agentEoa
         }
+        if (resolvedEoa && labelByEoaResult.status === 'fulfilled') {
+          const label = labelByEoaResult.value.get(resolvedEoa.toLowerCase())
+          if (label) ctx.setSubname(label)
+        }
+        if (resolvedEoa) ctx.setAgentEOA(resolvedEoa)
       })
       .catch((err: Error) => {
         if (!alive) return
@@ -98,8 +101,9 @@ function DetailShell({ tokenId, children }: { tokenId: bigint; children: ReactNo
         <>
           <AgentDetailHeader
             tokenId={tokenId}
-            owner={ctx.owner ?? address ?? ''}
             subname={ctx.subname ?? null}
+            agentEOA={ctx.agentEOA ?? null}
+            meta={meta}
           />
           {children}
         </>

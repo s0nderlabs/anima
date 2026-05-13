@@ -1,8 +1,9 @@
 'use client'
 
+import type { AgentChainMeta } from '@/lib/chain/inft'
+import { formatRelativeTime, shortAddress } from '@/lib/format'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { shortAddress } from '@/lib/format'
 
 const TABS = [
   { slug: '', label: 'Identity' },
@@ -13,18 +14,42 @@ const TABS = [
 
 export function AgentDetailHeader({
   tokenId,
-  owner,
   subname,
+  agentEOA,
+  meta,
 }: {
   tokenId: bigint
-  owner: string
   subname?: string | null
+  agentEOA?: string | null
+  meta?: AgentChainMeta | null
 }) {
   const pathname = usePathname()
   const base = `/console/${tokenId.toString()}`
 
+  const nowSec = Math.floor(Date.now() / 1000)
+  const lastSyncSecondsAgo = meta ? nowSec - meta.lastSyncAt : null
+  const lastSyncToken =
+    lastSyncSecondsAgo !== null ? formatRelativeTime(lastSyncSecondsAgo) : null
+  const [lastSyncValue, lastSyncWord] = lastSyncToken
+    ? (lastSyncToken.split(' ') as [string, string])
+    : [null, null]
+  const isFresh = lastSyncSecondsAgo !== null && lastSyncSecondsAgo < 86_400
+
+  const activity = (() => {
+    if (!meta) return null
+    const days = Math.max(1, nowSec - meta.firstSyncAt) / 86400
+    const aliveValue = days < 1 ? 'today' : days < 1.5 ? '1d' : `${Math.round(days)}d`
+    return {
+      syncCount: meta.syncCount,
+      syncWord: meta.syncCount === 1 ? 'sync' : 'syncs',
+      aliveValue,
+    }
+  })()
+
+  const dormant = !meta && !agentEOA
+
   return (
-    <header className="grid gap-7 pb-8 pt-2 sm:gap-9">
+    <header className="grid gap-8 pb-8 pt-2 sm:gap-10">
       <div>
         <Link
           href="/console"
@@ -33,42 +58,63 @@ export function AgentDetailHeader({
           <span aria-hidden>←</span> All agents
         </Link>
       </div>
-      <div className="grid grid-cols-[auto_1fr] items-end gap-6 sm:gap-9">
-        <span
-          className="font-display font-light leading-[0.82] text-[var(--color-ink)]"
-          style={{
-            fontSize: 'clamp(80px, 9vw, 144px)',
-            fontVariationSettings: '"opsz" 144, "SOFT" 0, "WONK" 0',
-          }}
-          aria-hidden
-        >
-          {tokenId.toString().padStart(2, '0')}
-        </span>
-        <div className="grid gap-2 pb-3">
-          {subname ? (
-            <h1
-              className="font-display text-[clamp(28px,3vw,44px)] font-light leading-[1.05] tracking-tight text-[var(--color-ink)]"
-              style={{ fontVariationSettings: '"opsz" 96, "SOFT" 30, "WONK" 0' }}
-            >
-              {subname}
-              <span className="text-[var(--color-ink-3)]">.0g</span>
-            </h1>
-          ) : (
-            <h1
-              className="font-display text-[clamp(26px,2.8vw,38px)] font-light leading-[1.1] tracking-tight text-[var(--color-ink-2)]"
-              style={{ fontVariationSettings: '"opsz" 96, "SOFT" 30, "WONK" 0' }}
-            >
-              Agent #{tokenId.toString()}
-            </h1>
-          )}
-          <p className="font-mono text-[13px] text-[var(--color-ink-2)]">
-            token #{tokenId.toString()} · owner {shortAddress(owner, 10, 8)}
+
+      <div className="grid gap-3">
+        {subname ? (
+          <h1
+            className="font-display font-light leading-[1.0] tracking-tight text-[var(--color-ink)]"
+            style={{
+              fontSize: 'clamp(48px, 6vw, 88px)',
+              fontVariationSettings: '"opsz" 96, "SOFT" 30, "WONK" 0',
+            }}
+          >
+            {subname}
+            <span className="text-[var(--color-ink-3)]">.anima.0g</span>
+          </h1>
+        ) : (
+          <h1
+            className="font-display font-light leading-[1.0] tracking-tight text-[var(--color-ink-2)]"
+            style={{
+              fontSize: 'clamp(40px, 5vw, 68px)',
+              fontVariationSettings: '"opsz" 96, "SOFT" 30, "WONK" 0',
+            }}
+          >
+            Agent #{tokenId.toString()}
+          </h1>
+        )}
+
+        {agentEOA ? (
+          <p className="font-mono text-[15px] text-[var(--color-ink)]">
+            {shortAddress(agentEOA, 10, 8)}
           </p>
-        </div>
+        ) : null}
+
+        {activity ? (
+          <p className="font-mono text-[13px] text-[var(--color-ink-3)]">
+            <span className="text-[var(--color-ink)]">{activity.syncCount}</span>{' '}
+            {activity.syncWord} · alive{' '}
+            <span className="text-[var(--color-ink-2)]">{activity.aliveValue}</span>
+            {lastSyncValue && lastSyncWord ? (
+              <>
+                {' · last '}
+                <span className={isFresh ? 'text-[var(--color-ink)]' : 'text-[var(--color-ink-2)]'}>
+                  {lastSyncValue}
+                </span>{' '}
+                {lastSyncWord}
+              </>
+            ) : null}
+          </p>
+        ) : null}
+
+        {dormant ? (
+          <p className="font-mono text-[13px] text-[var(--color-ink-3)]">
+            not yet anchored · awaiting first sync
+          </p>
+        ) : null}
       </div>
 
       <nav className="-mx-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-[var(--color-border)] pt-5">
-        {TABS.map((t) => {
+        {TABS.map(t => {
           const href = t.slug ? `${base}/${t.slug}` : base
           const active = t.slug
             ? pathname === href || pathname.startsWith(`${href}/`)

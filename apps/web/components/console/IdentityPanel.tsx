@@ -2,16 +2,22 @@
 
 import {
   ANIMA_AGENT_NFT_ADDRESS,
+  INTELLIGENT_DATA_SLOTS,
   explorerAddrUrl,
   explorerTokenUrl,
   explorerTxUrl,
   zgMainnet,
 } from '@/lib/chain/chain'
-import { type SlotEntry, fetchSlots, fetchTransferHistory } from '@/lib/chain/inft'
+import {
+  type SlotEntry,
+  fetchAnchorHistory,
+  fetchSlots,
+  fetchTransferHistory,
+} from '@/lib/chain/inft'
 import { shortAddress, shortHash } from '@/lib/format'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Address, Hex } from 'viem'
 import { usePublicClient } from 'wagmi'
 
@@ -28,16 +34,33 @@ export function IdentityPanel({ tokenId }: { tokenId: bigint }) {
   const client = usePublicClient({ chainId: zgMainnet.id })
   const [slots, setSlots] = useState<SlotEntry[] | null>(null)
   const [transfers, setTransfers] = useState<Transfer[] | null>(null)
+  // Per-slot most-recent Updated tx hash. Slot name → tx hash.
+  const [slotTx, setSlotTx] = useState<Map<string, Hex>>(new Map())
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!client) return
     let alive = true
-    Promise.all([fetchSlots(client, tokenId), fetchTransferHistory(client, tokenId, 5)])
-      .then(([s, t]) => {
+    Promise.all([
+      fetchSlots(client, tokenId),
+      fetchTransferHistory(client, tokenId, 5),
+      fetchAnchorHistory(client, tokenId, 200),
+    ])
+      .then(([s, t, anchors]) => {
         if (!alive) return
         setSlots(s)
         setTransfers(t)
+        // Walk anchor events newest-first; first event mentioning a slot index
+        // wins (that's the most-recent Updated tx that anchored that slot).
+        const txBySlot = new Map<string, Hex>()
+        outer: for (const a of anchors) {
+          for (const idx of a.slots) {
+            const name = INTELLIGENT_DATA_SLOTS[Number(idx)]
+            if (name && !txBySlot.has(name)) txBySlot.set(name, a.txHash)
+          }
+          if (txBySlot.size === INTELLIGENT_DATA_SLOTS.length) break outer
+        }
+        setSlotTx(txBySlot)
       })
       .catch((err: Error) => {
         if (!alive) return
@@ -50,14 +73,22 @@ export function IdentityPanel({ tokenId }: { tokenId: bigint }) {
 
   return (
     <div className="grid gap-12 pt-6 sm:gap-16">
-      <SlotTable slots={slots} error={error} />
-      <TransferList transfers={transfers} />
+      <SlotTable slots={slots} slotTx={slotTx} error={error} />
       <ContractCard tokenId={tokenId} />
+      <TransferList transfers={transfers} />
     </div>
   )
 }
 
-function SlotTable({ slots, error }: { slots: SlotEntry[] | null; error: string | null }) {
+function SlotTable({
+  slots,
+  slotTx,
+  error,
+}: {
+  slots: SlotEntry[] | null
+  slotTx: Map<string, Hex>
+  error: string | null
+}) {
   return (
     <section className="grid gap-6">
       <div>
@@ -75,7 +106,12 @@ function SlotTable({ slots, error }: { slots: SlotEntry[] | null; error: string 
       ) : (
         <div className="grid divide-y divide-[var(--color-border)] rounded-lg border border-[var(--color-border)] bg-[var(--color-paper)]">
           {(slots ?? Array.from({ length: 6 }).map(() => null)).map((slot, i) => (
-            <SlotRow key={slot?.name ?? `placeholder-${i}`} slot={slot} index={i} />
+            <SlotRow
+              key={slot?.name ?? `placeholder-${i}`}
+              slot={slot}
+              index={i}
+              txHash={slot ? (slotTx.get(slot.name) ?? null) : null}
+            />
           ))}
         </div>
       )}
@@ -83,13 +119,21 @@ function SlotTable({ slots, error }: { slots: SlotEntry[] | null; error: string 
   )
 }
 
-function SlotRow({ slot, index }: { slot: SlotEntry | null; index: number }) {
+function SlotRow({
+  slot,
+  index,
+  txHash,
+}: {
+  slot: SlotEntry | null
+  index: number
+  txHash: Hex | null
+}) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: ALWAYS_DELAY + index * 0.04, duration: 0.6, ease: [0.22, 1, 0.36, 1] }}
-      className="grid grid-cols-[minmax(160px,1fr)_minmax(0,2fr)_auto] items-center gap-4 px-5 py-4 sm:gap-8 sm:px-7"
+      className="grid grid-cols-[minmax(160px,1fr)_minmax(0,2fr)_minmax(96px,auto)] items-center gap-4 px-5 py-4 sm:gap-8 sm:px-7"
     >
       {slot ? (
         <>
@@ -101,24 +145,29 @@ function SlotRow({ slot, index }: { slot: SlotEntry | null; index: number }) {
               {slot.isBootstrap ? 'awaiting first sync' : 'anchored'}
             </p>
           </div>
-          <p className="font-mono text-[12.5px] text-[var(--color-ink)]">
-            {slot.isBootstrap ? (
-              <span className="text-[var(--color-ink-3)]">{shortHash(slot.hash)}</span>
-            ) : (
-              shortHash(slot.hash, 12, 8)
-            )}
-          </p>
+          <div className="flex items-center gap-2">
+            <p className="font-mono text-[12.5px] text-[var(--color-ink)]">
+              {slot.isBootstrap ? (
+                <span className="text-[var(--color-ink-3)]">{shortHash(slot.hash, 12, 8)}</span>
+              ) : (
+                shortHash(slot.hash, 12, 8)
+              )}
+            </p>
+            <CopyButton value={slot.hash} />
+          </div>
           {slot.isBootstrap ? (
             <span className="text-[12.5px] text-[var(--color-ink-3)]">placeholder</span>
-          ) : (
+          ) : txHash ? (
             <Link
-              href={`https://chainscan.0g.ai/token/${ANIMA_AGENT_NFT_ADDRESS}`}
+              href={explorerTxUrl(txHash)}
               target="_blank"
               rel="noreferrer"
               className="text-[12.5px] text-[var(--color-ink-2)] transition hover:text-[var(--color-ink)]"
             >
               chain ↗
             </Link>
+          ) : (
+            <span className="text-[12.5px] text-[var(--color-ink-3)]">—</span>
           )}
         </>
       ) : (
@@ -178,6 +227,75 @@ function TransferList({ transfers }: { transfers: Transfer[] | null }) {
         ))}
       </div>
     </section>
+  )
+}
+
+function CopyButton({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current)
+    },
+    [],
+  )
+
+  function handleCopy() {
+    navigator.clipboard
+      .writeText(value)
+      .then(() => {
+        setCopied(true)
+        if (timerRef.current) clearTimeout(timerRef.current)
+        timerRef.current = setTimeout(() => setCopied(false), 1500)
+      })
+      .catch(() => {})
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      aria-label={copied ? 'Copied' : 'Copy hash'}
+      className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-[var(--color-ink-3)] transition-colors hover:bg-[color-mix(in_oklab,var(--color-ink)_4%,transparent)] hover:text-[var(--color-ink)]"
+    >
+      {copied ? <CheckIcon /> : <CopyIcon />}
+    </button>
+  )
+}
+
+function CopyIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className="h-[12px] w-[12px]"
+    >
+      <rect x="5.5" y="5.5" width="8" height="8" rx="1.6" />
+      <path d="M10.5 5.5V4A1.5 1.5 0 0 0 9 2.5H4A1.5 1.5 0 0 0 2.5 4v5A1.5 1.5 0 0 0 4 10.5h1.5" />
+    </svg>
+  )
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden
+      className="h-[12px] w-[12px]"
+    >
+      <path d="M3 8.5l3 3 7-7" />
+    </svg>
   )
 }
 

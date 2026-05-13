@@ -3,10 +3,31 @@
 import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
 
+// Slots whose content is rendered as its own in-page panel by MemoryBrowser.
+// Memory-index markdown links like `[identity](agent/identity.md)` should
+// smooth-scroll to that panel instead of issuing a route navigation.
+const INLINE_SLOT_ANCHORS: Record<string, string> = {
+  'agent/identity.md': 'mem-identity',
+  'agent/persona.md': 'mem-persona',
+  'agent/profile.md': 'mem-profile',
+  'user/profile.md': 'mem-profile',
+}
+
+function resolveInPageAnchor(href: string | undefined): string | null {
+  if (!href) return null
+  const clean = href.replace(/^\.?\//, '')
+  return INLINE_SLOT_ANCHORS[clean] ?? null
+}
+
+function isExternalUrl(href: string | undefined): boolean {
+  if (!href) return false
+  return /^(https?:)?\/\//.test(href) || href.startsWith('mailto:')
+}
+
 const components: Components = {
   h1: ({ children }) => (
     <h1
-      className="mb-5 mt-7 font-display text-[clamp(28px,3vw,40px)] font-light leading-[1.08] tracking-tight text-[var(--color-ink)]"
+      className="mb-5 mt-7 font-display text-[clamp(28px,3vw,40px)] font-light leading-[1.08] tracking-tight text-[var(--color-ink)] first:mt-0"
       style={{ fontVariationSettings: '"opsz" 96, "SOFT" 30, "WONK" 0' }}
     >
       {children}
@@ -14,19 +35,19 @@ const components: Components = {
   ),
   h2: ({ children }) => (
     <h2
-      className="mb-4 mt-8 font-display text-[clamp(22px,2.4vw,30px)] font-light leading-[1.1] tracking-tight text-[var(--color-ink)]"
+      className="mb-4 mt-8 font-display text-[clamp(22px,2.4vw,30px)] font-light leading-[1.1] tracking-tight text-[var(--color-ink)] first:mt-0"
       style={{ fontVariationSettings: '"opsz" 96, "SOFT" 30, "WONK" 0' }}
     >
       {children}
     </h2>
   ),
   h3: ({ children }) => (
-    <h3 className="mb-3 mt-6 text-[19px] font-medium leading-[1.2] tracking-tight text-[var(--color-ink)]">
+    <h3 className="mb-3 mt-6 text-[19px] font-medium leading-[1.2] tracking-tight text-[var(--color-ink)] first:mt-0">
       {children}
     </h3>
   ),
   h4: ({ children }) => (
-    <h4 className="mb-2 mt-5 text-[16px] font-medium leading-[1.25] tracking-tight text-[var(--color-ink)]">
+    <h4 className="mb-2 mt-5 text-[16px] font-medium leading-[1.25] tracking-tight text-[var(--color-ink)] first:mt-0">
       {children}
     </h4>
   ),
@@ -51,16 +72,45 @@ const components: Components = {
     </ol>
   ),
   li: ({ children }) => <li>{children}</li>,
-  a: ({ href, children }) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noreferrer"
-      className="text-[var(--color-ink)] underline decoration-[var(--color-border-strong)] underline-offset-[3px] transition hover:decoration-[var(--color-ink)]"
-    >
-      {children}
-    </a>
-  ),
+  a: ({ href, children }) => {
+    const anchor = resolveInPageAnchor(href)
+    if (anchor) {
+      return (
+        <a
+          href={`#${anchor}`}
+          onClick={e => {
+            e.preventDefault()
+            document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+          }}
+          className="text-[var(--color-ink)] underline decoration-[var(--color-border-strong)] underline-offset-[3px] transition hover:decoration-[var(--color-ink)]"
+        >
+          {children}
+        </a>
+      )
+    }
+    if (isExternalUrl(href)) {
+      return (
+        <a
+          href={href}
+          target="_blank"
+          rel="noreferrer"
+          className="text-[var(--color-ink)] underline decoration-[var(--color-border-strong)] underline-offset-[3px] transition hover:decoration-[var(--color-ink)]"
+        >
+          {children}
+        </a>
+      )
+    }
+    // Relative path to a memory file we can't reach from the browser
+    // (lives in the operator's local /user/ partition, never anchored on-chain).
+    return (
+      <span
+        title="Stored only on the operator's device. Not on chain."
+        className="text-[var(--color-ink-2)] underline decoration-dotted decoration-[var(--color-border-strong)] underline-offset-[3px]"
+      >
+        {children}
+      </span>
+    )
+  },
   code: ({ children, className }) => {
     if (!className) {
       return (
