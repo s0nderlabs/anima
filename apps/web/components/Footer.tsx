@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { CONTRACTS, addressUrl, truncate } from '@/lib/chainscan'
+import { ThemeToggle } from '@/components/theme/ThemeToggle'
 
 const PROJECT_LINKS = [
   { label: 'GitHub', href: 'https://github.com/s0nderlabs/anima', external: true },
@@ -75,8 +76,11 @@ export function Footer() {
           </FooterColumn>
         </div>
 
-        <div className="mt-10 border-t border-[var(--color-border)] pt-6 font-mono text-[12px] text-[var(--color-ink-3)]">
-          © 2026 · Built by s0nderlabs
+        <div className="mt-10 flex flex-col gap-6 border-t border-[var(--color-border)] pt-6 sm:flex-row sm:items-end sm:justify-between">
+          <div className="font-mono text-[12px] text-[var(--color-ink-3)]">
+            © 2026 · Built by s0nderlabs
+          </div>
+          <ThemeToggle />
         </div>
       </div>
     </footer>

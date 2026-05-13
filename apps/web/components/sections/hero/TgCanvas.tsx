@@ -144,7 +144,11 @@ export function TgCanvas({ cycle }: { cycle: Cycle }) {
   return (
     <div
       className="relative flex h-full min-h-[460px] flex-col overflow-hidden"
-      style={{ background: '#dfe9d8', fontFamily: SF_STACK }}
+      style={{
+        background: 'var(--tg-chat-bg)',
+        fontFamily: SF_STACK,
+        color: 'var(--tg-text)',
+      }}
     >
       <ChatWallpaper />
       <ChatHeader
@@ -239,7 +243,7 @@ function ChatWallpaper() {
         >
           <g
             fill="none"
-            stroke="rgba(46,140,93,.32)"
+            stroke="var(--tg-doodle-stroke)"
             strokeWidth="1.4"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -316,15 +320,16 @@ function AnimaAvatar({ size = 24 }: { size?: number }) {
 function ChatHeader({ typing }: { typing: boolean }) {
   return (
     <div
-      className="relative z-20 flex shrink-0 items-center gap-2.5 rounded-t-[14px] border-b border-black/10 px-3 pt-3 pb-2 backdrop-blur-xl sm:rounded-tr-none"
+      className="relative z-20 flex shrink-0 items-center gap-2.5 rounded-t-[14px] px-3 pt-3 pb-2 backdrop-blur-xl sm:rounded-tr-none"
       style={{
-        background: 'rgba(247,247,247,.88)',
+        background: 'var(--tg-header-bg)',
+        borderBottom: '1px solid var(--tg-divider)',
         WebkitBackdropFilter: 'blur(20px) saturate(180%)',
       }}
     >
       <span
-        className="inline-flex items-center text-[#007aff]"
-        style={{ fontSize: 13, lineHeight: 1, gap: 1 }}
+        className="inline-flex items-center"
+        style={{ fontSize: 13, lineHeight: 1, gap: 1, color: 'var(--tg-accent)' }}
       >
         <svg
           width="6"
@@ -345,10 +350,15 @@ function ChatHeader({ typing }: { typing: boolean }) {
         <span style={{ marginLeft: -1 }}>Chats</span>
       </span>
       <div className="flex flex-1 flex-col items-center leading-tight">
-        <span className="text-[14px] font-semibold tracking-[-0.2px] text-black">Anima</span>
+        <span
+          className="text-[14px] font-semibold tracking-[-0.2px]"
+          style={{ color: 'var(--tg-name)' }}
+        >
+          Anima
+        </span>
         <span
           className="text-[11px] font-medium"
-          style={{ color: typing ? '#007aff' : '#3aa66e' }}
+          style={{ color: typing ? 'var(--tg-accent)' : 'var(--tg-online)' }}
         >
           {typing ? 'typing…' : 'online'}
         </span>
@@ -361,14 +371,13 @@ function ChatHeader({ typing }: { typing: boolean }) {
 // ─────────── user bubble (right-aligned, green) ───────────
 
 function UserBubble({ text, t }: { text: string; t: string }) {
-  const bg = '#e1ffc7'
   const tailStyle: CSSProperties = {
     position: 'absolute',
     bottom: 0,
     right: -5,
     width: 9,
     height: 14,
-    background: bg,
+    background: 'var(--tg-bubble-out-bg)',
     clipPath: 'path("M0 0 Q 0 14 9 14 L 0 14 Z")',
   }
   return (
@@ -377,11 +386,11 @@ function UserBubble({ text, t }: { text: string; t: string }) {
         className="relative text-[12.5px] leading-[1.36]"
         style={{
           maxWidth: '78%',
-          background: bg,
+          background: 'var(--tg-bubble-out-bg)',
           borderRadius: '16px 16px 4px 16px',
           padding: '5px 10px 5px 12px',
-          boxShadow: '0 1px 1px rgba(0,0,0,.07)',
-          color: '#000',
+          boxShadow: 'var(--tg-bubble-shadow)',
+          color: 'var(--tg-text)',
           wordBreak: 'break-word',
         }}
       >
@@ -391,7 +400,7 @@ function UserBubble({ text, t }: { text: string; t: string }) {
           className="ml-2 inline-flex items-center gap-[3px] text-[10px]"
           style={{
             float: 'right',
-            color: 'rgba(0,0,0,.45)',
+            color: 'var(--tg-text-muted)',
             position: 'relative',
             top: 4,
             marginTop: 4,
@@ -404,7 +413,7 @@ function UserBubble({ text, t }: { text: string; t: string }) {
             height="10"
             viewBox="0 0 16 11"
             fill="none"
-            stroke="#4ea7e6"
+            stroke="var(--tg-check-blue)"
             strokeWidth="1.6"
             strokeLinecap="round"
             strokeLinejoin="round"
@@ -423,14 +432,13 @@ function UserBubble({ text, t }: { text: string; t: string }) {
 // ─────────── tool bubble (left-aligned, white) ───────────
 
 function ToolBubble({ entries }: { entries: ToolStreamEntry[] }) {
-  const bg = '#ffffff'
   const tailStyle: CSSProperties = {
     position: 'absolute',
     bottom: 0,
     left: -5,
     width: 9,
     height: 14,
-    background: bg,
+    background: 'var(--tg-bubble-in-bg)',
     clipPath: 'path("M9 0 Q 9 14 0 14 L 9 14 Z")',
   }
   return (
@@ -442,11 +450,11 @@ function ToolBubble({ entries }: { entries: ToolStreamEntry[] }) {
         className="relative"
         style={{
           maxWidth: '85%',
-          background: bg,
+          background: 'var(--tg-bubble-in-bg)',
           borderRadius: '16px 16px 16px 4px',
           padding: '7px 11px 7px 12px',
-          boxShadow: '0 1px 1px rgba(0,0,0,.07)',
-          color: '#000',
+          boxShadow: 'var(--tg-bubble-shadow)',
+          color: 'var(--tg-text)',
         }}
       >
         <div aria-hidden style={tailStyle} />
@@ -486,16 +494,16 @@ function ToolLine({
         fontFamily: 'var(--font-mono), ui-monospace, SFMono-Regular, monospace',
         fontSize: 11.5,
         lineHeight: 1.4,
-        color: 'rgba(0,0,0,0.78)',
+        color: 'var(--tg-text-tool-body)',
       }}
     >
       <span>{emoji}</span>
       <span>
-        <span style={{ color: 'rgba(0,0,0,0.55)' }}>{entry.tool}</span>
+        <span style={{ color: 'var(--tg-text-tool-tool)' }}>{entry.tool}</span>
         {entry.args && (
           <>
-            <span style={{ color: 'rgba(0,0,0,0.45)' }}>: </span>
-            <span style={{ color: 'rgba(0,0,0,0.7)' }}>{entry.args}</span>
+            <span style={{ color: 'var(--tg-text-tool-colon)' }}>: </span>
+            <span style={{ color: 'var(--tg-text-tool-args)' }}>{entry.args}</span>
           </>
         )}
       </span>
@@ -523,14 +531,13 @@ function ReplyBubble({
   t: string
   compact?: boolean
 }) {
-  const bg = '#ffffff'
   const tailStyle: CSSProperties = {
     position: 'absolute',
     bottom: 0,
     left: -5,
     width: 9,
     height: 14,
-    background: bg,
+    background: 'var(--tg-bubble-in-bg)',
     clipPath: 'path("M9 0 Q 9 14 0 14 L 9 14 Z")',
   }
   return (
@@ -544,11 +551,11 @@ function ReplyBubble({
         className="relative text-[12.5px] leading-[1.4]"
         style={{
           maxWidth: '85%',
-          background: bg,
+          background: 'var(--tg-bubble-in-bg)',
           borderRadius: '16px 16px 16px 4px',
           padding: '7px 11px 7px 12px',
-          boxShadow: '0 1px 1px rgba(0,0,0,.07)',
-          color: '#000',
+          boxShadow: 'var(--tg-bubble-shadow)',
+          color: 'var(--tg-text)',
           wordBreak: 'break-word',
         }}
       >
@@ -566,7 +573,7 @@ function ReplyBubble({
           className="ml-2 inline-flex items-center gap-[3px] text-[10px]"
           style={{
             float: 'right',
-            color: 'rgba(0,0,0,.45)',
+            color: 'var(--tg-text-muted)',
             position: 'relative',
             top: 4,
             marginTop: 4,
@@ -592,10 +599,10 @@ function TypingBubble() {
       <div
         className="flex items-center gap-1"
         style={{
-          background: '#fff',
+          background: 'var(--tg-bubble-in-bg)',
           padding: '8px 12px',
           borderRadius: '16px 16px 16px 4px',
-          boxShadow: '0 1px 1px rgba(0,0,0,.07)',
+          boxShadow: 'var(--tg-bubble-shadow)',
         }}
       >
         {[0, 1, 2].map(i => (
@@ -609,7 +616,7 @@ function TypingBubble() {
               ease: 'easeInOut',
             }}
             className="block h-1.5 w-1.5 rounded-full"
-            style={{ background: '#8a8a8e' }}
+            style={{ background: 'var(--tg-typing-dot)' }}
           />
         ))}
       </div>
@@ -622,15 +629,17 @@ function TypingBubble() {
 function Composer() {
   return (
     <div
-      className="relative z-20 flex shrink-0 items-center gap-1.5 border-t border-black/10 p-2 backdrop-blur-xl"
+      className="relative z-20 flex shrink-0 items-center gap-1.5 p-2 backdrop-blur-xl"
       style={{
-        background: 'rgba(247,247,247,.88)',
+        background: 'var(--tg-composer-bg)',
+        borderTop: '1px solid var(--tg-divider)',
         WebkitBackdropFilter: 'blur(20px) saturate(180%)',
       }}
     >
       <button
         type="button"
-        className="grid place-items-center p-1 text-[#8e8e93]"
+        className="grid place-items-center p-1"
+        style={{ color: 'var(--tg-icon-muted)' }}
         aria-label="attach"
       >
         <svg
@@ -649,16 +658,22 @@ function Composer() {
       <div
         className="flex flex-1 items-center gap-2 px-2.5"
         style={{
-          background: '#fff',
-          border: '0.5px solid rgba(0,0,0,.15)',
+          background: 'var(--tg-composer-input-bg)',
+          border: '0.5px solid var(--tg-composer-input-border)',
           borderRadius: 16,
           minHeight: 30,
         }}
       >
-        <span className="py-[6px] text-[12.5px] text-[#8a8a8e]">Message</span>
+        <span
+          className="py-[6px] text-[12.5px]"
+          style={{ color: 'var(--tg-placeholder)' }}
+        >
+          Message
+        </span>
         <button
           type="button"
-          className="ml-auto p-1 text-[#8e8e93]"
+          className="ml-auto p-1"
+          style={{ color: 'var(--tg-icon-muted)' }}
           aria-label="emoji"
         >
           <svg
@@ -680,7 +695,8 @@ function Composer() {
       </div>
       <button
         type="button"
-        className="grid place-items-center p-1 text-[#8e8e93]"
+        className="grid place-items-center p-1"
+        style={{ color: 'var(--tg-icon-muted)' }}
         aria-label="voice"
       >
         <svg

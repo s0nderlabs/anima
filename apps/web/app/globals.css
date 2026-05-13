@@ -1,5 +1,7 @@
 @import 'tailwindcss';
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme {
   --color-cream: #f9f8f6;
   --color-cream-deep: #f2f1ee;
@@ -10,6 +12,13 @@
   --color-ink-3: #8b8b88;
   --color-border: rgba(16, 15, 9, 0.09);
   --color-border-strong: rgba(16, 15, 9, 0.2);
+
+  /* Raw RGB triplets so framer-motion / dynamic styles can compose
+     theme-aware rgba() values without re-reading the swapped tokens. */
+  --rgb-cream: 249 248 246;
+  --rgb-ink: 16 15 9;
+  --rgb-shadow: 60 50 30;
+  --rgb-shadow-strong: 16 15 9;
 
   --font-display: var(--font-fraunces);
   --font-italic: var(--font-instrument-serif);
@@ -25,6 +34,142 @@
   --shadow-doc: 0 30px 80px -40px rgba(70, 50, 30, 0.35);
   --shadow-card: 0 20px 50px -30px rgba(50, 35, 22, 0.28);
   --shadow-doc-asym: 18px 28px 60px -34px rgba(45, 30, 18, 0.42);
+}
+
+/* Dark token swap.  Two activation paths so dark-mode systems never
+   flash a light frame:
+     1. `@media (prefers-color-scheme: dark) html:not(.light)`  ,
+        applies BEFORE any JS runs, so the very first paint on a
+        dark system is already dark even if the inline script gets
+        delayed by HMR / hydration / network jitter.
+     2. `html.dark` , explicit class set by the user toggle or the
+        pre-hydration inline script. Authoritative override for any
+        case where the user chose dark on a light OS.
+   The `:not(.light)` keeps the media query from clobbering a user
+   who explicitly chose light on a dark OS. */
+/* TG mock palette tokens (consumed by components/sections/hero/TgCanvas.tsx).
+   Co-located here so theme flips skin the chat via CSS variable cascade
+   instead of forcing a full TG re-render through useTheme(). */
+:root {
+  --tg-chat-bg: #dfe9d8;
+  --tg-header-bg: rgba(247, 247, 247, 0.88);
+  --tg-composer-bg: rgba(247, 247, 247, 0.88);
+  --tg-composer-input-bg: #fff;
+  --tg-composer-input-border: rgba(0, 0, 0, 0.15);
+  --tg-bubble-out-bg: #e1ffc7;
+  --tg-bubble-in-bg: #ffffff;
+  --tg-text: #000000;
+  --tg-text-muted: rgba(0, 0, 0, 0.45);
+  --tg-text-tool-tool: rgba(0, 0, 0, 0.55);
+  --tg-text-tool-colon: rgba(0, 0, 0, 0.45);
+  --tg-text-tool-args: rgba(0, 0, 0, 0.7);
+  --tg-text-tool-body: rgba(0, 0, 0, 0.78);
+  --tg-doodle-stroke: rgba(46, 140, 93, 0.32);
+  --tg-divider: rgba(0, 0, 0, 0.1);
+  --tg-name: #000000;
+  --tg-typing-dot: #8a8a8e;
+  --tg-check-blue: #4ea7e6;
+  --tg-accent: #007aff;
+  --tg-online: #3aa66e;
+  --tg-icon-muted: #8e8e93;
+  --tg-placeholder: #8a8a8e;
+  --tg-bubble-shadow: 0 1px 1px rgba(0, 0, 0, 0.07);
+}
+
+@media (prefers-color-scheme: dark) {
+  html:not(.light) {
+    --color-cream: #0e0d0a;
+    --color-cream-deep: #161410;
+    --color-paper: #14120e;
+    --color-cream-warm: #1f1c14;
+    --color-ink: #efece3;
+    --color-ink-2: #a8a59e;
+    --color-ink-3: #6f6c65;
+    --color-border: rgba(239, 236, 227, 0.1);
+    --color-border-strong: rgba(239, 236, 227, 0.22);
+
+    --rgb-cream: 14 13 10;
+    --rgb-ink: 239 236 227;
+    --rgb-shadow: 0 0 0;
+    --rgb-shadow-strong: 0 0 0;
+
+    --shadow-doc: 0 30px 80px -40px rgba(0, 0, 0, 0.75);
+    --shadow-card: 0 20px 50px -30px rgba(0, 0, 0, 0.7);
+    --shadow-doc-asym: 18px 28px 60px -34px rgba(0, 0, 0, 0.78);
+
+    --tg-chat-bg: #0e1621;
+    --tg-header-bg: rgba(23, 33, 43, 0.92);
+    --tg-composer-bg: rgba(23, 33, 43, 0.92);
+    --tg-composer-input-bg: #182533;
+    --tg-composer-input-border: rgba(255, 255, 255, 0.06);
+    --tg-bubble-out-bg: #3a6b8f;
+    --tg-bubble-in-bg: #182533;
+    --tg-text: #ffffff;
+    --tg-text-muted: rgba(255, 255, 255, 0.55);
+    --tg-text-tool-tool: rgba(255, 255, 255, 0.7);
+    --tg-text-tool-colon: rgba(255, 255, 255, 0.5);
+    --tg-text-tool-args: rgba(255, 255, 255, 0.78);
+    --tg-text-tool-body: rgba(255, 255, 255, 0.85);
+    --tg-doodle-stroke: rgba(120, 200, 160, 0.16);
+    --tg-divider: rgba(255, 255, 255, 0.08);
+    --tg-name: #ffffff;
+    --tg-typing-dot: #6e7681;
+    --tg-check-blue: #7cbaf0;
+    --tg-accent: #7cbaf0;
+    --tg-online: #5dd5b6;
+    --tg-icon-muted: #7d8b95;
+    --tg-placeholder: #7d8b95;
+    --tg-bubble-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+
+    color-scheme: dark;
+  }
+}
+
+html.dark {
+  --color-cream: #0e0d0a;
+  --color-cream-deep: #161410;
+  --color-paper: #14120e;
+  --color-cream-warm: #1f1c14;
+  --color-ink: #efece3;
+  --color-ink-2: #a8a59e;
+  --color-ink-3: #6f6c65;
+  --color-border: rgba(239, 236, 227, 0.1);
+  --color-border-strong: rgba(239, 236, 227, 0.22);
+
+  --rgb-cream: 14 13 10;
+  --rgb-ink: 239 236 227;
+  --rgb-shadow: 0 0 0;
+  --rgb-shadow-strong: 0 0 0;
+
+  --shadow-doc: 0 30px 80px -40px rgba(0, 0, 0, 0.75);
+  --shadow-card: 0 20px 50px -30px rgba(0, 0, 0, 0.7);
+  --shadow-doc-asym: 18px 28px 60px -34px rgba(0, 0, 0, 0.78);
+
+  --tg-chat-bg: #0e1621;
+  --tg-header-bg: rgba(23, 33, 43, 0.92);
+  --tg-composer-bg: rgba(23, 33, 43, 0.92);
+  --tg-composer-input-bg: #182533;
+  --tg-composer-input-border: rgba(255, 255, 255, 0.06);
+  --tg-bubble-out-bg: #3a6b8f;
+  --tg-bubble-in-bg: #182533;
+  --tg-text: #ffffff;
+  --tg-text-muted: rgba(255, 255, 255, 0.55);
+  --tg-text-tool-tool: rgba(255, 255, 255, 0.7);
+  --tg-text-tool-colon: rgba(255, 255, 255, 0.5);
+  --tg-text-tool-args: rgba(255, 255, 255, 0.78);
+  --tg-text-tool-body: rgba(255, 255, 255, 0.85);
+  --tg-doodle-stroke: rgba(120, 200, 160, 0.16);
+  --tg-divider: rgba(255, 255, 255, 0.08);
+  --tg-name: #ffffff;
+  --tg-typing-dot: #6e7681;
+  --tg-check-blue: #7cbaf0;
+  --tg-accent: #7cbaf0;
+  --tg-online: #5dd5b6;
+  --tg-icon-muted: #7d8b95;
+  --tg-placeholder: #7d8b95;
+  --tg-bubble-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+
+  color-scheme: dark;
 }
 
 @layer base {
@@ -47,6 +192,17 @@
     background: var(--color-cream);
     color: var(--color-ink);
     overflow-x: hidden;
+  }
+  /* Gate the smooth bg/color crossfade behind a one-frame-late
+     attribute set by the pre-hydration script. Without this gate,
+     the body transition fires on the very first commit, which paints
+     light cream and animates to dark over 280ms (the half-second
+     flash). With the gate, first paint is instant and only subsequent
+     toggle clicks crossfade. */
+  html[data-theme-ready='1'] body {
+    transition:
+      background-color 280ms ease,
+      color 280ms ease;
   }
   ::selection {
     background: var(--color-ink);

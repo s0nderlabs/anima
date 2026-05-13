@@ -1,5 +1,7 @@
 import { MotionProvider } from '@/components/MotionProvider'
 import { PaperNoise } from '@/components/PaperNoise'
+import { ThemeProvider } from '@/components/theme/ThemeProvider'
+import { ThemeScript } from '@/components/theme/ThemeScript'
 import type { Metadata, Viewport } from 'next'
 import { Fraunces, Geist_Mono, Instrument_Serif, Outfit } from 'next/font/google'
 import localFont from 'next/font/local'
@@ -82,7 +84,10 @@ export const metadata: Metadata = {
 }
 
 export const viewport: Viewport = {
-  themeColor: '#f6f1e6',
+  themeColor: [
+    { media: '(prefers-color-scheme: light)', color: '#f9f8f6' },
+    { media: '(prefers-color-scheme: dark)', color: '#0e0d0a' },
+  ],
   width: 'device-width',
   initialScale: 1,
 }
@@ -92,14 +97,20 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html
       lang="en"
       className={`${fraunces.variable} ${instrumentSerif.variable} ${outfit.variable} ${geistMono.variable} ${calSans.variable}`}
+      suppressHydrationWarning
     >
+      <head>
+        <ThemeScript />
+      </head>
       <body>
-        <Providers>
-          <MotionProvider>
-            <PaperNoise />
-            {children}
-          </MotionProvider>
-        </Providers>
+        <ThemeProvider>
+          <Providers>
+            <MotionProvider>
+              <PaperNoise />
+              {children}
+            </MotionProvider>
+          </Providers>
+        </ThemeProvider>
       </body>
     </html>
   )

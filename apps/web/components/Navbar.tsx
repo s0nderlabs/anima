@@ -147,9 +147,13 @@ export function Navbar() {
   const chromeShadowAlpha = useTransform(smoothScroll, [morphStart, morphEnd], [0, 0.22])
   const chromeBorderAlpha = useTransform(smoothScroll, [morphStart, morphEnd], [0, 0.1])
 
-  const chromeBg = useMotionTemplate`rgba(249, 248, 246, ${chromeOpacity})`
-  const chromeBorder = useMotionTemplate`1px solid rgba(16, 15, 9, ${chromeBorderAlpha})`
-  const chromeShadow = useMotionTemplate`0 18px 50px -28px rgba(60, 50, 30, ${chromeShadowAlpha})`
+  // Use the raw-rgb tokens declared in globals.css so the pill chrome
+  // tracks the active theme (cream stays cream in light, deep-roast in
+  // dark). framer-motion's useMotionTemplate emits the literal CSS each
+  // frame, so the var() lookup happens at paint time.
+  const chromeBg = useMotionTemplate`rgb(var(--rgb-cream) / ${chromeOpacity})`
+  const chromeBorder = useMotionTemplate`1px solid rgb(var(--rgb-ink) / ${chromeBorderAlpha})`
+  const chromeShadow = useMotionTemplate`0 18px 50px -28px rgb(var(--rgb-shadow) / ${chromeShadowAlpha})`
   const chromeFilter = useMotionTemplate`blur(${chromeBlur}px)`
 
   return (
