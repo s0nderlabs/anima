@@ -4,6 +4,22 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.21] - 2026-05-13
+
+### Added
+
+- **`anima --version` / `-v` / `version`** prints the CLI's installed version. Reads `package.json` via a path relative to the module so it works in dev workspace, `bun add -g` global installs, and Bun's per-project content store.
+
+### Fixed
+
+- **`anima --help` and `--version` no longer launch the TUI.** The argv dispatcher previously rewrote any first arg starting with `--` to the default `chat` subcommand (so `anima --yolo` worked as a shorthand). The side effect was that `anima --help` dropped into the chat REPL instead of printing help, and the `case '--help'` branch in the switch was unreachable dead code. The rewrite now excludes `--help` and `--version` as top-level commands.
+
+### Internal
+
+- `resolveCliVersion()` in `packages/cli/src/util/cli-version.ts` switched from `import.meta.resolve('@s0nderlabs/anima/package.json')` (which failed in monorepo workspace runs because the cli package has no `exports` entry for `./package.json`) to a direct `fs.readFile` of `../../package.json` relative to `import.meta.url`. Same output in installed mode, now works in dev too. Used by `--version` and by `commands/upgrade.ts` + `commands/init/sandbox-provision.ts` to pin the gateway npm install version.
+
+[0.21.21]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.21
+
 ## [0.21.20] - 2026-05-13
 
 ### Changed

@@ -6,7 +6,10 @@
 const argv = process.argv.slice(2)
 // First arg starting with `--` means the user invoked the default subcommand
 // (chat) with flags, e.g. `anima --yolo`. Treat it as if `chat` were implicit.
-const sub = argv[0]?.startsWith('--') ? 'chat' : argv[0]
+// Exception: `--help` and `--version` are top-level commands, not chat flags.
+const first = argv[0]
+const isTopLevelFlag = first === '--help' || first === '--version'
+const sub = first?.startsWith('--') && !isTopLevelFlag ? 'chat' : first
 
 async function main(): Promise<void> {
   switch (sub) {
@@ -286,6 +289,14 @@ async function main(): Promise<void> {
       printHelp()
       return
     }
+    case '-v':
+    case '--version':
+    case 'version': {
+      const { resolveCliVersion } = await import('./util/cli-version')
+      const v = await resolveCliVersion()
+      console.log(v)
+      return
+    }
     default: {
       console.log(`Unknown command: ${sub}`)
       printHelp()
@@ -332,7 +343,8 @@ function printHelp(): void {
       '  anima admin <sub>         operator-only ops endpoints  (subs: autotopup-tick)',
       '                            autotopup-tick = live-fire AutoTopupManager poll cycle now',
       '  anima inspect [ref]       audit on-chain memory slots (flags: --slot, --tx, --raw, --diff, --json, --full, --out <dir>)',
-      '  anima help                show this message',
+      '  anima version             print CLI version  (aliases: --version, -v)',
+      '  anima help                show this message  (aliases: --help, -h)',
       '',
     ].join('\n'),
   )
