@@ -167,6 +167,71 @@ export class AnimaAgentNFTClient extends AnimaAgentNFTReader {
     }
     return hash
   }
+
+  /**
+   * ERC-7857 intelligent transfer: rewrites all 6 IntelligentData slot hashes
+   * AND moves ownership in a single atomic tx, gated by an oracle ECDSA proof.
+   *
+   * The `oracleSignature` must be produced by signing the proof preimage with
+   * the address returned by `teeOracle()` on the contract. Use
+   * `signTransferProof` from `./transfer` to build it.
+   *
+   * Caller (the wallet behind this client) must be either the `from` address,
+   * a per-token approved operator, or `setApprovalForAll(from, caller)`.
+   * In the standard transfer flow, the `from` operator's wallet IS this client.
+   */
+  async iTransferFrom(args: {
+    from: Address
+    to: Address
+    tokenId: bigint
+    newHashes: readonly Hex[]
+    proofNonce: Hex
+    oracleSignature: Hex
+  }): Promise<Hex> {
+    if (args.newHashes.length === 0) {
+      throw new Error('iTransferFrom: newHashes empty')
+    }
+    // Atomic 6-slot rewrite + ECDSA recover + transfer; ~250-400k gas in
+    // practice. Same explicit-gas pattern as mint/update for WC compatibility.
+    const gas = BigInt(args.newHashes.length) * 60_000n + 200_000n
+    const gasPrice = await getGasPriceWithFloor(this.publicClient)
+    const hash = await this.walletClient.writeContract({
+      address: this.contractAddress,
+      abi: AGENT_NFT_ABI,
+      functionName: 'iTransferFrom',
+      args: [
+        args.from,
+        args.to,
+        args.tokenId,
+        [...args.newHashes],
+        args.proofNonce,
+        args.oracleSignature,
+      ],
+      chain: this.chain,
+      account: this.account,
+      gas,
+      maxFeePerGas: gasPrice,
+      maxPriorityFeePerGas: gasPrice,
+    })
+    const receipt = await waitForReceiptResilient(this.publicClient, hash)
+    if (receipt.status !== 'success') {
+      throw new Error(`iTransferFrom reverted in tx ${hash}`)
+    }
+    return hash
+  }
+
+  /**
+   * Read the address authorized to sign transfer proofs (`teeOracle()` on the
+   * contract). Used by `anima transfer` to detect whether the operator wallet
+   * IS the oracle (MVP path) or a separate signer is required.
+   */
+  async teeOracle(): Promise<Address> {
+    return (await this.publicClient.readContract({
+      address: this.contractAddress,
+      abi: AGENT_NFT_ABI,
+      functionName: 'teeOracle',
+    })) as Address
+  }
 }
 
 /** Build the 6 canonical IntelligentData entries from optional per-slot real hashes. */

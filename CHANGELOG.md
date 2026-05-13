@@ -4,6 +4,20 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.17] - 2026-05-13
+
+### Added
+
+- **`anima transfer <iNFT-ref> --to <addr>` CLI command.** Wires the previously unimplemented ERC-7857 `iTransferFrom` flow end-to-end: re-encrypts the keystore for the recipient, uploads the new blob to 0G Storage, signs the oracle proof, and atomically rewrites all 6 IntelligentData slots + transfers ownership. Memory slots (memory-index, identity, persona, activity-log) pass through unchanged because they're keyed off the agent privkey (stable across transfer); only the keystore slot is re-encrypted, and the profile slot is purged to its bootstrap placeholder by default (`--no-purge` opts out). Supports `--dry-run` (round-trip verifies the new keystore decrypt without chain writes), `--yes` (skip confirmation), and `--recipient-key <hex>` / `ANIMA_RECIPIENT_PRIVKEY` env (skip the recipient picker).
+- **`@s0nderlabs/anima-core` exports** for the transfer building blocks: `transferProofPreimage`, `signTransferProof`, `buildTransferHashes` (in new `identity/transfer.ts`), `reEncryptKeystoreForRecipient` (in `identity/keystore-storage.ts`).
+- **`AnimaAgentNFTClient.iTransferFrom()` + `teeOracle()`** methods (the ABI was already present; only the TS callers were missing).
+
+### Internal
+
+- 23 new unit tests across `transfer.test.ts` (proof preimage, oracle signing, hash building, A→B re-encryption round-trip) and `transfer.test.ts` for CLI argv parsing.
+
+[0.21.17]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.17
+
 ## [0.21.16] - 2026-05-13
 
 ### Fixed
