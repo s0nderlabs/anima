@@ -37,7 +37,11 @@ export interface BuildBootstrapScriptOpts {
   sandboxId: string
   /** EIP-191 checksummed operator address. Stored in container env, used by `verifyChatSig`. */
   operatorAddress: string
-  /** Bootstrap mode. Defaults to 'git' for backward compat. */
+  /**
+   * Bootstrap mode. Defaults to 'npm' (since v0.21.20) because it's ~10x
+   * faster. Callers in cli/src always pass `mode` explicitly via
+   * `resolveBootstrapMode`; this default is defense-in-depth.
+   */
   mode?: BootstrapMode
   /**
    * Git mode: tag/branch/SHA to clone (e.g. 'v0.15.0', 'main', or commit SHA).
@@ -265,7 +269,7 @@ function buildNpmInnerScript(opts: BuildBootstrapScriptOpts, aptList: string): s
 }
 
 export function buildBootstrapScript(opts: BuildBootstrapScriptOpts): BuildBootstrapScriptResult {
-  const mode: BootstrapMode = opts.mode ?? 'git'
+  const mode: BootstrapMode = opts.mode ?? 'npm'
   const aptPkgs = [...DEFAULT_APT_PACKAGES, ...(opts.extraAptPackages ?? [])]
   const aptList = [...new Set(aptPkgs)].join(' ')
   const inner =

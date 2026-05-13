@@ -36,7 +36,10 @@ export interface BuildUpgradeScriptOpts {
   operatorAddress: string
   /**
    * Bootstrap mode of the existing container. CLI should probe this via a
-   * small `execInToolbox` call before invoking upgrade. Defaults to 'git'.
+   * small `execInToolbox` call before invoking upgrade (so the upgrade
+   * script matches whatever mode the container was originally bootstrapped
+   * in). Default is 'npm' (since v0.21.20) as the safer fallback when the
+   * probe is bypassed.
    */
   mode?: BootstrapMode
   /**
@@ -197,7 +200,7 @@ function buildNpmInnerScript(opts: BuildUpgradeScriptOpts): string {
 }
 
 export function buildUpgradeScript(opts: BuildUpgradeScriptOpts): BuildUpgradeScriptResult {
-  const mode: BootstrapMode = opts.mode ?? 'git'
+  const mode: BootstrapMode = opts.mode ?? 'npm'
   const inner = mode === 'npm' ? buildNpmInnerScript(opts) : buildGitInnerScript(opts)
 
   const innerPath = '/tmp/anima-upgrade-inner.sh'

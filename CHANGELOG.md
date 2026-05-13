@@ -4,6 +4,22 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.21.20] - 2026-05-13
+
+### Changed
+
+- **Sandbox bootstrap default flipped from `git` to `npm`.** Fresh `anima deploy` and `anima upgrade --reprovision` now install the harness via `bun add -g @s0nderlabs/anima@<version>` (~30-60 sec cold start) instead of cloning the monorepo from GitHub (~5-8 min). The npm path shipped in v0.21.15 as opt-in, was live-verified end-to-end on enigma (v0.21.16 ship report), and lived as opt-in for several releases before this flip — the path is exercised, the default is the only thing changing.
+- **`ANIMA_BOOTSTRAP_REF` auto-implies git mode** when set without an explicit `ANIMA_BOOTSTRAP_MODE`. Preserves existing dev workflows ("deploy `main`", "deploy `<sha>`"). Explicit `ANIMA_BOOTSTRAP_MODE=npm` still wins.
+- **Existing git-bootstrapped containers (specter local + enigma sandbox) are unaffected.** `anima upgrade` probes the container's filesystem (`probeContainerBootstrapMode`) and re-uses whatever mode the container was originally bootstrapped in. No surprise mode-flip on in-place upgrades.
+
+### Internal
+
+- New `resolveBootstrapMode(env)` helper in `packages/cli/src/util/bootstrap-mode.ts` consolidates env-var resolution. 7 unit tests cover default, explicit override, REF auto-imply, MODE-wins-over-REF, garbage MODE fall-through, and empty-string REF.
+- `packages/gateway/src/bootstrap.ts` and `packages/gateway/src/upgrade-script.ts` defense-in-depth defaults flipped to 'npm' for consistency with `sandbox-provision.ts`.
+- `packages/cli/src/commands/deploy.ts` error-tip language updated: "try forcing git mode (for unreleased commits): `ANIMA_BOOTSTRAP_MODE=git anima deploy`" (was: the inverse).
+
+[0.21.20]: https://github.com/s0nderlabs/anima/releases/tag/v0.21.20
+
 ## [0.21.19] - 2026-05-13
 
 ### Fixed

@@ -8,10 +8,14 @@ import {
 } from './bootstrap'
 
 describe('buildBootstrapScript', () => {
+  // baseOpts pins mode='git' so the legacy assertions about apt + git clone +
+  // bun install retry chains keep exercising the git inner-script. The dedicated
+  // "default mode" test below covers the new npm default.
   const baseOpts = {
     sandboxId: 'sbx-abc-123',
     operatorAddress: '0xC635e6Eb223aE14143E23cEEa9440bC773dc87Ec',
     ref: 'v0.15.0',
+    mode: 'git' as const,
   }
 
   // Decodes the base64-baked inner subshell out of the outer `bash -c '...'`
@@ -275,9 +279,11 @@ describe('buildBootstrapScript', () => {
     })
   })
 
-  test('default mode is git when not specified (zero-regression for legacy callers)', () => {
-    const inner = decodeInner()
-    expect(inner).toContain('bootstrap-start (mode=git)')
-    expect(inner).toContain('git clone --depth 1 --branch')
+  test('default mode is npm when not specified (flipped in v0.21.20; ~10x faster cold start)', () => {
+    const { sandboxId, operatorAddress, ref } = baseOpts
+    const inner = decodeInner({ sandboxId, operatorAddress, ref, packageVersion: '0.21.20' })
+    expect(inner).toContain('bootstrap-start (mode=npm)')
+    expect(inner).toContain("bun add -g '@s0nderlabs/anima@0.21.20'")
+    expect(inner).not.toContain('git clone --depth 1 --branch')
   })
 })

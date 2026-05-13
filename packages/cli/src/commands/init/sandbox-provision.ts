@@ -36,6 +36,7 @@ import {
 import { type Address, type Hex, formatEther, hexToBytes, parseEther } from 'viem'
 import type { LocalAccount } from 'viem/accounts'
 import { SandboxClient } from '../../sandbox/client'
+import { resolveBootstrapMode } from '../../util/bootstrap-mode'
 import { resolveCliVersion } from '../../util/cli-version'
 import { withSilencedConsole } from '../../util/silence-console'
 import type { TelegramHandoffSecrets } from '../../util/telegram-secrets'
@@ -75,9 +76,11 @@ export interface SandboxProvisionOpts {
   repoUrl?: string
   /**
    * Bootstrap mode: 'git' clones monorepo from GitHub; 'npm' installs
-   * @s0nderlabs/anima via `bun add -g`. Defaults to ANIMA_BOOTSTRAP_MODE env
-   * or 'git'. Npm mode is ~10x faster (~30-60 sec vs 5-8 min cold start) but
-   * requires a published version (no branches/SHAs).
+   * @s0nderlabs/anima via `bun add -g`. Defaults to npm (since v0.21.20)
+   * because it's ~10x faster (~30-60 sec vs 5-8 min cold start). Falls back
+   * to git when ANIMA_BOOTSTRAP_REF is set or ANIMA_BOOTSTRAP_MODE=git
+   * (unreleased-code testing). See `resolveBootstrapMode` in
+   * `cli/src/util/bootstrap-mode.ts` for the full env resolution.
    */
   mode?: import('@s0nderlabs/anima-gateway').BootstrapMode
   /**
@@ -214,7 +217,7 @@ export async function runSandboxProvision(
   // the explicit `githubToken` opt). Token is embedded in the clone URL inside
   // the bootstrap script. Public repos skip auth entirely.
   const githubToken = opts.githubToken ?? process.env.ANIMA_GITHUB_TOKEN
-  const mode = opts.mode ?? (process.env.ANIMA_BOOTSTRAP_MODE === 'npm' ? 'npm' : 'git')
+  const mode = opts.mode ?? resolveBootstrapMode()
   const packageVersion =
     opts.packageVersion ?? (mode === 'npm' ? await resolveCliVersion() : undefined)
   const { script } = buildBootstrapScript({
