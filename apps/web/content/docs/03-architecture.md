@@ -39,18 +39,18 @@ The `routeLoop` pulls one event at a time, calls `brain.infer({ event })`, dispa
 
 ## The gateway pattern
 
-A `Listener` is a small object with `{ name, source, start(queue), stop() }`. Plugins contribute listeners via `ctx.registerListener`. Six event sources are defined:
+A `Listener` is a small object with `{ name, source, start(queue), stop() }`. Plugins contribute listeners via `ctx.registerListener`. Eight event sources are defined in the type union; four have live emitters today.
 
 | Source | Listener | Where |
 |---|---|---|
 | stdin | Local CLI input | `packages/cli/src/commands/chat.tsx` |
-| cron | Scheduled triggers | Reserved, not yet shipped |
-| webhook | HTTP triggers | Reserved, not yet shipped |
 | a2a | Agent-to-agent messages | `packages/plugin-comms/src/listener.ts` |
 | marketplace | ERC-8183 job events | `packages/plugin-comms/src/market-listener.ts` |
-| chain | Arbitrary contract subscriptions | `packages/plugin-onchain/src/...` |
 | telegram | Telegram Bot API long-poll | `packages/plugin-telegram/src/listener.ts` |
-| internal | Brain self-trigger | `packages/core/src/events` |
+| cron | Scheduled triggers | Reserved, not yet shipped |
+| webhook | HTTP triggers | Reserved, not yet shipped |
+| chain | Arbitrary contract subscriptions | Reserved, not yet shipped |
+| internal | Brain self-trigger | Reserved (type only), not yet shipped |
 
 Disable a plugin and its listeners stop firing. The queue and the router stay in core.
 
@@ -83,6 +83,7 @@ When deployed to 0G Sandbox the gateway daemon at `packages/gateway/src/server.t
 - `POST /chat` for operator-signed chat input.
 - `POST /sync` for explicit memory flushes.
 - `POST /approval/:id/respond` for approval modal responses.
+- `POST /admin/autotopup/tick` for operator-signed live-fire of one `AutoTopupManager` poll cycle.
 
 A 30-minute self-ping (`packages/gateway/src/heartbeat.ts`) prevents Daytona's idle-archive cycle. The standalone gateway daemon model means TUI launch and TUI exit never affect the brain's availability for Telegram or A2A.
 

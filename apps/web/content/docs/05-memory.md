@@ -76,7 +76,7 @@ Source: [`packages/core/src/memory/index-file.ts`](https://github.com/s0nderlabs
 
 ## Sync to 0G
 
-A memory write goes to disk first, fast. The `MemorySyncManager` (`packages/core/src/memory/sync.ts`) watches the partition. When a slot has changed (or `anima sync` is called), it:
+A memory write goes to disk first, fast. The `MemorySyncManager` (class in `packages/core/src/memory/sync-manager.ts`, pipeline helpers in `packages/core/src/memory/sync.ts`) watches the partition. When a slot has changed (or `anima sync` is called), it:
 
 1. Reads the changed file from disk.
 2. Encrypts it with `deriveMemoryKey(agentPrivkey)` (HKDF from the agent's private key).
@@ -89,7 +89,7 @@ Source: [`packages/core/src/memory/sync.ts`](https://github.com/s0nderlabs/anima
 
 ## Threat scan
 
-Every memory write passes through `scanForThreats()` at `packages/core/src/memory/scan.ts`. Six regex patterns block known prompt-injection vectors:
+Every memory write passes through `scanForThreats()` at `packages/core/src/memory/scan.ts`. Seven regex patterns block known prompt-injection and exfiltration vectors:
 
 - `ignore previous instructions` and variants
 - role override attempts ("you are now ...")
@@ -97,6 +97,7 @@ Every memory write passes through `scanForThreats()` at `packages/core/src/memor
 - private key dump requests
 - invisible Unicode control characters
 - transfer/claim phrases that could fake operator authority
+- exfiltration sinks: shell pipelines that POST or pipe to `curl`, `nc`, `wget`
 
 If a write matches, the tool returns an error to the brain explaining which pattern matched. The write does not land. The brain decides whether to retry with sanitized content or abandon the save.
 
@@ -106,7 +107,7 @@ Source: [`packages/core/src/memory/scan.ts`](https://github.com/s0nderlabs/anima
 
 Slot 5 stores a rolling gzip-compressed sequence of recent turns. The blob format is `activity-log v=2` (gzip + JSONL inside). Anchored on chain so an auditor can replay the agent's tool calls. ~4.3x size reduction vs uncompressed; the change shipped in v0.21.14.
 
-Source: [`packages/core/src/runtime/activity-log.ts`](https://github.com/s0nderlabs/anima/blob/main/packages/core/src/runtime/activity-log.ts).
+Source: [`packages/core/src/runtime/activity.ts`](https://github.com/s0nderlabs/anima/blob/main/packages/core/src/runtime/activity.ts) (in-process JSONL append) plus [`packages/core/src/memory/activity-sync.ts`](https://github.com/s0nderlabs/anima/blob/main/packages/core/src/memory/activity-sync.ts) (gzip-encrypt-upload).
 
 ## Frozen prefix
 

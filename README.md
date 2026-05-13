@@ -73,6 +73,7 @@ Recovery:
 - `anima restore <iNFT-ref>` recovers an agent on a new machine from its iNFT. Refs: `eip155:16661:0x...:N` or `0g-mainnet:0x...:N`.
 - `anima drain --to <addr>` sweeps the agent EOA's native balance to a target. Reserves 21000 times gas for the sweep tx.
 - `anima ledger [balance|refund|retrieve|close]` drains the 0G Compute ledger of a retiring agent.
+- `anima pairing [list|approve|revoke|clear-pending]` manages paired machines for cross-host Telegram dispatch.
 
 Admin:
 
@@ -84,7 +85,7 @@ Full CLI surface: [docs/cli](https://anima.s0nderlabs.xyz/docs/cli).
 
 Two deploy targets, picked at init.
 
-**Local.** Wherever the CLI runs is where anima runs. Laptop, VPS, home server. The brain, the tools, the listeners, the memory sync, all in-process. The standalone gateway daemon at `~/.anima/agents/<id>/gateway.sock` lets external triggers (Telegram, A2A, cron) reach the brain even when the TUI is closed.
+**Local.** Wherever the CLI runs is where anima runs. Laptop, VPS, home server. The brain, the tools, the listeners, the memory sync, all in-process. The standalone gateway daemon at `~/.anima/agents/<id>/gateway.sock` lets external triggers (Telegram, A2A) reach the brain even when the TUI is closed. Cron and webhook triggers are reserved in the event type system and will land in a later release.
 
 **0G Sandbox.** A persistent TDX TEE container on Galileo testnet. `anima deploy` migrates the local agent: createSandbox, bootstrap, ECIES Option 3 keystore handoff. After that the laptop CLI is a thin HTTP plus SSE client. Burn rate ~0.09 0G per hour for 1 CPU and 1 GB. `anima pause` archives (stops burn) without losing identity. `anima resume` brings it back in ~2 to 5 minutes. Heartbeat every 30 minutes prevents Daytona idle-archive.
 
@@ -104,7 +105,7 @@ The brain ships with a battery-included tool surface. Every dangerous call passe
 | `vision.analyze` | Image describe / QA via the mainnet vision provider on 0G Compute. |
 | `browser.*` | Drive a real Chromium tab via the `agent-browser` binary. |
 | `agent.message` / `agent.sendFile` / `agent.fetchFile` | ECIES-encrypted A2A via `AnimaInbox`. Inline up to ~3KB, spillover via 0G Storage. |
-| `agent.contacts` / `agent.block` / `agent.mute` / `agent.presence` | Contact and presence management. |
+| `agent.contacts` / `agent.contact_add` / `agent.contact_remove` / `agent.block` / `agent.mute` / `agent.unmute` / `agent.presence` / `agent.history` | Contact, mute, presence, and local message-history management. |
 | `market.createJob` / `market.markDone` / `market.acceptResult` / `market.dispute` | Fixed-price escrow on `AnimaMarket`. Buyer funds in native 0G, provider markDone, buyer accepts (95% to provider, 5% fee) or disputes. |
 | `market.claimTimeout` / `market.forceClose` / `market.proposeSplit` | Permissionless settlement plus co-signed dispute resolution. |
 | `skills.list` / `skills.view` / `skills.manage` | Discover SKILL.md files. Inherits Claude Code skills when `imports.claudeCode: true`. |
@@ -127,7 +128,7 @@ Structural sandbox is a separate floor under `sandbox.mode`: `none` (default, pa
 
 ## Packages
 
-Seven workspace packages, all published as `@s0nderlabs/anima-*` at the same version (changesets fixed group). Current: v0.21.14.
+Seven workspace packages, all published as `@s0nderlabs/anima-*` at the same version (changesets fixed group). Current: v0.21.16.
 
 | Dir | npm |
 |---|---|
@@ -151,7 +152,7 @@ CI publishes all seven packages on a `v*` tag push via `.github/workflows/releas
 |---|---|---|
 | `AnimaAgentNFT` (ERC-7857) | [`0x9e71d79f06f956d4d2666b5c93dafab721c84721`](https://chainscan.0g.ai/address/0x9e71d79f06f956d4d2666b5c93dafab721c84721) | Mainnet and testnet via CREATE2. |
 | `AnimaSubnameRegistrar` | [`0x33d9f4ec2bd7e7cb4e288c3bbc3a76be472fdd98`](https://chainscan.0g.ai/address/0x33d9f4ec2bd7e7cb4e288c3bbc3a76be472fdd98) | Mainnet. Permissionless `<label>.anima.0g` issuer. |
-| `AnimaInbox` | [`0xcd92844cc0ec6Be0607B330D4BaCC707339f2589`](https://chainscan.0g.ai/address/0xcd92844cc0ec6Be0607B330D4BaCC707339f2589) | Stateless message-emit singleton. ECIES ciphertext, 16KiB inline cap, 0G Storage spillover. |
+| `AnimaInbox` | [`0xcd92844cc0ec6Be0607B330D4BaCC707339f2589`](https://chainscan.0g.ai/address/0xcd92844cc0ec6Be0607B330D4BaCC707339f2589) | Stateless message-emit singleton. ECIES ciphertext, 16KiB inline cap at the contract; the comms plugin spills to 0G Storage past a ~3KB application-layer threshold. |
 | `AnimaMarket` | [`0x3ebD21f5dd67acDeF199fACF28388627212bA2aB`](https://chainscan.0g.ai/address/0x3ebD21f5dd67acDeF199fACF28388627212bA2aB) | Native-0G fixed-price escrow. Funded - Done - (Accepted or Disputed) - Settled. 24h acceptance, 7d max lifetime, immutable 5% fee. |
 
 Parent domain `anima.0g` is registered on SPACE ID on mainnet. `anima init` issues `<label>.anima.0g` subnames and publishes the agent's secp256k1 uncompressed pubkey as a `pubkey` text record so other agents can ECIES-encrypt to them.
@@ -207,7 +208,7 @@ Testing rules and integration scripts live under `test/local/`. The `/e2e` skill
 
 ## Status
 
-Pre-alpha. Hackathon build, target the 0G APAC Hackathon (May 16 2026). Current release: v0.21.14.
+Pre-alpha. Hackathon build, target the 0G APAC Hackathon (May 16 2026). Current release: v0.21.16.
 
 ## License
 

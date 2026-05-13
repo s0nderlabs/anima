@@ -33,7 +33,7 @@ export default defineConfig({
     provider: '0xPROVIDER...',
     model: 'qwen3-coder-plus',
   },
-  plugins: ['onchain', 'comms', 'system', 'telegram'],
+  plugins: ['onchain', 'comms', 'system', 'telegram'],  // 'telegram' opt-in; default is just the first three
 })
 ```
 
@@ -112,13 +112,13 @@ economy: {
     enabled: true,
     pollIntervalMs: 5 * 60_000,   // every 5 min
     compute: {
-      lowThreshold: 0.5,           // 0G
+      lowThreshold: 1.7,           // 0G; raised from 0.5 to absorb a single qwen3.6-plus inference lock
       topUpAmount: 1.0,            // 0G
-      maxPerDay: 5.0,              // 0G
+      maxPerDay: 5,                // 0G
     },
     wallet: {
-      notifyThreshold: 0.3,        // notify operator when EOA drops below
-      minRetainedAfterTopup: 0.05, // never spend below this in a top-up
+      notifyThreshold: 2.0,        // notify operator when EOA drops below
+      minRetainedAfterTopup: 0.1,  // never spend below this in a top-up
     },
   },
 }

@@ -75,7 +75,7 @@ In sandbox mode the laptop CLI is a thin client over HTTP and SSE. Tool indicato
 
 ## Gateway
 
-`anima gateway [start|stop|status|logs|run]` manages the local gateway daemon. Local mode runs an always-on `anima-gateway-local` process bound to `~/.anima/agents/<id>/gateway.sock`. Telegram, A2A, and cron events route through it even when the TUI is closed.
+`anima gateway [start|stop|restart|status|logs|run]` manages the local gateway daemon. Local mode runs an always-on `anima-gateway-local` process bound to `~/.anima/agents/<id>/gateway.sock`. Telegram and A2A events route through it even when the TUI is closed (cron and webhook listeners are reserved for a later release).
 
 ## Telegram
 
@@ -83,7 +83,7 @@ In sandbox mode the laptop CLI is a thin client over HTTP and SSE. Tool indicato
 
 ## Pairing
 
-`anima pairing [list|approve|revoke|clear]` manages paired machines. OTP-based; useful for cross-machine Telegram dispatch where the gateway is on a different host than the operator's phone.
+`anima pairing [list|approve|revoke|clear-pending]` manages paired machines. OTP-based; useful for cross-machine Telegram dispatch where the gateway is on a different host than the operator's phone.
 
 ## Admin
 

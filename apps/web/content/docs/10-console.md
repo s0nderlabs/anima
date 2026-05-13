@@ -41,7 +41,7 @@ Source: [`apps/web/components/console`](https://github.com/s0nderlabs/anima/tree
 
 ## SIWE and sessions
 
-`POST /api/auth/nonce` issues a random nonce. The wallet signs the EIP-4361 message that includes the nonce. `POST /api/auth/verify` checks the signature, validates the nonce hasn't been replayed, and writes the iron-session cookie. `GET /api/auth/me` returns the current session. `POST /api/auth/logout` clears it.
+`GET /api/auth/nonce` issues a random nonce. The wallet signs the EIP-4361 message that includes the nonce. `POST /api/auth/verify` checks the signature, validates the nonce hasn't been replayed, and writes the iron-session cookie. `GET /api/auth/me` returns the current session. `POST /api/auth/logout` clears it.
 
 No server-held key material. The cookie is signed (HMAC) but contains only the address and chainId; the seal secret protects against forgery.
 
@@ -55,13 +55,13 @@ Decryption follows the same protocol as the CLI:
 
 ```
 sig = operatorWallet.signTypedData(EIP712_DOMAIN, EIP712_TYPES, message)
-key = HKDF-SHA256(sig, info='anima-keystore-v1')
+key = HKDF-SHA256(sig, info='anima-keystore-aead-v1')
 plaintext = AES-256-GCM.decrypt(blob.iv, blob.tag, blob.ct, key)
 ```
 
 EIP-712 domain includes the iNFT contract address, the token id, and (for v0.6+ keystores) the chainId. The console tries with and without `chainId` for legacy keystore compat per `feedback-tokenid-to-agenteoa-via-updated-event` and v0.5 migration notes.
 
-`agentPrivkey` and `memoryKey` are placed into a React context. The page-level layout ensures wagmi's `useConnect({ connector })` is defensively called when `useAccount.address` is null after a hard navigation, because kura and some wallets return `[]` from `eth_accounts` after a hard nav (`feedback-kura-no-persistent-auth-across-hard-nav`).
+`agentPrivkey` and `memoryKey` are placed into a React context. The unlock component defensively calls wagmi's `useConnect({ connector })` when `useAccount.address` is null after a hard navigation, because kura and some wallets return `[]` from `eth_accounts` after a hard nav (`feedback-kura-no-persistent-auth-across-hard-nav`).
 
 Source: [`apps/web/components/console/UnlockKeystore.tsx`](https://github.com/s0nderlabs/anima/blob/main/apps/web/components/console/UnlockKeystore.tsx).
 

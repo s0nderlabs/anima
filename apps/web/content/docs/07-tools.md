@@ -42,7 +42,7 @@ Source: [`packages/plugin-system`](https://github.com/s0nderlabs/anima/tree/main
 
 ### plugin-onchain
 
-19 tools for 0G Chain reads and writes. Active when `OnchainRuntimeContext` is supplied. Mainnet and testnet supported, with the JAINE V3 (Uniswap V3 softfork) and Gimo (staking) protocols on mainnet only.
+20 tools for 0G Chain reads and writes. Active when `OnchainRuntimeContext` is supplied. Mainnet and testnet supported, with the JAINE V3 (Uniswap V3 softfork) and Gimo (staking) protocols on mainnet only.
 
 | Tool | What it does |
 |---|---|
@@ -62,7 +62,7 @@ A2A messaging plus the ERC-8183 marketplace. Active when `CommsRuntimeContext` i
 
 | Tool | What it does |
 |---|---|
-| `agent.message` / `agent.sendFile` / `agent.fetchFile` | ECIES-encrypted A2A via `AnimaInbox`. Inline up to ~3KB, spillover via 0G Storage. Files up to 10MB. |
+| `agent.message` / `agent.sendFile` / `agent.fetchFile` | ECIES-encrypted A2A via `AnimaInbox`. The contract caps inline payload at 16KiB; the plugin spills to 0G Storage past a ~3KB application-layer threshold. Files up to 10MB. |
 | `agent.history` | Local SQLite-backed message history per peer. |
 | `agent.contact_add` / `contact_remove` / `contacts` | Contact management. Pending requests until approved. |
 | `agent.block` / `mute` / `unmute` | Hard-deny or silence senders. Duration durations like `30m`, `1d`, `all`. |
@@ -114,7 +114,7 @@ Source: [`packages/core/src/sandbox`](https://github.com/s0nderlabs/anima/tree/m
 
 ## Plugin loading
 
-`loadPlugins(names, deps)` in `packages/core/src/plugins/context.ts` reads the `plugins` array from `anima.config.ts` (default `['onchain', 'comms', 'system', 'telegram']`) and dynamically imports `@s0nderlabs/anima-plugin-<name>`. Each module exports `default.register(ctx)` or a top-level `register(ctx)`. The `PluginContext` gives plugins `registerTool`, `registerListener`, `addHook`, and side-band contexts like `comms`, `onchain`, `telegram`.
+`loadPlugins(names, deps)` in `packages/core/src/plugins/context.ts` reads the `plugins` array from `anima.config.ts` (built-in default `['onchain', 'comms', 'system']`; `'telegram'` is appended by `anima init` when the operator pastes a bot token) and dynamically imports `@s0nderlabs/anima-plugin-<name>`. Each module exports `default.register(ctx)` or a top-level `register(ctx)`. The `PluginContext` gives plugins `registerTool`, `registerListener`, `addHook`, and side-band contexts like `comms`, `onchain`, `telegram`.
 
 A glob-level toggle in config lets you disable individual tools without unloading the whole plugin: `tools: { 'defi.*': false, 'shell.run': false, 'web.fetch': true }`.
 
@@ -129,7 +129,7 @@ Skills are markdown plus YAML frontmatter at four discovery roots:
 3. `~/.claude/skills/<id>/SKILL.md` (when `imports.claudeCode: true`, default)
 4. `~/.claude/plugins/cache/<market>/<plugin>/<version>/skills/<id>/SKILL.md`
 
-Claude Code commands and sub-agent definitions from `~/.claude/plugins/cache/.../commands/` and `.../agents/` get surfaced as `delegate.task` targets. MCP servers from `~/.claude.json` are discovered and proxied. Anima inherits the entire Claude Code plugin ecosystem on day one.
+Claude Code commands and sub-agent definitions from `~/.claude/plugins/cache/.../commands/` and `.../agents/` get surfaced as `delegate.task` targets. MCP servers are discovered from three places: `~/.claude/.mcp.json`, `~/.anima/.mcp.json`, and the per-plugin `mcp.json` files inside each Claude Code plugin cache dir. Anima inherits the entire Claude Code plugin ecosystem on day one.
 
 Source: [`packages/core/src/skills/scanner.ts`](https://github.com/s0nderlabs/anima/blob/main/packages/core/src/skills/scanner.ts), [`packages/core/src/claude-plugins/discovery.ts`](https://github.com/s0nderlabs/anima/blob/main/packages/core/src/claude-plugins/discovery.ts).
 
