@@ -140,7 +140,7 @@ const components: Components = {
     )
   },
   code: ({ children, className }) => {
-    if (!className) {
+    if (!className && !flattenText(children).includes('\n')) {
       return (
         <code className="rounded bg-[var(--color-paper)] px-1.5 py-0.5 font-mono text-[13.5px] text-[var(--color-ink)]">
           {children}
