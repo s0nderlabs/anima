@@ -4,6 +4,14 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.6] - 2026-05-15
+
+### Fixed
+
+- **Bootstrap spinner pinned on `launching bootstrap (...)` for the first 30-180s of `anima init` sandbox provisioning.** v0.24.5 added a 5s heartbeat inside the post-launch poll loop, but the wait that hurts most was the launch call itself: `provider.execInToolbox(sandboxId, launchScript)` blocks on Daytona's HTTP API for 30-180s including retries, and no `progress(...)` fires during that window. Operators on screen-render-eager terminals (iPad SSH clients, certain tmux setups) saw 1400+ identical spinner frames accumulate in scrollback with no movement. Fix wraps `execInToolbox` with a background ticker that fires `progress("launching bootstrap (...) — Ns elapsed (uploading script, beat N)")` every 5s during the call, then cancels via `finally`. Operator now sees the elapsed-seconds counter advance even while the HTTP call is wedged in retries.
+
+[0.24.6]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.6
+
 ## [0.24.5] - 2026-05-15
 
 ### Fixed

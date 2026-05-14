@@ -243,8 +243,29 @@ export async function runSandboxProvision(
     mode === 'npm'
       ? 'apt + bun + npm install + browser deps + harness daemon, ~90-150s (live progress below)'
       : 'apt + bun + git clone + harness daemon, runs ~3-5 min'
-  progress(`launching bootstrap (${installLabel})`)
-  const launchRes = await provider.execInToolbox(sandboxId, { command: script, timeout: 60 })
+  // v0.24.6: ticker keeps the spinner text alive while `execInToolbox` blocks
+  // in HTTP retries against Daytona (worst case ~252s = 3 retries x 60s timeout
+  // + linear backoff). Without this, the spinner sits on `launching bootstrap`
+  // for 30-180s before the poll-loop heartbeat (line 269+) ever runs. Reported
+  // by elpabl0 with screenshots of 1400+ identical frames during atlas init.
+  const launchLabel = `launching bootstrap (${installLabel})`
+  progress(launchLabel)
+  const launchStart = Date.now()
+  let launchTickerRunning = true
+  ;(async () => {
+    while (launchTickerRunning) {
+      await sleep(5000)
+      if (!launchTickerRunning) break
+      const elapsedSec = Math.round((Date.now() - launchStart) / 1000)
+      progress(`${launchLabel}, ${elapsedSec}s elapsed (uploading script)`)
+    }
+  })().catch(() => {})
+  let launchRes: ToolboxExecResponse
+  try {
+    launchRes = await provider.execInToolbox(sandboxId, { command: script, timeout: 60 })
+  } finally {
+    launchTickerRunning = false
+  }
   if (launchRes.exitCode !== 0) {
     const launchOut = extractExecOutput(launchRes)
     throw new Error(
