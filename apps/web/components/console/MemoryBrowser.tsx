@@ -9,6 +9,7 @@ import {
   deriveOperatorBlobKey,
   isOperatorBlobBytes,
 } from '@/lib/crypto/operator-blob'
+import { unpackIfV2 } from '@/lib/crypto/pack-blob'
 import { fetchBlobByRootHash } from '@/lib/storage/og'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
@@ -27,6 +28,12 @@ type MemFile = {
   error?: string
   /** Raw bytes cached so the operator-sign button can decrypt without refetch. */
   rawBytes?: Uint8Array
+  /**
+   * v0.24.0: when the decrypted plaintext is a v2 pack envelope, sibling files
+   * (every partition file except the root) live here. memory-index packs
+   * agent/*.md; profile packs user/*.md.
+   */
+  packedFiles?: Record<string, string>
 }
 
 const MEMORY_SLOTS = ['memory-index', 'identity', 'persona', 'profile'] as const
@@ -100,9 +107,13 @@ export function MemoryBrowser({
               if (profileKey) {
                 const text = await decryptOperatorBlobToText(bytes, profileKey)
                 if (!alive) return
+                const { body, packedFiles } = unpackIfV2(text)
                 setFiles(prev =>
                   prev
-                    ? { ...prev, [name]: { ...prev[name], status: 'ready', body: text } }
+                    ? {
+                        ...prev,
+                        [name]: { ...prev[name], status: 'ready', body, packedFiles },
+                      }
                     : prev,
                 )
                 return
@@ -120,8 +131,11 @@ export function MemoryBrowser({
             }
             const text = await decryptMemoryToText(bytes, memoryKey)
             if (!alive) return
+            const { body, packedFiles } = unpackIfV2(text)
             setFiles(prev =>
-              prev ? { ...prev, [name]: { ...prev[name], status: 'ready', body: text } } : prev,
+              prev
+                ? { ...prev, [name]: { ...prev[name], status: 'ready', body, packedFiles } }
+                : prev,
             )
           } catch (err) {
             if (!alive) return
@@ -305,7 +319,15 @@ function FileDetail({
   label: string
 }) {
   const [mode, setMode] = useState<ViewMode>('prose')
+  /** Which file is selected in the prose pane: undefined = root, else sibling filename. */
+  const [selected, setSelected] = useState<string | undefined>(undefined)
   const canToggle = file.status === 'ready' && !!file.body
+  const packed = file.packedFiles
+  const packedNames = packed ? Object.keys(packed).sort() : []
+  // v0.24.0: when a v2 envelope is detected, viewing a sibling pulls its
+  // content from the packed map instead of the root body.
+  const visibleBody =
+    selected && packed ? (packed[selected] ?? '') : (file.body ?? '')
   return (
     <section className="flex flex-col gap-3">
       <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
@@ -313,7 +335,7 @@ function FileDetail({
           className="font-display text-[clamp(26px,2.6vw,36px)] font-light leading-[1.1] tracking-tight text-[var(--color-ink)]"
           style={{ fontVariationSettings: '"opsz" 96, "SOFT" 30, "WONK" 0' }}
         >
-          {label}
+          {selected ?? label}
         </h2>
         {canToggle ? <ViewToggle mode={mode} onChange={setMode} /> : null}
       </header>
@@ -330,17 +352,80 @@ function FileDetail({
           could not decrypt · {file.error}
         </p>
       ) : (
-        <article className="rounded-xl border border-[var(--color-border)] bg-[var(--color-paper)] px-6 py-7 shadow-[var(--shadow-card)] sm:px-9 sm:py-10">
-          {mode === 'prose' ? (
-            <MarkdownView content={stripFrontmatter(file.body ?? '')} />
-          ) : (
-            <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[13px] leading-[1.65] text-[var(--color-ink)]">
-              {file.body ?? ''}
-            </pre>
-          )}
-        </article>
+        <>
+          {packedNames.length > 0 ? (
+            <PackedSiblingList
+              rootLabel={label}
+              siblings={packedNames}
+              selected={selected}
+              onSelect={setSelected}
+              slotName={slotName}
+            />
+          ) : null}
+          <article className="rounded-xl border border-[var(--color-border)] bg-[var(--color-paper)] px-6 py-7 shadow-[var(--shadow-card)] sm:px-9 sm:py-10">
+            {mode === 'prose' ? (
+              <MarkdownView content={stripFrontmatter(visibleBody)} />
+            ) : (
+              <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-[13px] leading-[1.65] text-[var(--color-ink)]">
+                {visibleBody}
+              </pre>
+            )}
+          </article>
+        </>
       )}
     </section>
+  )
+}
+
+function PackedSiblingList({
+  rootLabel,
+  siblings,
+  selected,
+  onSelect,
+  slotName,
+}: {
+  rootLabel: string
+  siblings: string[]
+  selected: string | undefined
+  onSelect: (name: string | undefined) => void
+  slotName: MemorySlotName
+}) {
+  const partition = slotName === 'memory-index' ? 'agent/' : 'user/'
+  return (
+    <nav
+      aria-label="Packed sibling files"
+      className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-paper)] px-4 py-3"
+    >
+      <span className="font-mono text-[11.5px] uppercase tracking-[0.22em] text-[var(--color-ink-3)]">
+        packed · {siblings.length + 1} files
+      </span>
+      <button
+        type="button"
+        onClick={() => onSelect(undefined)}
+        className={`font-mono text-[12.5px] tracking-tight transition-colors ${
+          selected === undefined
+            ? 'text-[var(--color-ink)] underline decoration-[var(--color-ink)] underline-offset-[3px]'
+            : 'text-[var(--color-ink-2)] hover:text-[var(--color-ink)]'
+        }`}
+      >
+        {rootLabel}
+      </button>
+      {siblings.map(name => (
+        <button
+          key={name}
+          type="button"
+          onClick={() => onSelect(name)}
+          className={`font-mono text-[12.5px] tracking-tight transition-colors ${
+            selected === name
+              ? 'text-[var(--color-ink)] underline decoration-[var(--color-ink)] underline-offset-[3px]'
+              : 'text-[var(--color-ink-2)] hover:text-[var(--color-ink)]'
+          }`}
+          title={`${partition}${name}`}
+        >
+          {name}
+        </button>
+      ))}
+    </nav>
   )
 }
 

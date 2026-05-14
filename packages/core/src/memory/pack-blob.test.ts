@@ -1,11 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  PACK_BLOB_VERSION,
-  decodePackBlob,
-  encodePackBlob,
-  encodeRootOrPack,
-  isV2Envelope,
-} from './pack-blob'
+import { PACK_BLOB_VERSION, decodePackBlob, encodePackBlob, isV2Envelope } from './pack-blob'
 
 describe('pack-blob v2 envelope', () => {
   test('encode + decode round-trips single root', () => {
@@ -80,18 +74,6 @@ describe('pack-blob v2 envelope', () => {
     const blob = decodePackBlob(bytes)
     expect(blob.files['ok.md']).toBe('y')
     expect(blob.files['../bad.md']).toBeUndefined()
-  })
-
-  test('encodeRootOrPack legacy mode produces raw bytes when no files', () => {
-    const md = '# raw\n\ntext'
-    const bytes = encodeRootOrPack({ root: md, legacy: true })
-    expect(new TextDecoder().decode(bytes)).toBe(md)
-    expect(isV2Envelope(bytes)).toBe(false)
-  })
-
-  test('encodeRootOrPack legacy + files still emits v2', () => {
-    const bytes = encodeRootOrPack({ root: '# r', files: { 'a.md': 'b' }, legacy: true })
-    expect(isV2Envelope(bytes)).toBe(true)
   })
 
   test('handles large blobs (~100 small files)', () => {

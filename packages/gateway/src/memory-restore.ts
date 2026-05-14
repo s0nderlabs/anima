@@ -1,4 +1,4 @@
-import { mkdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import {
   AnimaAgentNFTReader,
@@ -268,7 +268,6 @@ async function fileNonEmpty(path: string): Promise<boolean> {
 
 async function tryReadFile(path: string): Promise<Uint8Array | null> {
   try {
-    const { readFile } = await import('node:fs/promises')
     return new Uint8Array(await readFile(path))
   } catch {
     return null

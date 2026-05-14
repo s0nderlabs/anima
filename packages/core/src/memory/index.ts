@@ -69,7 +69,6 @@ export { readOrNull } from './fs-util'
 export {
   PACK_BLOB_VERSION,
   encodePackBlob,
-  encodeRootOrPack,
   decodePackBlob,
   isV2Envelope,
   type PackBlob,

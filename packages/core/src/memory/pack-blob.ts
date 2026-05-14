@@ -118,16 +118,3 @@ export function decodePackBlob(bytes: Uint8Array): PackBlob {
   }
   return { v: PACK_BLOB_VERSION, root: parsed.root, files }
 }
-
-/**
- * Convenience: encode v2 OR fall back to v1 raw markdown bytes for callers
- * that want to ship a single file. Useful during the v0.24.0 migration
- * window when an operator's chain state is v1 and we want to roll forward
- * to v2 on next sync without breaking older readers.
- */
-export function encodeRootOrPack(opts: EncodePackOpts & { legacy?: boolean }): Uint8Array {
-  if (opts.legacy && (!opts.files || Object.keys(opts.files).length === 0)) {
-    return new TextEncoder().encode(opts.root)
-  }
-  return encodePackBlob(opts)
-}

@@ -4,6 +4,18 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.1] - 2026-05-14
+
+### Added
+
+- **`/console` v2 envelope render.** Memory tab on `anima.s0nderlabs.xyz/console` now detects the v0.24.0 pack envelope after decryption and renders the root file plus a list of packed sibling files inline. Clicking a sibling swaps the body into the prose/source viewer. Slot 0 packs surface every `agent/*.md`; slot 3 packs surface every `user/*.md`. Closes the v0.24.0 follow-up (B14) where /console only showed the root field of packed slots. New helpers: `apps/web/lib/crypto/pack-blob.ts` (browser mirror of core), `unpackIfV2` convenience, `PackedSiblingList` component.
+
+### Changed
+
+- **Simplify pass over v0.24.0 surface.** Dropped dead `encodeRootOrPack` export (zero callers since v0.24.0 ship; the legacy-fallback escape hatch never landed). Dropped the dynamic `import('node:fs/promises')` inside `tryReadFile` in `memory-restore.ts` in favor of the top-level import already present. Web-side `unpackIfV2` helper moved from `MemoryBrowser.tsx` into `apps/web/lib/crypto/pack-blob.ts` so any future memory-rendering surface can reuse it.
+
+[0.24.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.1
+
 ## [0.24.0] - 2026-05-14
 
 ### Added
