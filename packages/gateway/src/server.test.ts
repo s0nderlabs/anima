@@ -94,6 +94,25 @@ function makeStubRuntimeWithTick(tickFn: TickResultFn): RuntimeAdapter {
   }
 }
 
+type ApprovePairingFn = NonNullable<RuntimeAdapter['approvePairing']>
+
+function makeStubRuntimeWithPairing(approveFn: ApprovePairingFn): RuntimeAdapter {
+  return {
+    async start() {},
+    ready: () => true,
+    async runChatTurn() {
+      return { response: '', toolCalls: [], durationMs: 0 }
+    },
+    async flushSync() {
+      return { slots: [] }
+    },
+    async stop() {},
+    approvePairing(platform, code) {
+      return approveFn(platform, code)
+    },
+  }
+}
+
 async function provisionFixture(fix: Fixture): Promise<void> {
   const envelope = encryptToPubkey({
     recipientPubkey: fix.session.bootstrap.pubkeyHexCompressed,
@@ -540,6 +559,224 @@ describe('harness HTTP server — admin endpoints', () => {
     expect(body.reason).toBe('ts-stale')
     sandboxFix.server.close()
     sandboxFix.session.approvals.stop()
+  })
+
+  // v0.24.4: pairing-approve admin endpoint. Auth shape mirrors profile-key
+  // (signed `adminTickHash('pairing-approve', ts, sandboxId)`); body shape
+  // is `{ platform, code, ts, signature }`. Platform allowlist + code format
+  // are checked BEFORE sig verification so a malformed CLI invocation gets
+  // 400 without burning a signature round-trip.
+  test('POST /admin/pairing/approve 200 with valid sig (sandbox path)', async () => {
+    const approveCalls: Array<{ platform: string; code: string }> = []
+    const sandboxFix = await setupFixture({
+      trustLocal: false,
+      sandboxId: 'sbx-pair-1',
+      runtime: makeStubRuntimeWithPairing((platform, code) => {
+        approveCalls.push({ platform, code })
+        return { ok: true as const, userId: '12345', userName: 'alice' }
+      }),
+    })
+    await provisionFixture(sandboxFix)
+    const ts = Date.now()
+    const hash = adminTickHash({
+      action: 'pairing-approve',
+      ts,
+      sandboxId: 'sbx-pair-1',
+    })
+    const sig = await privateKeyToAccount(sandboxFix.operatorPriv).signMessage({
+      message: { raw: hexToBytes(hash) },
+    })
+    const r = await fetch(`${sandboxFix.base}/admin/pairing/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'telegram', code: 'ABCDEFGH', ts, signature: sig }),
+    })
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { ok: boolean; userId?: string; userName?: string }
+    expect(body.ok).toBe(true)
+    expect(body.userId).toBe('12345')
+    expect(body.userName).toBe('alice')
+    expect(approveCalls).toEqual([{ platform: 'telegram', code: 'ABCDEFGH' }])
+    sandboxFix.server.close()
+    sandboxFix.session.approvals.stop()
+  })
+
+  test('POST /admin/pairing/approve 200 with ok:false when code unknown', async () => {
+    const sandboxFix = await setupFixture({
+      trustLocal: true,
+      sandboxId: 'sbx-pair-miss',
+      runtime: makeStubRuntimeWithPairing(() => ({
+        ok: false as const,
+        reason: 'unknown-or-expired-code',
+      })),
+    })
+    await provisionFixture(sandboxFix)
+    const r = await fetch(`${sandboxFix.base}/admin/pairing/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'telegram', code: 'ABCDEFGH' }),
+    })
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { ok: boolean; reason?: string }
+    expect(body.ok).toBe(false)
+    expect(body.reason).toBe('unknown-or-expired-code')
+    sandboxFix.server.close()
+    sandboxFix.session.approvals.stop()
+  })
+
+  test('POST /admin/pairing/approve 401 with invalid sig', async () => {
+    const sandboxFix = await setupFixture({
+      trustLocal: false,
+      sandboxId: 'sbx-pair-badsig',
+      runtime: makeStubRuntimeWithPairing(() => ({
+        ok: true as const,
+        userId: 'x',
+        userName: 'x',
+      })),
+    })
+    await provisionFixture(sandboxFix)
+    // Sign over a *different* sandboxId so the recovered address matches the
+    // operator but the hash diverges from what the server reconstructs.
+    const ts = Date.now()
+    const wrongHash = adminTickHash({
+      action: 'pairing-approve',
+      ts,
+      sandboxId: 'sbx-different',
+    })
+    const badSig = await privateKeyToAccount(sandboxFix.operatorPriv).signMessage({
+      message: { raw: hexToBytes(wrongHash) },
+    })
+    const r = await fetch(`${sandboxFix.base}/admin/pairing/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        platform: 'telegram',
+        code: 'ABCDEFGH',
+        ts,
+        signature: badSig,
+      }),
+    })
+    expect(r.status).toBe(401)
+    const body = (await r.json()) as { error?: string; reason?: string }
+    expect(body.error).toBe('unauthorized')
+    sandboxFix.server.close()
+    sandboxFix.session.approvals.stop()
+  })
+
+  test('POST /admin/pairing/approve 400 when missing fields', async () => {
+    const sandboxFix = await setupFixture({
+      trustLocal: true,
+      sandboxId: 'sbx-pair-missing',
+    })
+    await provisionFixture(sandboxFix)
+    const r = await fetch(`${sandboxFix.base}/admin/pairing/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'telegram' }),
+    })
+    expect(r.status).toBe(400)
+    const body = (await r.json()) as { error?: string }
+    expect(body.error).toBe('missing-fields')
+    sandboxFix.server.close()
+    sandboxFix.session.approvals.stop()
+  })
+
+  test('POST /admin/pairing/approve 400 when platform unsupported', async () => {
+    const sandboxFix = await setupFixture({
+      trustLocal: true,
+      sandboxId: 'sbx-pair-platform',
+    })
+    await provisionFixture(sandboxFix)
+    const r = await fetch(`${sandboxFix.base}/admin/pairing/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'discord', code: 'ABCDEFGH' }),
+    })
+    expect(r.status).toBe(400)
+    const body = (await r.json()) as { error?: string }
+    expect(body.error).toBe('unsupported-platform')
+    sandboxFix.server.close()
+    sandboxFix.session.approvals.stop()
+  })
+
+  test('POST /admin/pairing/approve 400 when code is wrong length', async () => {
+    const sandboxFix = await setupFixture({
+      trustLocal: true,
+      sandboxId: 'sbx-pair-len',
+    })
+    await provisionFixture(sandboxFix)
+    const r = await fetch(`${sandboxFix.base}/admin/pairing/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'telegram', code: 'SHORT' }),
+    })
+    expect(r.status).toBe(400)
+    const body = (await r.json()) as { error?: string; reason?: string }
+    expect(body.error).toBe('bad-code-format')
+    expect(body.reason).toBe('wrong-length')
+    sandboxFix.server.close()
+    sandboxFix.session.approvals.stop()
+  })
+
+  test('POST /admin/pairing/approve 400 when code has invalid character', async () => {
+    const sandboxFix = await setupFixture({
+      trustLocal: true,
+      sandboxId: 'sbx-pair-alpha',
+    })
+    await provisionFixture(sandboxFix)
+    // `0` (zero) is excluded from PAIRING_ALPHABET. 8 chars to pass length check.
+    const r = await fetch(`${sandboxFix.base}/admin/pairing/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'telegram', code: 'ABCDEFG0' }),
+    })
+    expect(r.status).toBe(400)
+    const body = (await r.json()) as { error?: string; reason?: string }
+    expect(body.error).toBe('bad-code-format')
+    expect(body.reason).toBe('invalid-character')
+    sandboxFix.server.close()
+    sandboxFix.session.approvals.stop()
+  })
+
+  test('POST /admin/pairing/approve 409 when state is not Ready', async () => {
+    const sandboxFix = await setupFixture({
+      trustLocal: true,
+      sandboxId: 'sbx-pair-notready',
+      runtime: makeStubRuntimeWithPairing(() => ({
+        ok: true as const,
+        userId: 'x',
+        userName: 'x',
+      })),
+    })
+    await provisionFixture(sandboxFix)
+    // Flip state back so the Ready guard fires.
+    sandboxFix.session.state = 'Provisioned'
+    const r = await fetch(`${sandboxFix.base}/admin/pairing/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'telegram', code: 'ABCDEFGH' }),
+    })
+    expect(r.status).toBe(409)
+    const body = (await r.json()) as { error?: string }
+    expect(body.error).toBe('not-ready')
+    sandboxFix.server.close()
+    sandboxFix.session.approvals.stop()
+  })
+
+  test('POST /admin/pairing/approve 501 when runtime has no approvePairing', async () => {
+    // StubRuntime (default) does NOT implement approvePairing — confirm 501.
+    const local = await setupFixture({ trustLocal: true, sandboxId: 'sbx-pair-501' })
+    await provisionFixture(local)
+    const r = await fetch(`${local.base}/admin/pairing/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ platform: 'telegram', code: 'ABCDEFGH' }),
+    })
+    expect(r.status).toBe(501)
+    const body = (await r.json()) as Record<string, unknown>
+    expect(body.error).toBe('not-supported')
+    local.server.close()
+    local.session.approvals.stop()
   })
 })
 

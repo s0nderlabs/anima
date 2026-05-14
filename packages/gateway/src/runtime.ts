@@ -154,4 +154,16 @@ export interface RuntimeAdapter {
    * doesn't have an active MemorySyncManager (e.g. pre-Ready or stub).
    */
   setProfileKey?(keyHex: `0x${string}`): Promise<{ ok: true } | { ok: false; reason: string }>
+  /**
+   * v0.24.4: approve a pending pairing code in the container's canonical
+   * pairing dir (`~/.anima/agents/<id>/pairing`). Backs the
+   * `/admin/pairing/approve` endpoint so the host CLI can route pair-mode
+   * approvals to sandbox-deployed agents without SSHing into the container.
+   * `ok:true` returns the approved user's id + name; `ok:false` returns one
+   * of `unknown-or-expired-code | locked-out | runtime-not-started`.
+   */
+  approvePairing?(
+    platform: string,
+    code: string,
+  ): { ok: true; userId: string; userName: string } | { ok: false; reason: string }
 }

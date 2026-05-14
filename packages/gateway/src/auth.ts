@@ -204,9 +204,21 @@ export async function verifyChatSig(opts: VerifyChatOpts): Promise<VerifyResult>
  * `action` + `sandboxId` so a sig for one admin endpoint can't be replayed
  * against another, and the `chat`/`approval` sig spaces stay isolated from
  * admin operations. Pattern mirrors `chatMessageHash` / `approvalResponseHash`.
+ *
+ * v0.24.4: `AdminAction` is a documentation-only union of actions currently
+ * accepted by sandbox endpoints. The hash + verifier accept arbitrary
+ * strings (so cross-action replay tests can sign non-existent actions); the
+ * allowlist is enforced at the route layer in `server.ts`. Add new admin
+ * endpoints here so call-site authors can grep for the canonical name.
+ *
+ *   - 'autotopup-tick'  → POST /admin/autotopup/tick
+ *   - 'profile-key'     → POST /admin/profile-key
+ *   - 'pairing-approve' → POST /admin/pairing/approve
  */
+export type AdminAction = 'autotopup-tick' | 'profile-key' | 'pairing-approve'
+
 export function adminTickHash(opts: {
-  action: string
+  action: AdminAction | string
   ts: number
   sandboxId: string
 }): Hex {
@@ -223,7 +235,7 @@ export function adminTickHash(opts: {
 }
 
 export interface VerifyAdminTickOpts {
-  action: string
+  action: AdminAction | string
   ts: number
   sandboxId: string
   signature: Hex

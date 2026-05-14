@@ -4,6 +4,25 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.4] - 2026-05-15
+
+### Fixed
+
+- **`anima init` Phase E (Telegram setup) now runs BEFORE Phase 11 (sandbox provision)** so the sandbox-handoff envelope picks up `telegram-secrets.encrypted` from disk and ships it via the secondary ECIES envelope. Pre-fix, sandbox-deployed agents booted with `listeners.telegram: "disabled"` after a fresh init, forcing operators to run `anima upgrade --in-place` to re-ship secrets. `init.ts` reordered + new `skipConfigWrite` flag on `runTelegramStep` so the caller owns a single final config write (no partial-write hazard).
+- **`anima init` subname survives the Telegram step.** Pre-fix, the `cfg` object passed to `runTelegramStep` had `subname: null` from `DEFAULT_CONFIG`, and `telegram-step.ts:203` re-wrote the config with that null, wiping the just-registered subname. Statusbar then couldn't render the `.0g` name. Fix at `init.ts:674` passes `{ ...cfg, subname: registeredSubname }`.
+
+### Added
+
+- **`POST /admin/pairing/approve`** signed admin endpoint on the gateway so sandbox-deployed agents can have Telegram pair-mode approvals routed from the operator's host CLI to the container's pairing dir. Pre-add, `anima pairing approve telegram <code>` wrote to the host's local `~/.anima/agents/<id>/pairing/` but the sandbox listener's pending list lived inside the container — host approvals silently never propagated. Auth: EIP-191 signed `adminTickHash({ action: 'pairing-approve', ts, sandboxId })`, same shape as `/admin/autotopup/tick`. `SandboxClient.approvePairing()` + `runPairingApprove` now detects `config.deployTarget === 'sandbox'` and routes through the remote endpoint.
+- **TUI statusbar correctly distinguishes local-gateway vs sandbox connections.** Pre-fix, `chat-sandbox.tsx:178` hardcoded `connected to sandbox <id>` even when routed via unix socket to a local gateway daemon, and `ui/app.tsx:637` showed the `sandbox X.XX 0G` balance row unconditionally even on local deploys (where it's nonsensical). Now `isLocalGateway` is threaded through `createChatState`, the `initialSystem` text says `connected to local gateway` vs `connected to sandbox X @ Y` based on deploy target, and the sandbox-balance row is hidden on local. Also saves 2 RPC calls/min on local deploys (no more pointless `getSandboxBillingReserve` polling).
+- **Bootstrap progress surfaces every 5s with STAGE markers** instead of a static label for 30+ seconds. `sandbox-provision.ts` poll modulo reduced from 6 (every 30s) to 1 (every 5s). `bootstrap.ts` now emits `STAGE:` lines at each named phase (`updating package index`, `installing system deps`, `installing bun runtime`, `installing anima (<ver>)`, `installing chrome for browser tools`, `starting harness daemon`, `harness ready`). New `extractBootstrapProgressLine` poller helper prefers STAGE lines over raw tail. Static label updated from "runs ~30-60s" (which omitted browser deps) to honest "~90-150s (live progress below)".
+
+### Changed
+
+- **`anima upgrade` post-flight version verifier accepts newer-than-requested as a soft pass.** Pre-fix, when npm registry `latest` was newer than the github release `latest` tag (common in the ship-window seconds after a tag push), the in-container `npm install @s0nderlabs/anima-cli@latest` pulled a newer version than the local CLI requested, and the verifier flagged "silent-success regression: expected X, got Y" + bailed out of handoff. Now `isSemverNewer(actual, expected)` treats this as expected behavior, surfaces a one-line note "harness landed Y (newer than requested X); continuing", and proceeds to handoff.
+
+[0.24.4]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.4
+
 ## [0.24.3] - 2026-05-14
 
 ### Fixed

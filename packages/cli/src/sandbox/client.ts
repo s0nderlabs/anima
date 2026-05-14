@@ -258,6 +258,53 @@ export class SandboxClient {
   }
 
   /**
+   * v0.24.4: forward an operator pair-mode approval to the sandbox so the
+   * container's pairing dir gets the approved user. Same EIP-191 auth as
+   * `triggerAutoTopupTick` / `setProfileKey` but with action='pairing-approve'.
+   * Returns the result shape from `BuiltRuntime.approvePairing` so the
+   * `anima pairing approve` command can print user details on success or
+   * a clean error on locked-out / unknown-code.
+   */
+  async approvePairing(
+    platform: string,
+    code: string,
+  ): Promise<{ ok: boolean; userId?: string; userName?: string; reason?: string }> {
+    const ts = Date.now()
+    const hash = adminTickHash({ action: 'pairing-approve', ts, sandboxId: this.sandboxId })
+    const signature = await this.operator.signMessage({ message: { raw: hash } })
+    const r = await this.#fetch(`${this.endpoint}/admin/pairing/approve`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ platform, code, ts, signature }),
+    })
+    if (r.status === 401) {
+      const detail = (await r.json().catch(() => null)) as { reason?: string } | null
+      throw new Error(`pairing-approve auth failed: ${detail?.reason ?? '401'}`)
+    }
+    if (r.status === 501) {
+      throw new Error('pairing-approve not supported (runtime missing approvePairing)')
+    }
+    if (r.status === 400) {
+      const detail = (await r.json().catch(() => null)) as {
+        error?: string
+        reason?: string
+      } | null
+      throw new Error(
+        `pairing-approve bad-request: ${detail?.error ?? '400'}${detail?.reason ? ` (${detail.reason})` : ''}`,
+      )
+    }
+    if (r.status === 409) {
+      throw new Error('pairing-approve gateway not Ready')
+    }
+    return (await r.json()) as {
+      ok: boolean
+      userId?: string
+      userName?: string
+      reason?: string
+    }
+  }
+
+  /**
    * Forward an operator approval decision to the harness. Maps anima's
    * `PermissionDecision` (`allow-once | allow-session | deny`) onto the
    * sandbox-server wire format (`allow | allow-session | deny`) since

@@ -1,5 +1,5 @@
 import http from 'node:http'
-import { decryptWithPrivkey } from '@s0nderlabs/anima-core'
+import { PAIRING_ALPHABET, PAIRING_CODE_LENGTH, decryptWithPrivkey } from '@s0nderlabs/anima-core'
 import { type Address, type Hex, bytesToHex, getAddress } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import {
@@ -448,6 +448,77 @@ export function createGatewayServer(deps: ServerDeps): http.Server {
           return send(res, result.ok ? 200 : 503, result)
         } catch (e) {
           return send(res, 500, { error: 'set-failed', detail: (e as Error).message })
+        }
+      }
+
+      // v0.24.4: route an operator pair-mode approval into the container's
+      // pairing dir so sandbox-deployed agents are reachable from the host
+      // CLI without SSHing into the container. Mirrors `/admin/profile-key`
+      // auth shape — body must be signed by the operator over
+      // `adminTickHash('pairing-approve', ts, sandboxId)`. Platform is
+      // currently restricted to `telegram` (single live listener); extend
+      // this allowlist as new platforms ship listeners. Code format must
+      // match `PairingStore.generateCode` (8-char uppercase from
+      // `PAIRING_ALPHABET`, no 0/O/1/I); a 400 here saves a wasted lookup
+      // round-trip and gives the operator's CLI a clean reject signal.
+      if (method === 'POST' && url === '/admin/pairing/approve') {
+        const body = (await readJson(req).catch(() => null)) as {
+          platform?: string
+          code?: string
+          ts?: number
+          signature?: Hex
+        } | null
+        if (!body || typeof body.platform !== 'string' || typeof body.code !== 'string') {
+          return send(res, 400, { error: 'missing-fields', need: 'platform,code' })
+        }
+        if (body.platform !== 'telegram') {
+          return send(res, 400, { error: 'unsupported-platform', platform: body.platform })
+        }
+        const normalizedCode = body.code.toUpperCase().trim()
+        if (normalizedCode.length !== PAIRING_CODE_LENGTH) {
+          return send(res, 400, { error: 'bad-code-format', reason: 'wrong-length' })
+        }
+        for (const ch of normalizedCode) {
+          if (!PAIRING_ALPHABET.includes(ch)) {
+            return send(res, 400, { error: 'bad-code-format', reason: 'invalid-character' })
+          }
+        }
+        if (!trustLocal) {
+          const operator = session.operatorAddress
+          if (!operator) {
+            return send(res, 500, { error: 'operator-not-set' })
+          }
+          if (typeof body.ts !== 'number' || !body.signature) {
+            return send(res, 401, {
+              error: 'unauthorized',
+              reason: 'sandbox admin requires {ts, signature} body signed by operator',
+            })
+          }
+          const verify = await verifyAdminTickSig({
+            action: 'pairing-approve',
+            ts: body.ts,
+            sandboxId: session.sandboxId,
+            signature: body.signature,
+            expectedOperator: operator,
+          })
+          if (!verify.ok) {
+            return send(res, 401, { error: 'unauthorized', reason: verify.reason })
+          }
+        }
+        if (session.state !== 'Ready') {
+          return send(res, 409, { error: 'not-ready', state: session.state })
+        }
+        if (!session.runtime.approvePairing) {
+          return send(res, 501, { error: 'not-supported' })
+        }
+        try {
+          const result = session.runtime.approvePairing(body.platform, normalizedCode)
+          // Non-200 only for transport-level failure; an unknown code or a
+          // locked-out platform is still a successful round-trip — the
+          // operator's CLI prints `result.reason` either way.
+          return send(res, 200, result)
+        } catch (e) {
+          return send(res, 500, { error: 'approve-failed', detail: (e as Error).message })
         }
       }
 

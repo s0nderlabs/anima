@@ -47,6 +47,15 @@ export interface TelegramStepOpts {
    * test paths.
    */
   allowOverwrite?: boolean
+  /**
+   * v0.24.4: when true, do NOT write the config file from inside this step —
+   * caller (init.ts) builds the final cfg with `'telegram'` in plugins and
+   * writes once. Avoids the partial-write hazard where Phase E runs before
+   * the init's main config build and the intermediate write has incomplete
+   * identity/sandbox fields. Standalone `anima telegram setup` keeps the
+   * default false so it still rewrites the config.
+   */
+  skipConfigWrite?: boolean
 }
 
 export interface TelegramStepResult {
@@ -197,10 +206,15 @@ export async function runTelegramStep(opts: TelegramStepOpts): Promise<TelegramS
     return { configured: false, cancelled: true }
   }
 
-  const plugins = Array.from(new Set([...(opts.config.plugins ?? []), 'telegram' as const]))
-  if (plugins.length !== (opts.config.plugins ?? []).length) {
-    const updated = { ...opts.config, plugins }
-    await writeConfigTs(opts.configPath, updated, { subname: opts.config.subname })
+  // v0.24.4: when caller asks (init.ts), skip the config rewrite — caller will
+  // build the final cfg with `'telegram'` in plugins and write once. Avoids the
+  // partial-write hazard where Phase E runs before init's main config build.
+  if (!opts.skipConfigWrite) {
+    const plugins = Array.from(new Set([...(opts.config.plugins ?? []), 'telegram' as const]))
+    if (plugins.length !== (opts.config.plugins ?? []).length) {
+      const updated = { ...opts.config, plugins }
+      await writeConfigTs(opts.configPath, updated, { subname: opts.config.subname })
+    }
   }
 
   return {

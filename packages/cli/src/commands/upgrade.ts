@@ -398,21 +398,32 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
       )
       return
     }
-    const actual = m[1]
+    const actual = m[1] ?? ''
     if (actual !== expected) {
-      sBox.stop(`silent-success regression: expected ${expected}, got ${actual}`)
-      note(
-        [
-          `The harness reported success but is running ${actual} instead of ${expected}.`,
-          'This means git fetch may not have seen the tag yet. Re-running',
-          `\`anima upgrade --ref ${args.resolved.ref}\` should land it correctly,`,
-          'or `anima upgrade latest` to pick the most recent published release.',
-        ].join('\n'),
-        'recoverable',
-      )
-      return
+      // v0.24.4: when npm `latest` is newer than the github release `latest`
+      // tag (common during a ship window where the tag was published seconds
+      // before the github release was cut), `npm install @s0nderlabs/anima-cli@latest`
+      // pulls a NEWER version than `expected`. Treat newer-than-requested as
+      // a soft pass: print a note, continue handoff, don't bail out.
+      const cmpNewer = isSemverNewer(actual, expected)
+      if (cmpNewer) {
+        sBox.message(`harness landed ${actual} (newer than requested ${expected}); continuing`)
+      } else {
+        sBox.stop(`silent-success regression: expected ${expected}, got ${actual}`)
+        note(
+          [
+            `The harness reported success but is running ${actual} instead of ${expected}.`,
+            'This means git fetch may not have seen the tag yet. Re-running',
+            `\`anima upgrade --ref ${args.resolved.ref ?? 'latest'}\` should land it correctly,`,
+            'or `anima upgrade latest` to pick the most recent published release.',
+          ].join('\n'),
+          'recoverable',
+        )
+        return
+      }
+    } else {
+      sBox.message(`verified harness version=${actual}`)
     }
-    sBox.message(`verified harness version=${actual}`)
   }
 
   // Re-handoff against the SAME endpoint (harness restarted with fresh keypair).
@@ -601,6 +612,29 @@ async function runReprovisionUpgrade(args: ReprovisionUpgradeArgs): Promise<void
       'Next: `anima` to chat (now routes through the new harness)',
     ].join('\n'),
   )
+}
+
+/**
+ * v0.24.4: compare two semver-shaped strings as `a > b`. Strips a leading `v`
+ * if present. Returns true when `a` is strictly newer than `b`. Used by the
+ * post-flight verifier so a newer-than-requested install (npm latest > github
+ * release latest during a ship window) doesn't fire the "silent-success
+ * regression" warning. Lightweight — does not handle prerelease tags.
+ */
+function isSemverNewer(a: string, b: string): boolean {
+  const parse = (s: string): number[] => {
+    const clean = s.replace(/^v/, '').split('-')[0] ?? ''
+    return clean.split('.').map(p => Number.parseInt(p, 10) || 0)
+  }
+  const pa = parse(a)
+  const pb = parse(b)
+  for (let i = 0; i < 3; i++) {
+    const av = pa[i] ?? 0
+    const bv = pb[i] ?? 0
+    if (av > bv) return true
+    if (av < bv) return false
+  }
+  return false
 }
 
 function sliceBetween(s: string, start: string, end: string): string {

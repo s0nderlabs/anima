@@ -6,6 +6,7 @@ import {
   createSandboxWithOrphanRetry,
   ensureSandboxArchived,
   ensureSandboxStarted,
+  extractBootstrapProgressLine,
   pickPermissionMode,
 } from './sandbox-provision'
 
@@ -378,5 +379,87 @@ describe('SandboxProvisionOpts shape (v0.21.19 telegramSecrets plumbing)', () =>
     }
     expect(sample.botToken).toBe('456:zyxwvu')
     expect(sample.allowedUserIds).toEqual([99])
+  })
+})
+
+describe('extractBootstrapProgressLine (v0.24.4 STAGE-aware surfacing)', () => {
+  // Bug closed by v0.24.4 Bundle 5: operator stared at "launching bootstrap"
+  // spinner for 30s with no updates because (a) the poll loop only surfaced
+  // every 6th tick (~30s) and (b) the surface line was whatever raw `[$(date)
+  // ...]` log entry happened to land in `tail -n 1`. Now the bootstrap script
+  // emits explicit `STAGE: ...` markers and this helper prefers them.
+
+  test('prefers the last STAGE marker over raw tail lines (last-wins, prefix stripped)', () => {
+    const tail = [
+      '[2026-05-15T10:00:01Z] bootstrap-start (mode=npm)',
+      'STAGE: updating package index',
+      '[apt update attempt 1/3]',
+      'STAGE: installing system deps (build-essential, curl, git, xvfb)',
+      '[apt install attempt 1/3]',
+      'STAGE: installing bun runtime',
+      'curl: downloading bun...',
+    ].join('\n')
+    expect(extractBootstrapProgressLine(tail)).toBe('installing bun runtime')
+  })
+
+  test('returns the most recent STAGE even if non-STAGE lines follow it', () => {
+    const tail = [
+      'STAGE: installing chrome for browser tools',
+      '[browser deps]',
+      'Downloading Chromium 119...',
+      'progress 42%',
+    ].join('\n')
+    // Should still pick the STAGE line — operator cares about the stage,
+    // not which sub-step within the stage is mid-stream.
+    expect(extractBootstrapProgressLine(tail)).toBe('installing chrome for browser tools')
+  })
+
+  test('falls back to filter/pop when no STAGE marker is present (older gateway)', () => {
+    const tail = [
+      '[2026-05-15T10:00:01Z] bootstrap-start (mode=npm)',
+      '  sandbox=sb-abc',
+      '[apt update attempt 1/3]',
+      'Reading package lists... Done',
+    ].join('\n')
+    expect(extractBootstrapProgressLine(tail)).toBe('Reading package lists... Done')
+  })
+
+  test('filters bash setlocale warnings out of the fallback', () => {
+    const tail = [
+      'STAGE-less old log',
+      'bash: warning: setlocale: LC_ALL: cannot change locale',
+      'real progress here',
+      'bash: warning: setlocale: LC_ALL: cannot change locale',
+    ].join('\n')
+    expect(extractBootstrapProgressLine(tail)).toBe('real progress here')
+  })
+
+  test('strips exactly one `STAGE: ` prefix (does not double-strip)', () => {
+    const tail = 'STAGE: STAGE: nested'
+    expect(extractBootstrapProgressLine(tail)).toBe('STAGE: nested')
+  })
+
+  test('returns undefined for empty tail', () => {
+    expect(extractBootstrapProgressLine('')).toBeUndefined()
+    expect(extractBootstrapProgressLine('   \n   \n')).toBeUndefined()
+  })
+
+  test('STAGE markers from v0.24.4 bootstrap script match the documented set', () => {
+    // Lock the canonical labels so a future bootstrap.ts rename surfaces
+    // here. The first 6 are the steps the operator sees in order; the last
+    // is the success terminator the poll loop detects via DONE_MARKER too.
+    const stages = [
+      'updating package index',
+      'installing system deps (build-essential, curl, git, xvfb)',
+      'installing bun runtime',
+      'installing anima (0.24.4)',
+      'installing chrome for browser tools',
+      'starting harness daemon',
+      'harness ready',
+    ]
+    for (const stage of stages) {
+      const tail = ['some prior line', `STAGE: ${stage}`, 'noise after'].join('\n')
+      expect(extractBootstrapProgressLine(tail)).toBe(stage)
+    }
   })
 })

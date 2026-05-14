@@ -45,6 +45,14 @@ interface CreateChatStateOpts {
   initialSystem: string
   identityLabel: string
   approvalsMode: PermissionMode
+  // v0.24.4: true when the TUI talks to a local gateway daemon over a unix
+  // socket (`~/.anima/agents/<id>/gateway.sock`) instead of a remote Daytona
+  // sandbox endpoint. Drives statusbar copy (drops the "sandbox X" prefix on
+  // the system line) and hides the sandbox-billing balance segment (which is
+  // meaningless for local deploys — there is no billing reserve to surface).
+  // Defaults to false so existing call sites that don't pass it (i.e. nothing
+  // today, since both call sites set it explicitly) keep sandbox semantics.
+  isLocalGateway?: boolean
 }
 
 export function createChatState(opts: CreateChatStateOpts) {
@@ -180,6 +188,7 @@ export function createChatState(opts: CreateChatStateOpts) {
     pushRow,
     onStatusChange,
     identityLabel: opts.identityLabel,
+    isLocalGateway: opts.isLocalGateway ?? false,
   }
 }
 

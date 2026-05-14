@@ -747,6 +747,10 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     // in the frozen prefix and /healthz.brainProvider for operators.
     identityLabel: `agent ${config.subname ?? agentId}  ${agentAddress}`,
     approvalsMode: initialMode,
+    // v0.24.4: embedded chat runs in-process on the operator's machine — by
+    // definition local. Tag it so the statusbar hides the sandbox-billing
+    // segment, matching the standalone-local-gateway path.
+    isLocalGateway: true,
   })
 
   // Phase 12: now that state exists, point the telegram row sinks at it. The

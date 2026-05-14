@@ -175,7 +175,15 @@ export async function runChatSandbox(
   const { ChatApp } = await import('../ui/app')
 
   const state = createChatState({
-    initialSystem: `connected to sandbox ${sandboxId.slice(0, 8)} @ ${sandboxEndpoint}`,
+    // v0.24.4: branch on isLocalGateway. Local-gateway TUI talks to a daemon
+    // over a unix socket (`~/.anima/agents/<id>/gateway.sock`) — calling that
+    // "sandbox" mislead operators into believing they were paying sandbox
+    // billing fees and into expecting a Daytona-style endpoint. The
+    // standalone gateway path gets a clearer label; sandbox path keeps its
+    // existing "connected to sandbox X @ Y" copy.
+    initialSystem: isLocalGateway
+      ? `connected to local gateway (~/.anima/agents/${agentId.slice(0, 8)}/gateway.sock)`
+      : `connected to sandbox ${sandboxId.slice(0, 8)} @ ${sandboxEndpoint}`,
     // v0.22.0: subname (if registered) + full EOA. Brain provider dropped.
     identityLabel: `agent ${config.subname ?? agentId}  ${agentAddress}`,
     // v0.21.13: seeded from /healthz.permsMode so the statusline reflects
@@ -183,6 +191,9 @@ export async function runChatSandbox(
     // statusline subsequently updates locally via the /yolo and /perms
     // slash handlers below.
     approvalsMode: initialPermsMode,
+    // v0.24.4: drives the statusbar gate that hides the sandbox-billing
+    // balance segment + drives the /help copy below. See state.ts.
+    isLocalGateway,
   })
 
   const renderer = await createCliRenderer({
@@ -367,7 +378,11 @@ export async function runChatSandbox(
         if (detail) state.setBalance(Number(formatEther(detail.totalBalance)))
       })
       .catch(() => {})
-    if (operatorAddressForBilling) {
+    // v0.24.4: local-gateway deploys have no Daytona billing reserve to
+    // surface — skip the RPC roundtrip entirely (saved 2 calls/min on the
+    // 30s timer) and leave sandboxBalance() as null so the statusbar Show
+    // gate hides the segment.
+    if (!isLocalGateway && operatorAddressForBilling) {
       getSandboxBillingReserve({ recipient: operatorAddressForBilling })
         .then(wei => state.setSandboxBalance(Number(formatEther(wei))))
         .catch(() => {})
@@ -467,9 +482,15 @@ export async function runChatSandbox(
       return true
     }
     if (cmd === '/help') {
+      // v0.24.4: differentiate the help copy. Local gateway mode flushes
+      // memory directly to chain via the daemon; sandbox mode flushes via
+      // the remote harness sitting in Daytona. Both share the same command
+      // surface so the body is identical; only the prefix label differs.
+      const modeLabel = isLocalGateway ? 'local gateway' : 'sandbox'
+      const flushTarget = isLocalGateway ? 'via local gateway daemon' : 'via remote harness'
       state.pushRow({
         role: 'system',
-        text: "sandbox-mode slash commands:\n  /sync   force memory + activity flush via remote harness\n  /yolo   toggle approval prompts off/on for this session\n  /perms <mode>  set permission mode (off|prompt|strict); no arg shows current\n  /reset  clear this channel's conversation history\n  /exit   quit (harness keeps running)\n  /help   this message",
+        text: `${modeLabel}-mode slash commands:\n  /sync   force memory + activity flush ${flushTarget}\n  /yolo   toggle approval prompts off/on for this session\n  /perms <mode>  set permission mode (off|prompt|strict); no arg shows current\n  /reset  clear this channel's conversation history\n  /exit   quit (${isLocalGateway ? 'gateway daemon keeps running' : 'harness keeps running'})\n  /help   this message`,
       })
       return true
     }

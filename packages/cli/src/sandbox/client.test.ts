@@ -155,4 +155,97 @@ describe('SandboxClient', () => {
     const resp = await fix.client.health()
     expect(resp.runtimeReady).toBe(true)
   })
+
+  // v0.24.4: approvePairing signs the same `adminTickHash('pairing-approve',
+  // ts, sandboxId)` payload as autotopup-tick / profile-key. We assert by
+  // intercepting fetch and confirming the signature recovers to the operator
+  // address — this proves the SandboxClient is signing what the server expects
+  // without needing a live PairingStore in the gateway test fixture.
+  test('approvePairing posts signed body to /admin/pairing/approve', async () => {
+    interface CapturedBody {
+      platform: string
+      code: string
+      ts: number
+      signature: Hex
+    }
+    const captured: { body: CapturedBody | null; url: string | null } = { body: null, url: null }
+    const mockFetch = (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      captured.url = typeof input === 'string' ? input : input.toString()
+      captured.body = JSON.parse(String(init?.body ?? '{}')) as CapturedBody
+      return new Response(JSON.stringify({ ok: true, userId: '42', userName: 'bob' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as unknown as typeof fetch
+    const operator = privateKeyToAccount(fix.operatorPriv)
+    const client = new SandboxClient({
+      endpoint: 'http://stub.local',
+      sandboxId: 'sbx-pair-sign',
+      operator,
+      fetchImpl: mockFetch,
+    })
+
+    const result = await client.approvePairing('telegram', 'ABCDEFGH')
+    expect(result.ok).toBe(true)
+    expect(result.userId).toBe('42')
+    expect(result.userName).toBe('bob')
+    expect(captured.url).toBe('http://stub.local/admin/pairing/approve')
+    expect(captured.body).not.toBeNull()
+    const body = captured.body
+    if (!body) throw new Error('captured.body is null')
+    expect(body.platform).toBe('telegram')
+    expect(body.code).toBe('ABCDEFGH')
+    expect(typeof body.ts).toBe('number')
+    expect(body.signature).toMatch(/^0x[0-9a-fA-F]+$/)
+
+    // Recover address from signature + reconstructed hash; assert operator.
+    const { adminTickHash } = await import('@s0nderlabs/anima-gateway')
+    const { recoverMessageAddress } = await import('viem')
+    const hash = adminTickHash({
+      action: 'pairing-approve',
+      ts: body.ts,
+      sandboxId: 'sbx-pair-sign',
+    })
+    const recovered = await recoverMessageAddress({
+      message: { raw: hash },
+      signature: body.signature,
+    })
+    expect(recovered.toLowerCase()).toBe(operator.address.toLowerCase())
+  })
+
+  test('approvePairing surfaces ok:false reason from gateway', async () => {
+    const mockFetch = (async () => {
+      return new Response(JSON.stringify({ ok: false, reason: 'locked-out' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as unknown as typeof fetch
+    const operator = privateKeyToAccount(fix.operatorPriv)
+    const client = new SandboxClient({
+      endpoint: 'http://stub.local',
+      sandboxId: 'sbx-pair-lock',
+      operator,
+      fetchImpl: mockFetch,
+    })
+    const result = await client.approvePairing('telegram', 'ABCDEFGH')
+    expect(result.ok).toBe(false)
+    expect(result.reason).toBe('locked-out')
+  })
+
+  test('approvePairing throws on 401', async () => {
+    const mockFetch = (async () => {
+      return new Response(JSON.stringify({ error: 'unauthorized', reason: 'sig-mismatch' }), {
+        status: 401,
+        headers: { 'content-type': 'application/json' },
+      })
+    }) as unknown as typeof fetch
+    const operator = privateKeyToAccount(fix.operatorPriv)
+    const client = new SandboxClient({
+      endpoint: 'http://stub.local',
+      sandboxId: 'sbx-pair-401',
+      operator,
+      fetchImpl: mockFetch,
+    })
+    await expect(client.approvePairing('telegram', 'ABCDEFGH')).rejects.toThrow(/auth failed/)
+  })
 })

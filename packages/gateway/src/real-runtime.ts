@@ -309,6 +309,21 @@ export class RealRuntime implements RuntimeAdapter {
     return this.#runtime.setProfileKey(keyHex)
   }
 
+  /**
+   * v0.24.4: approve a pending pairing code in the container's pairing dir.
+   * Called by the `/admin/pairing/approve` endpoint after operator-sig
+   * verification succeeds. Forwards to `BuiltRuntime.approvePairing` which
+   * wraps `PairingStore.approveCode` with the locked-out vs unknown-code
+   * branching the HTTP layer needs.
+   */
+  approvePairing(
+    platform: string,
+    code: string,
+  ): { ok: true; userId: string; userName: string } | { ok: false; reason: string } {
+    if (!this.#runtime) return { ok: false, reason: 'runtime-not-started' }
+    return this.#runtime.approvePairing(platform, code)
+  }
+
   // Wire the drainers. Each pulls from the queue, runs brain.infer with the
   // appropriate source, persists activity entries, fires sync flush. Mirrors
   // chat.tsx local-mode but surfaces output via EventHub instead of TUI rows.

@@ -634,7 +634,13 @@ export function ChatApp(props: AppProps) {
             {formatBalance(props.state.balance())}
           </text>
         </Show>
-        <Show when={props.state.sandboxBalance() != null}>
+        {/* v0.24.4: hide the sandbox-billing balance segment on local-gateway
+            deploys. There's no Daytona reserve to surface for a daemon running
+            on the operator's own machine; chat-sandbox.tsx also skips the
+            getSandboxBillingReserve RPC for the same reason, so the signal
+            stays null even if the gate were missing — but gating here keeps
+            the statusbar deterministic for tests + future setters. */}
+        <Show when={!props.state.isLocalGateway && props.state.sandboxBalance() != null}>
           <text fg="#374151" flexShrink={0}>
             {'  ·  '}
           </text>

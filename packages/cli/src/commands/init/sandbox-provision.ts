@@ -241,7 +241,7 @@ export async function runSandboxProvision(
   })
   const installLabel =
     mode === 'npm'
-      ? 'apt + bun + npm install + harness daemon, runs ~30-60s'
+      ? 'apt + bun + npm install + browser deps + harness daemon, ~90-150s (live progress below)'
       : 'apt + bun + git clone + harness daemon, runs ~3-5 min'
   progress(`launching bootstrap (${installLabel})`)
   const launchRes = await provider.execInToolbox(sandboxId, { command: script, timeout: 60 })
@@ -253,20 +253,23 @@ export async function runSandboxProvision(
   }
 
   // Poll the done/fail markers. Bootstrap runs ~3-8 min depending on the
-  // image cache; surface progress every 30s so the operator sees movement.
+  // image cache; surface progress every 5s so the operator sees real
+  // movement instead of a static spinner.
   progress('waiting for bootstrap completion (apt + bun + git clone + harness ready)')
   const bootstrapDeadline = Date.now() + 600_000 // 10 min max
-  // Lean poll: cheap `cat` of FAIL + DONE markers every 5s; the
-  // progress-log `tail` only attaches every 6th tick (~30s) since the
-  // operator UX echo throttles at 30s anyway. Saves ~5/6 of the
-  // signed-exec response payload through Daytona's HTTP channel.
+  // Lean poll: cheap `cat` of FAIL + DONE markers, plus a 20-line tail of
+  // the progress log so STAGE markers are findable. The progress surfacing
+  // logic prefers any `STAGE: ...` line over the raw tail line.
   const execRead = makeExecRead(provider, sandboxId)
   const FAST_POLL = `echo --F--; cat ${BOOTSTRAP_FAIL_MARKER} 2>/dev/null; echo --D--; cat ${BOOTSTRAP_DONE_MARKER} 2>/dev/null`
-  const SLOW_POLL = `${FAST_POLL}; echo --P--; tail -n 1 ${BOOTSTRAP_PROGRESS_LOG} 2>/dev/null`
-  let tick = 0
+  const SLOW_POLL = `${FAST_POLL}; echo --P--; tail -n 20 ${BOOTSTRAP_PROGRESS_LOG} 2>/dev/null`
   let lastDone = ''
+  let lastSurfaced = ''
   while (Date.now() < bootstrapDeadline) {
-    const surfaceProgress = ++tick % 6 === 0
+    // v0.24.4: surface progress every 5s tick (was every 6th tick / ~30s).
+    // STAGE markers from the bootstrap script give the operator a meaningful
+    // update on every poll without spamming repeats — `lastSurfaced` dedupes.
+    const surfaceProgress = true
     const out = await execRead(surfaceProgress ? SLOW_POLL : FAST_POLL)
     const fail = sliceBetween(out, '--F--', '--D--')
     const done = surfaceProgress ? sliceBetween(out, '--D--', '--P--') : sliceAfter(out, '--D--')
@@ -286,12 +289,11 @@ export async function runSandboxProvision(
       break
     }
     if (surfaceProgress) {
-      const real = sliceAfter(out, '--P--')
-        .trim()
-        .split('\n')
-        .filter(l => !l.includes('setlocale'))
-        .pop()
-      if (real) progress(`bootstrap: ${real}`)
+      const real = extractBootstrapProgressLine(sliceAfter(out, '--P--'))
+      if (real && real !== lastSurfaced) {
+        lastSurfaced = real
+        progress(`bootstrap: ${real}`)
+      }
     }
     await sleep(5000)
   }
@@ -887,6 +889,31 @@ export function makeExecRead(
 export function extractExecOutput(r: ToolboxExecResponse): string {
   if (typeof r.result === 'string') return r.result
   return r.stdout ?? r.stderr ?? ''
+}
+
+/**
+ * Pull the most informative progress line from a chunk of the bootstrap log.
+ *
+ * v0.24.4: bootstrap.ts emits explicit `STAGE: ...` markers before each major
+ * step (apt update, apt install, bun install, anima install, browser deps,
+ * harness launch). If any tail line starts with `STAGE: ` we prefer that
+ * (last-wins, prefix stripped) so the operator sees the current stage instead
+ * of whichever raw `[$(date) ...]` log line happened to land last. Falls back
+ * to the existing filter/pop heuristic when no STAGE marker is present (older
+ * gateway versions, or the gap between bootstrap-start and the first STAGE).
+ */
+export function extractBootstrapProgressLine(tail: string): string | undefined {
+  const lines = tail.trim().split('\n')
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]?.trim() ?? ''
+    if (line.startsWith('STAGE: ')) return line.slice('STAGE: '.length)
+  }
+  return (
+    lines
+      .filter(l => !l.includes('setlocale'))
+      .pop()
+      ?.trim() || undefined
+  )
 }
 
 function sliceBetween(s: string, start: string, end: string): string {

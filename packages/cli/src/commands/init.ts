@@ -45,6 +45,7 @@ import {
 import { type Address, type Hex, formatEther, hexToBytes, parseEther } from 'viem'
 import { writeConfigTs } from '../config/render'
 import { withSilencedConsole } from '../util/silence-console'
+import { loadTelegramHandoffSecrets } from '../util/telegram-secrets'
 import { estimateCosts, renderCostSummary } from './init/cost'
 import { fundingGate } from './init/funding-gate'
 import { pickBrainModel } from './init/model-picker'
@@ -542,12 +543,83 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     }
   }
 
+  // v0.24.4: Phase E (Telegram bot setup) MUST run before Phase 11 (sandbox
+  // provision) so the sandbox handoff envelope can ship `telegram-secrets`
+  // and the listener boots active. Previously Phase E ran AFTER provision and
+  // the sandbox booted with `listeners.telegram: disabled`, forcing the
+  // operator to `anima upgrade --in-place` post-init to re-ship secrets.
+  let telegramConfigured: { botUsername: string; mode: string } | null = null
+  if (mintedTokenId !== null && contractAddress) {
+    const tgChoice = await confirm({
+      message: 'Configure a Telegram bot for this agent now? (recommended)',
+      initialValue: true,
+    })
+    if (!isCancel(tgChoice) && tgChoice === true) {
+      try {
+        const { runTelegramStep } = await import('./init/telegram-step')
+        const tgResult = await runTelegramStep({
+          signer: operator,
+          agentId: finalAgentId,
+          agentAddress: agent.address as Address,
+          configPath,
+          // Synthetic partial cfg — caller writes the final cfg below. Pass
+          // skipConfigWrite=true so telegram-step doesn't touch disk.
+          config: { plugins: [], subname: registeredSubname } as never,
+          network,
+          skipConfigWrite: true,
+        })
+        if (tgResult.configured && tgResult.botUsername && tgResult.modeUsed) {
+          telegramConfigured = {
+            botUsername: tgResult.botUsername,
+            mode: tgResult.modeUsed,
+          }
+          // v0.24.3: append TELEGRAM key to `.operator-session` so the gateway
+          // daemon auto-spawns on first chat without re-prompting Touch ID.
+          if (tgResult.telegramScopeKeyHex) {
+            try {
+              const sess = buildOperatorSession({
+                agent: agent.address as Address,
+                keys: {
+                  ...operatorKeys,
+                  [OPERATOR_BLOB_SCOPES.TELEGRAM]: tgResult.telegramScopeKeyHex,
+                },
+              })
+              writeOperatorSession(finalAgentId, sess)
+            } catch (e) {
+              note(
+                `operator-session rewrite skipped: ${(e as Error).message.slice(0, 160)}\nRun \`anima telegram setup\` later to re-derive the TG scope key.`,
+                'telegram (non-fatal)',
+              )
+            }
+          }
+        }
+      } catch (e) {
+        note(
+          `Telegram step failed: ${(e as Error).message.slice(0, 200)}\nIdentity + iNFT + subname are safe. Re-run \`anima telegram setup\` later.`,
+          'non-fatal',
+        )
+      }
+    }
+  }
+
+  // Load TG handoff secrets into memory for the sandbox envelope. Skipped if
+  // TG wasn't configured this run. The shape is exactly what the harness
+  // expects inside the secondary ECIES envelope (botToken + allowedUserIds +
+  // optional pairingApproved). Errors are non-fatal: TG is opt-in.
+  let telegramHandoff: Awaited<ReturnType<typeof loadTelegramHandoffSecrets>> = undefined
+  if (telegramConfigured && mintedTokenId !== null && contractAddress) {
+    telegramHandoff = await loadTelegramHandoffSecrets({
+      signer: operator,
+      agentAddress: agent.address as Address,
+      contractAddress,
+      tokenId: mintedTokenId,
+      onNotice: msg => note(msg, 'telegram handoff (non-fatal)'),
+    })
+  }
+
   // Phase 11: deploy harness into 0G Sandbox if user picked sandbox target.
-  // Runs AFTER subname-records (so we know if subname is registered) but
-  // BEFORE config write (so the resulting sandbox.id + endpoint land in cfg).
-  // Tx + handoff cost paid in testnet 0G via the operator wallet's Galileo
-  // network. Idempotent: if balance already sufficient, deposit is skipped;
-  // if TEE signer already acknowledged, that step is skipped too.
+  // Runs AFTER Phase E so handoff envelope can ship TG secrets to the
+  // container. Sandbox boots with `listeners.telegram: active` first try.
   let sandboxResult: SandboxProvisionResult | null = null
   if (deployTarget === 'sandbox' && mintedTokenId !== null && contractAddress && modelPick) {
     const sBox = spinner()
@@ -564,6 +636,7 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
         ref: process.env.ANIMA_BOOTSTRAP_REF ?? 'main',
         subname: registeredSubname,
         profileScopeKeyHex,
+        telegramSecrets: telegramHandoff,
         onProgress: msg => sBox.message(msg),
       })
       await updateWizardState(paths.dir, draft => {
@@ -631,7 +704,9 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
       provider: modelPick?.provider ?? null,
       model: modelPick?.model ?? null,
     },
-    plugins: ['onchain', 'comms', 'system'],
+    plugins: telegramConfigured
+      ? ['onchain', 'comms', 'system', 'telegram']
+      : ['onchain', 'comms', 'system'],
     tools: {},
     imports: { claudeCode: true },
     operator: operatorHint,
@@ -649,71 +724,6 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     header: '// Regenerated by `anima init`. Edit freely; type-safe.',
     subname: registeredSubname,
   })
-
-  // ─── Phase E: optional Telegram bot setup ───────────────────────────────
-  //
-  // Hermes folds messaging-platform setup into `hermes gateway setup` (Section
-  // 4 of the wizard, post-identity). We mirror that: fold it into init's tail
-  // so `anima init` produces a working agent + working bot in one shot,
-  // reusing the still-unlocked operator wallet (no second Touch ID prompt).
-
-  let telegramConfigured: { botUsername: string; mode: string } | null = null
-  if (mintedTokenId !== null && contractAddress) {
-    const tgChoice = await confirm({
-      message: 'Configure a Telegram bot for this agent now? (recommended)',
-      initialValue: true,
-    })
-    if (!isCancel(tgChoice) && tgChoice === true) {
-      try {
-        const { runTelegramStep } = await import('./init/telegram-step')
-        const tgResult = await runTelegramStep({
-          signer: operator,
-          agentId: finalAgentId,
-          agentAddress: agent.address as Address,
-          configPath,
-          config: cfg,
-          network,
-        })
-        if (tgResult.configured && tgResult.botUsername && tgResult.modeUsed) {
-          telegramConfigured = {
-            botUsername: tgResult.botUsername,
-            mode: tgResult.modeUsed,
-          }
-          // v0.24.3: append TELEGRAM key to `.operator-session` so the gateway
-          // daemon auto-spawns on first chat without re-prompting Touch ID.
-          // Without it, requiredScopesForAgent reports TELEGRAM missing →
-          // daemon fail-louds at boot → chat.tsx degrades to embedded mode
-          // (TG listener silently dropped).
-          if (tgResult.telegramScopeKeyHex) {
-            try {
-              const sess = buildOperatorSession({
-                agent: agent.address as Address,
-                keys: {
-                  ...operatorKeys,
-                  [OPERATOR_BLOB_SCOPES.TELEGRAM]: tgResult.telegramScopeKeyHex,
-                },
-              })
-              writeOperatorSession(finalAgentId, sess)
-            } catch (e) {
-              // Surface to wizard UI (not console.warn) — silent failure here
-              // would only manifest as the daemon fail-loud above, hours later
-              // with no breadcrumb back to init. Matches the boot-restore
-              // visibility lesson (`feedback-silent-restore-failure-bites`).
-              note(
-                `operator-session rewrite skipped: ${(e as Error).message.slice(0, 160)}\nRun \`anima telegram setup\` later to re-derive the TG scope key.`,
-                'telegram (non-fatal)',
-              )
-            }
-          }
-        }
-      } catch (e) {
-        note(
-          `Telegram step failed: ${(e as Error).message.slice(0, 200)}\nIdentity + iNFT + subname are safe. Re-run \`anima telegram setup\` later.`,
-          'non-fatal',
-        )
-      }
-    }
-  }
 
   await operator.close?.()
 
