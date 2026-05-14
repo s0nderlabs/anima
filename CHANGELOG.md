@@ -4,6 +4,24 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.0] - 2026-05-14
+
+### Added
+
+- **Packed-blob memory slot envelope (v2 format).** Slots 0 (memory-index) and 3 (profile) now wrap their root file plus every sibling file in the partition into a single encrypted blob. Slot 0 packs `MEMORY.md` + every `agent/*.md` except `identity.md`/`persona.md` (which keep their own slots). Slot 3 packs `user/profile.md` + every other `user/*.md`. Result: every file the brain writes under `memory/agent/` or `memory/user/` now survives reprovision, cross-device handoff, and iNFT transfer (with correct purge semantics on the user side). Pre-fix only 6 files (the hardcoded `RESTORE_TARGETS` whitelist) anchored on chain; every other `user/<slug>.md` and `agent/learned-*.md` was local-only scratchpad that vanished on reprovision and left `MEMORY.md` with dangling references. New helpers: `packages/core/src/memory/pack-blob.ts` (encode/decode v2 envelope), `pack-gather.ts` (gather/write partition).
+- **Backwards-compat detection.** `isV2Envelope` cheap byte sniff lets readers detect v2 vs legacy v1 raw markdown. Restore path unpacks v2 to the full partition tree; v1 stays single-file. 19 new unit tests cover round-trip, large packs (~100 files), unsafe filename rejection, and version-mismatch errors.
+
+### Changed
+
+- **`syncProfile` accepts pre-built plaintext** instead of reading from a file path. The slot-3 caller (`MemorySyncManager.doFlush`) now passes the encoded v2 pack bytes directly. Same operator-keyed encryption (PROFILE scope), same purge-on-transfer semantics.
+- **`memory-restore.ts` unpacks slot 0 + 3 v2 envelopes on cold start.** Detects the envelope after decryption, writes root file + every entry in the `files` map to its path under `memory/agent/` or `memory/user/`. Legacy v1 path stays single-file.
+
+### Fixed
+
+- **Closes Issue 2 from the v0.23.x roadmap (RESTORE_TARGETS whitelist gap).** Operators no longer lose `user/operator-preferences.md`, `agent/learned-*.md`, or any other partition file on reprovision. `/console` PROFILE.md view now reflects the chain truth instead of just the canary seed.
+
+[0.24.0]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.0
+
 ## [0.23.2] - 2026-05-14
 
 ### Changed

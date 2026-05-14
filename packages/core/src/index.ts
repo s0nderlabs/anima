@@ -161,6 +161,18 @@ export {
   type ProfileSyncOpts,
   type ProfileSyncResult,
   type RestoreProfileOpts,
+  PACK_BLOB_VERSION,
+  encodePackBlob,
+  encodeRootOrPack,
+  decodePackBlob,
+  isV2Envelope,
+  type PackBlob,
+  type EncodePackOpts,
+  gatherAgentPack,
+  gatherUserPack,
+  writeAgentPack,
+  writeUserPack,
+  type GatherResult,
 } from './memory'
 
 export type { Storage } from './storage'

@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { type Hex, keccak256 } from 'viem'
 import type { AnimaNetwork } from '../config'
@@ -37,8 +37,13 @@ export interface ProfileSyncOpts {
   agentPrivkey: Hex
   /** Operator-derived AES key for the PROFILE scope (32 bytes). */
   profileKey: Buffer
-  /** Local path to `<agentDir>/memory/user/profile.md`. */
-  profilePath: string
+  /**
+   * v0.24.0: pre-built plaintext bytes for the profile slot. Callers should
+   * pass the v2 pack envelope (gathered + encoded by `gatherUserPack` +
+   * `encodePackBlob`). v0.23.x callers can keep passing raw `user/profile.md`
+   * bytes — the encryption layer is agnostic to envelope vs raw.
+   */
+  plaintext: Uint8Array
   /** Last successful plaintext hash; null on first flush. */
   lastPlaintextHash: Hex | null
 }
@@ -51,12 +56,7 @@ export interface ProfileSyncResult {
 }
 
 export async function syncProfile(opts: ProfileSyncOpts): Promise<ProfileSyncResult> {
-  let plaintext: Uint8Array
-  try {
-    plaintext = new Uint8Array(await readFile(opts.profilePath))
-  } catch {
-    return { uploaded: false, rootHash: null, plaintextHash: null, reason: 'missing-file' }
-  }
+  const plaintext = opts.plaintext
   if (plaintext.length === 0) {
     return { uploaded: false, rootHash: null, plaintextHash: null, reason: 'missing-file' }
   }

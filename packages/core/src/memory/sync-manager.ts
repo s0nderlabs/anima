@@ -13,6 +13,8 @@ import { OGStorage } from '../storage/og'
 import { syncActivityLog } from './activity-sync'
 import { deriveMemoryKey, encryptMemoryBytes } from './encryption'
 import { readOrNull } from './fs-util'
+import { encodePackBlob } from './pack-blob'
+import { gatherAgentPack, gatherUserPack } from './pack-gather'
 import { syncProfile } from './profile-sync'
 import { type SyncTarget, defaultMemorySyncTargets } from './sync'
 
@@ -252,7 +254,36 @@ export class MemorySyncManager {
     const uploads: FlushResult['uploads'] = {}
     const changedSlots: IntelligentDataSlot[] = []
 
+    // v0.24.0: slot 'memory-index' is a packed-blob envelope containing MEMORY.md
+    // root + every agent/*.md file (except identity.md and persona.md which keep
+    // their own slots). Anchoring the pack as one slot makes every agent
+    // partition file survive reprovision instead of being local-only scratchpad.
+    const memoryDirForPacks = this.opts.memoryDir ?? agentPaths.agent(this.opts.agentId).memoryDir
+    const agentPack = await gatherAgentPack(memoryDirForPacks)
+    const agentPackBytes =
+      agentPack.root.length === 0 && Object.keys(agentPack.files).length === 0
+        ? null
+        : encodePackBlob(agentPack)
+    if (agentPackBytes) {
+      const plaintextHash = keccak256(agentPackBytes)
+      if (this.lastPlaintextHash.get('memory-index') !== plaintextHash) {
+        const ciphertext = encryptMemoryBytes(agentPackBytes, this.memoryKey)
+        const rootHash = (await this.storage.putBlob(ciphertext)) as Hex
+        if (!rootHash.startsWith('0x') || rootHash.length !== 66) {
+          throw new Error(
+            `0G Storage returned a root hash that doesn't fit bytes32 (${rootHash.length} chars)`,
+          )
+        }
+        uploads['memory-index'] = { rootHash, plaintextHash }
+        this.lastPlaintextHash.set('memory-index', plaintextHash)
+        changedSlots.push('memory-index')
+        updates.push({ slot: 'memory-index', dataHash: rootHash })
+      }
+    }
+
+    // Identity + persona slots keep their single-file flow (no pack).
     for (const target of this.fileTargets) {
+      if (target.slot === 'memory-index') continue
       const bytes = await readOrNull(target.path)
       if (!bytes) continue
       const plaintextHash = keccak256(bytes)
@@ -291,23 +322,32 @@ export class MemorySyncManager {
     // Only flushes when profileKey is provided (operator unlocked or
     // sandbox handoff completed). The slot rides on the same batched
     // updateSlots tx as the agent-key slots — one chain anchor per turn.
+    //
+    // v0.24.0: slot 'profile' is a packed-blob envelope containing
+    // user/profile.md root + every user/*.md file. Same operator-scoped
+    // encryption (PROFILE key, purges on iNFT transfer) but the encrypted
+    // plaintext is now the v2 pack instead of a single file.
     if (this.profileKey) {
       try {
-        const profileRes = await syncProfile({
-          network: this.opts.network,
-          agentPrivkey: this.opts.agentPrivkey,
-          profileKey: this.profileKey,
-          profilePath: this.profilePath,
-          lastPlaintextHash: this.lastPlaintextHash.get('profile') ?? null,
-        })
-        if (profileRes.uploaded && profileRes.rootHash && profileRes.plaintextHash) {
-          uploads.profile = {
-            rootHash: profileRes.rootHash,
-            plaintextHash: profileRes.plaintextHash,
+        const userPack = await gatherUserPack(memoryDirForPacks)
+        if (userPack.root.length > 0 || Object.keys(userPack.files).length > 0) {
+          const userPackBytes = encodePackBlob(userPack)
+          const profileRes = await syncProfile({
+            network: this.opts.network,
+            agentPrivkey: this.opts.agentPrivkey,
+            profileKey: this.profileKey,
+            plaintext: userPackBytes,
+            lastPlaintextHash: this.lastPlaintextHash.get('profile') ?? null,
+          })
+          if (profileRes.uploaded && profileRes.rootHash && profileRes.plaintextHash) {
+            uploads.profile = {
+              rootHash: profileRes.rootHash,
+              plaintextHash: profileRes.plaintextHash,
+            }
+            this.lastPlaintextHash.set('profile', profileRes.plaintextHash)
+            changedSlots.push('profile')
+            updates.push({ slot: 'profile', dataHash: profileRes.rootHash })
           }
-          this.lastPlaintextHash.set('profile', profileRes.plaintextHash)
-          changedSlots.push('profile')
-          updates.push({ slot: 'profile', dataHash: profileRes.rootHash })
         }
       } catch {
         // Non-fatal: profile flush failure shouldn't block the agent-key

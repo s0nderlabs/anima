@@ -66,3 +66,19 @@ export {
   type RestoreProfileOpts,
 } from './profile-sync'
 export { readOrNull } from './fs-util'
+export {
+  PACK_BLOB_VERSION,
+  encodePackBlob,
+  encodeRootOrPack,
+  decodePackBlob,
+  isV2Envelope,
+  type PackBlob,
+  type EncodePackOpts,
+} from './pack-blob'
+export {
+  gatherAgentPack,
+  gatherUserPack,
+  writeAgentPack,
+  writeUserPack,
+  type GatherResult,
+} from './pack-gather'

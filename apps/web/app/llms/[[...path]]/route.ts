@@ -92,7 +92,7 @@ bun add -g @s0nderlabs/anima
 anima init
 \`\`\`
 
-Current version: 0.23.2. Requires bun >=1.1. Published as \`@s0nderlabs/anima\` on npm; binary name is \`anima\`.
+Current version: 0.24.0. Requires bun >=1.1. Published as \`@s0nderlabs/anima\` on npm; binary name is \`anima\`.
 
 ## For AI agents
 
@@ -130,7 +130,7 @@ async function renderLlmsFull(): Promise<string> {
 
 > \`anima init\` is interactive. Eight blocking @clack/prompts selects with no env-var bypass (except \`ANIMA_OPERATOR_PRIVKEY\`). Two completion paths from an agent: guide the human, or puppet the TUI with \`tmux send-keys\` if you have shell access. Naive stdin piping fails because @clack checks for a real TTY.
 
-Current version: 0.23.2. Binary name: \`anima\`. Engine: bun >=1.1.`
+Current version: 0.24.0. Binary name: \`anima\`. Engine: bun >=1.1.`
 
   const sections: string[] = [header]
 

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { randomBytes } from 'node:crypto'
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { Hex } from 'viem'
@@ -119,14 +119,13 @@ describe('profile-sync round trip (precomputedKey path)', () => {
 
   // v0.23.0: syncProfile reports missing-file when profile.md doesn't exist
   // on disk (cold-start sandbox before init seeds). No-op rather than throw.
-  test('syncProfile returns missing-file when path is absent', async () => {
+  test('syncProfile returns missing-file when plaintext is empty', async () => {
     const profileKey = Buffer.from(randomBytes(32))
-    const dir = await mkdtemp(join(tmpdir(), 'anima-profile-missing-'))
     const res = await syncProfile({
       network: '0g-mainnet',
       agentPrivkey: generatePrivateKey(),
       profileKey,
-      profilePath: join(dir, 'does-not-exist.md'),
+      plaintext: new Uint8Array(0),
       lastPlaintextHash: null,
     })
     expect(res.uploaded).toBe(false)
@@ -135,22 +134,14 @@ describe('profile-sync round trip (precomputedKey path)', () => {
 
   test('syncProfile returns no-change when plaintextHash matches lastPlaintextHash', async () => {
     const profileKey = Buffer.from(randomBytes(32))
-    const dir = await mkdtemp(join(tmpdir(), 'anima-profile-nochange-'))
-    const profilePath = join(dir, 'profile.md')
-    const content = '# Profile\n\nno change expected\n'
-    await writeFile(profilePath, content)
-    // First sync uploads; cache the resulting hash; second sync re-runs
-    // against the SAME plaintext + that hash should short-circuit.
-    // We slice the path by computing the keccak inline because the upload
-    // side requires a real 0G Storage handle. The no-change branch fires
-    // BEFORE any network call, so the test never touches storage.
+    const plaintext = new TextEncoder().encode('# Profile\n\nno change expected\n')
     const { keccak256 } = await import('viem')
-    const plaintextHash = keccak256(new Uint8Array(await readFile(profilePath))) as Hex
+    const plaintextHash = keccak256(plaintext) as Hex
     const res = await syncProfile({
       network: '0g-mainnet',
       agentPrivkey: generatePrivateKey(),
       profileKey,
-      profilePath,
+      plaintext,
       lastPlaintextHash: plaintextHash,
     })
     expect(res.uploaded).toBe(false)

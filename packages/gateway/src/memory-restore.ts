@@ -6,11 +6,15 @@ import {
   type IntelligentDataEntry,
   type IntelligentDataSlot,
   bootstrapHashFor,
+  decodePackBlob,
   decryptMemoryBytes,
   deriveMemoryKey,
   downloadBlobByRoot,
   ensureSyntheticIndexEntries,
+  isV2Envelope,
   restoreProfile,
+  writeAgentPack,
+  writeUserPack,
 } from '@s0nderlabs/anima-core'
 import type { Address, Hex } from 'viem'
 
@@ -143,6 +147,25 @@ async function restoreSlot(
         profilePath: path,
       })
       if (res.status === 'restored') {
+        // v0.24.0: profile blob may carry a v2 pack envelope. Detect by reading
+        // back what restoreProfile just wrote — if it's a v2 envelope, unpack
+        // it to the user partition (writeUserPack handles root + sibling files).
+        const written = await tryReadFile(path)
+        if (written && isV2Envelope(written)) {
+          try {
+            const blob = decodePackBlob(written)
+            await writeUserPack(`${agentDir}/memory`, blob)
+            return {
+              slot: 'profile',
+              path,
+              status: 'restored',
+              bytes: written.length,
+              reason: `packed:${Object.keys(blob.files).length}`,
+            }
+          } catch {
+            // Fall through to single-file behavior on parse failure.
+          }
+        }
         return { slot: 'profile', path, status: 'restored', bytes: res.bytes }
       }
       lastReason = res.reason ?? 'unknown'
@@ -179,6 +202,21 @@ async function restoreSlot(
   }
   try {
     const plaintext = decryptMemoryBytes(ciphertext, memoryKey)
+    // v0.24.0: slot 'memory-index' may carry a v2 pack envelope (root MEMORY.md +
+    // every agent/*.md except identity/persona). Unpack instead of single-file
+    // write. Legacy v1 raw markdown still works (writePack with empty files map).
+    if (entry.dataDescription === 'memory-index' && isV2Envelope(plaintext)) {
+      const blob = decodePackBlob(plaintext)
+      await writeAgentPack(`${agentDir}/memory`, blob)
+      const packedCount = Object.keys(blob.files).length
+      return {
+        slot: 'memory-index',
+        path,
+        status: 'restored',
+        bytes: plaintext.length,
+        reason: `packed:${packedCount}`,
+      }
+    }
     await mkdir(dirname(path), { recursive: true })
     await writeFile(path, plaintext)
     return {
@@ -225,5 +263,14 @@ async function fileNonEmpty(path: string): Promise<boolean> {
     return s.isFile() && s.size > 0
   } catch {
     return false
+  }
+}
+
+async function tryReadFile(path: string): Promise<Uint8Array | null> {
+  try {
+    const { readFile } = await import('node:fs/promises')
+    return new Uint8Array(await readFile(path))
+  } catch {
+    return null
   }
 }
