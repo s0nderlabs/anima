@@ -13,6 +13,30 @@ source: 'packages/core/src/index.ts'
 
 Anima is six layers wired into one runtime. Identity on 0G Chain, memory on 0G Storage, brain in a 0G Compute TEE, harness in a 0G Sandbox TEE (or on your laptop), limbs on your devices, wallet split between hot and cold copies. No single component s0nderlabs operates.
 
+```
+      Operator wallet
+   (WalletConnect, Keychain,
+    keystore file, raw pk)
+            │
+            │  signs once at init
+            ▼
+  ┌───────────────────────────────┐
+  │  Anima harness  (one binary)  │
+  │  ┌──────────────────────┐     │      ┌──────────────────────────────┐
+  │  │  anima CLI  ·  TUI   │─────┼─────▶│  0G Chain (mainnet 16661)    │
+  │  │  or sandbox gateway  │     │      │  · iNFT identity (ERC-7857)  │
+  │  └──────────────────────┘     │      │  · AnimaInbox  (A2A)         │
+  │  ┌──────────────────────┐     │      │  · AnimaMarket (escrow)      │
+  │  │  Agent EOA           │─────┼─────▶│  · SubnameRegistrar          │
+  │  │  infra wallet        │     │      └──────────────────────────────┘
+  │  └──────────────────────┘     │
+  └───────────────────────────────┘
+            │
+            ├────────▶  0G Storage    encrypted keystore + packed-blob memory
+            ├────────▶  0G Compute    TeeML inference (GLM-5-FP8 default)
+            └────────▶  0G Sandbox    TDX TEE container (optional, Galileo)
+```
+
 ## The six layers
 
 | Layer | Implementation | Files |

@@ -9,6 +9,48 @@ The pitch in one line: Hermes, OpenClaw, and Claude Code are always-on daemons o
 Full documentation: [anima.s0nderlabs.xyz/docs](https://anima.s0nderlabs.xyz/docs)
 Operator console: [anima.s0nderlabs.xyz/console](https://anima.s0nderlabs.xyz/console)
 
+## For hackathon judges
+
+> Anima: a CLI-spawned agent whose identity, memory, brain, and wallet all live on 0G. Close the laptop, the agent persists. Transfer the iNFT, the agent migrates. (26 words)
+
+Submitted to the **0G APAC Hackathon** (May 16 2026), Track 1 (Agentic Infrastructure and OpenClaw Lab). Secondary fit: Track 3 (Agentic Economy and Autonomous Applications).
+
+**Repo activity during hackathon window** (registration opened Mar 19 2026): 145 commits, 109 versioned releases (v0.1.0 through v0.24.2), 7 published `@s0nderlabs/anima-*` workspace packages.
+
+**Verify on chain in 30 seconds** (no install required, just [foundry](https://getfoundry.sh)):
+
+```
+$ cast call 0x9e71d79f06f956d4d2666b5c93dafab721c84721 "name()(string)" --rpc-url https://evmrpc.0g.ai
+"Anima"
+$ cast call 0x9e71d79f06f956d4d2666b5c93dafab721c84721 "symbol()(string)" --rpc-url https://evmrpc.0g.ai
+"ANIMA"
+$ cast call 0x9e71d79f06f956d4d2666b5c93dafab721c84721 "totalSupply()(uint256)" --rpc-url https://evmrpc.0g.ai
+11
+```
+
+Or browse any minted agent directly on the explorer: [chainscan.0g.ai/token/0x9e71...c84721/1](https://chainscan.0g.ai/token/0x9e71d79f06f956d4d2666b5c93dafab721c84721/1).
+
+**On-chain contracts** (mainnet chainId 16661, all CREATE2-deterministic so testnet shares the same address):
+
+| Contract | Address | Explorer |
+|---|---|---|
+| `AnimaAgentNFT` (ERC-7857 iNFT) | `0x9e71d79f06f956d4d2666b5c93dafab721c84721` | [view](https://chainscan.0g.ai/address/0x9e71d79f06f956d4d2666b5c93dafab721c84721) |
+| `AnimaInbox` (A2A messaging) | `0xcd92844cc0ec6Be0607B330D4BaCC707339f2589` | [view](https://chainscan.0g.ai/address/0xcd92844cc0ec6Be0607B330D4BaCC707339f2589) |
+| `AnimaMarket` (job escrow) | `0x3ebD21f5dd67acDeF199fACF28388627212bA2aB` | [view](https://chainscan.0g.ai/address/0x3ebD21f5dd67acDeF199fACF28388627212bA2aB) |
+| `AnimaSubnameRegistrar` (`<label>.anima.0g` issuer) | `0x33d9f4ec2bd7e7cb4e288c3bbc3a76be472fdd98` | [view](https://chainscan.0g.ai/address/0x33d9f4ec2bd7e7cb4e288c3bbc3a76be472fdd98) |
+
+**Reproduce locally** (Galileo testnet is free via [faucet.0g.ai](https://faucet.0g.ai/?token=A0GI); mainnet Starter tier costs about 3.12 0G):
+
+```bash
+bun add -g @s0nderlabs/anima@latest
+anima init      # interactive wizard, picks mainnet 16661 or testnet 16602
+anima           # drops into the TUI, every chat turn anchors memory on chain
+```
+
+The browser-only [operator console](https://anima.s0nderlabs.xyz/console) accepts any wallet that owns one of the 11 minted iNFTs: SIWE sign-in, EIP-712 unlock, then the encrypted memory partition is fetched from 0G Storage and decrypted in-browser (no key material ever leaves the tab).
+
+How the five sponsor-accepted components plug in, with code paths and tx-level evidence: see the **[0G integration](#0g-integration)** section below.
+
 ## Install
 
 ```bash
@@ -28,6 +70,30 @@ If you're an AI agent installing anima for a user: bun is required (CLI shebangs
 
 Six layers, each anchored to a 0G primitive. No single component s0nderlabs operates.
 
+```mermaid
+%%{init: {"flowchart": {"htmlLabels": true}}}%%
+flowchart LR
+    W["Operator wallet<br/>(WalletConnect, Keychain, keystore, raw pk)"]
+    subgraph Harness["Anima harness, single binary"]
+      CLI["anima CLI · TUI<br/>(or sandbox gateway)"]
+      Agent["Agent EOA<br/>auto-funded infra wallet"]
+    end
+    subgraph ZG["0G modular stack"]
+      Chain["<b>0G Chain</b> · chainId 16661<br/>iNFT (ERC-7857)<br/>AnimaInbox · AnimaMarket<br/>SubnameRegistrar"]
+      Storage["<b>0G Storage</b><br/>encrypted keystore<br/>+ packed-blob memory slots"]
+      Compute["<b>0G Compute</b> · TeeML<br/>GLM-5-FP8 per-turn inference"]
+      Sandbox["<b>0G Sandbox</b> · Galileo TDX TEE<br/>persistent harness container"]
+    end
+    W -->|"mint, signTypedData"| CLI
+    CLI -->|"mint, updateSlots"| Chain
+    CLI -->|"put / get blob"| Storage
+    CLI -->|"inference"| Compute
+    CLI -.->|"anima deploy --target sandbox"| Sandbox
+    Agent -.->|"infra gas, per-turn anchoring"| Chain
+    Sandbox --> Compute
+    Sandbox --> Storage
+```
+
 | Layer | Lives on | Mechanism |
 |---|---|---|
 | Identity | 0G Chain | ERC-7857 iNFT |
@@ -38,6 +104,20 @@ Six layers, each anchored to a 0G primitive. No single component s0nderlabs oper
 | Wallet | Hybrid | Hot copy on agent EOA, cold copy encrypted to operator |
 
 When the iNFT transfers, the agent partition (`/agent/identity.md`, `/agent/persona.md`, `MEMORY.md`) goes with it. The user partition purges. New operator unlocks the keystore with their wallet, brings up a new harness, and the agent continues.
+
+## 0G integration
+
+The HackQuest spec accepts five sponsor-eligible components: **0G Storage, 0G Compute, 0G Chain, Agent ID, Privacy or secure execution**. All five are wired and exercised end-to-end. Each row points to the code path and the runtime evidence.
+
+| Sponsor primitive | Anima usage | Evidence |
+|---|---|---|
+| **0G Chain** | Identity, A2A messaging, and marketplace contracts deployed on mainnet (chainId 16661) via CREATE2. Per-turn memory sync emits an `updateSlots` tx anchoring the iNFT's 6 IntelligentData slots. | Live bytecode confirmed on chain (`eth_getCode` returns 8345 bytes for the iNFT, 4559 for AnimaMarket, 1640 for the SubnameRegistrar, 560 for AnimaInbox). Addresses canonical at [`packages/core/src/identity/deployments.ts`](packages/core/src/identity/deployments.ts). |
+| **0G Storage** | Encrypted agent keystore plus memory blobs, root hashes anchored in the iNFT's IntelligentData slots. The v0.24.0 packed-blob envelope wraps every file under `memory/agent/` (slot 0) and `memory/user/` (slot 3) into one encrypted partition blob per slot. Operators no longer lose files on reprovision, cross-device handoff, or iNFT transfer. Indexer-degraded path falls through to direct discovered-nodes fetch. | [`packages/core/src/storage/og.ts`](packages/core/src/storage/og.ts) (`downloadBlobByRoot`, `downloadBlobViaDiscoveredNodes`), [`packages/core/src/memory/pack-blob.ts`](packages/core/src/memory/pack-blob.ts) (envelope encode/decode plus 19 round-trip unit tests). |
+| **0G Compute** | Brain inference via `@0glabs/0g-serving-broker` SDK in TeeML mode. Default model `zai-org/GLM-5-FP8` (0G's current flagship). Prompt-caching observed live across multi-turn sessions (`cached_tokens: 1408` on 4 sequential turns). | [`packages/core/src/brain/og-compute.ts`](packages/core/src/brain/og-compute.ts). Recorded session (2026-04-23) hit the mainnet provider `0xd9966e13a6026Fcca4b13E7ff95c94DE268C471C` with 6 HTTP 200 calls on chainId 16661, agent EOA balance moved 8.54 to 5.54 0G (3.003 0G spent). |
+| **Agent ID (ERC-7857)** | `AnimaAgentNFT`, symbol `ANIMA`, 11 mainnet iNFTs minted as of v0.24.2. Six IntelligentData slots: memory-index, identity, persona, profile, keystore, activity-log. Slot 3 (profile) uses operator-scoped HKDF-SHA256 plus AES-256-GCM and cryptographically purges on `iTransferFrom`; agent-scoped slots re-encrypt for the new owner via the TEE oracle. | Foundry project at [`contracts/`](contracts/). On-chain client at [`packages/core/src/identity/contract.ts`](packages/core/src/identity/contract.ts). `cast call ... totalSupply()` returns 11 on mainnet. |
+| **Privacy / secure execution** | TeeML attested inference at the Compute layer (every brain call lands inside the provider's TEE enclave). Optional TDX TEE harness on 0G Sandbox (Galileo testnet today; 0G's Sandbox mainnet has not yet launched, so the hybrid model puts identity, wallet, Storage, and Compute on mainnet while the optional persistent container lives on Galileo). All operator key material derives from `signTypedData` and never leaves the wallet's signature surface; the operator console performs every memory decryption inside the tab. | [`packages/core/src/og-sandbox/`](packages/core/src/og-sandbox/), [`apps/web/lib/crypto/`](apps/web/lib/crypto/), [`packages/core/src/memory/pack-blob.ts`](packages/core/src/memory/pack-blob.ts). |
+
+**Why this matters.** Hermes, OpenClaw, and Claude Code all live entirely on the operator's machine. Memory, keys, and intelligence sit on local disk; if the machine dies, the agent dies. Anima moves every sovereignty-relevant artifact (identity, memory, brain, infra wallet) onto 0G's decentralized stack. The CLI is a thin orchestration plane, closer to `vercel deploy` than `kubectl`. Close the laptop, transfer the iNFT, walk away, the agent persists.
 
 ## Quickstart
 
