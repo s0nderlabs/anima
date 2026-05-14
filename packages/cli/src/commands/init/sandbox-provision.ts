@@ -5,6 +5,7 @@ import {
   NETWORK_CHAIN_ID,
   type OperatorSigner,
   type PermissionMode,
+  SANDBOX_DEFAULT_INITIAL_DEPOSIT_OG,
   SANDBOX_PROVIDER_GALILEO,
   SANDBOX_PROVIDER_URL_GALILEO,
   SANDBOX_TEE_SIGNER_GALILEO,
@@ -143,7 +144,7 @@ export async function runSandboxProvision(
   const progress = opts.onProgress ?? (() => {})
   const snapshotName = opts.snapshotName ?? 'daytonaio/sandbox:0.5.0-slim'
   const repoUrl = opts.repoUrl ?? 'https://github.com/s0nderlabs/anima.git'
-  const depositWei = parseEther(String(opts.depositOg ?? 1))
+  const depositWei = parseEther(String(opts.depositOg ?? SANDBOX_DEFAULT_INITIAL_DEPOSIT_OG))
 
   const operatorAddress = await opts.operator.address()
   const operatorAccount = await opts.operator.account()

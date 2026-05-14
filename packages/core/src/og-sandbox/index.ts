@@ -55,6 +55,21 @@ export const SANDBOX_PROVIDER_GALILEO = '0xB831371eb2703305f1d9F8542163633D0675C
 export const SANDBOX_PROVIDER_URL_GALILEO =
   'https://provider-private-sandbox-testnet.0g.ai' as const
 
+/**
+ * Galileo testnet sandbox runtime billing rate, in 0G/hour. Surfaced in the
+ * init wizard's cost summary and by `anima topup --sandbox` for the runway
+ * estimate `balance / rate`. Galileo testnet 0G is faucet-funded; the rate
+ * is real but the dollar cost is $0.
+ */
+export const SANDBOX_BURN_RATE_OG_PER_HOUR = 0.09
+
+/**
+ * Default initial deposit on the Galileo SandboxSettlement contract when
+ * `anima init --target sandbox` provisions a fresh container. Mirrors the
+ * `depositOg ?? 1` fallback in `runSandboxProvision`.
+ */
+export const SANDBOX_DEFAULT_INITIAL_DEPOSIT_OG = 1
+
 export interface BuildSandboxEndpointOpts {
   sandboxId: string
   /** Default 8080 — anima harness binds 8080 inside the container. */

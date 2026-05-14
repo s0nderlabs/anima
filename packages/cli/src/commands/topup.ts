@@ -1,5 +1,6 @@
 import { cancel, intro, isCancel, outro, password, select, spinner } from '@clack/prompts'
 import {
+  SANDBOX_BURN_RATE_OG_PER_HOUR,
   SANDBOX_PROVIDER_GALILEO,
   SandboxSettlementClient,
   agentPaths,
@@ -135,7 +136,7 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
     try {
       before = await settle.getBalance(operatorAccount.address, SANDBOX_PROVIDER_GALILEO)
       sBefore.stop(
-        `current deposit ${formatEther(before)} 0G (~${(Number(before) / 1e18 / 0.09).toFixed(1)}h runway)`,
+        `current deposit ${formatEther(before)} 0G (~${(Number(before) / 1e18 / SANDBOX_BURN_RATE_OG_PER_HOUR).toFixed(1)}h runway)`,
       )
     } catch (e) {
       sBefore.stop(`balance read failed: ${(e as Error).message.slice(0, 120)}`)
@@ -152,7 +153,7 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
       await waitForReceiptResilient(galileoPub, tx, { tries: 60, delayMs: 2000 })
       const after = await settle.getBalance(operatorAccount.address, SANDBOX_PROVIDER_GALILEO)
       sDep.stop(
-        `deposit confirmed → ${explorerTxUrl('0g-testnet', tx)} (new balance ${formatEther(after)} 0G ≈ ${(Number(after) / 1e18 / 0.09).toFixed(1)}h)`,
+        `deposit confirmed → ${explorerTxUrl('0g-testnet', tx)} (new balance ${formatEther(after)} 0G ≈ ${(Number(after) / 1e18 / SANDBOX_BURN_RATE_OG_PER_HOUR).toFixed(1)}h)`,
       )
       outro(`Galileo deposit topped up by ${amount} 0G`)
     } catch (e) {

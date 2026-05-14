@@ -4,6 +4,19 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.2] - 2026-05-14
+
+### Changed
+
+- **`anima init` cost summary now surfaces sandbox spend when deploy target is `sandbox`.** Pre-fix, the cost summary showed only the mainnet operator spend (mint + storage + agent infra float + compute ledger deposit) and silently omitted the 0G Sandbox Galileo testnet billing entirely, leaving operators guessing how much testnet 0G to fund and what the runtime burn rate looks like. New rows appear only for `deployTarget === 'sandbox'`: `initial provider deposit` (1 testnet 0G, $0.00 via faucet), `runtime burn` (0.09 0G/h, ~11h runway on a 1 0G deposit), `fund via faucet.0g.ai/?token=A0GI`, and `auto-topup agent EOA refills sandbox billing from compute ledger` so operators know the steady-state is hands-off.
+- **Sandbox billing constants hoisted to `@s0nderlabs/anima-core`.** New exports `SANDBOX_BURN_RATE_OG_PER_HOUR = 0.09` and `SANDBOX_DEFAULT_INITIAL_DEPOSIT_OG = 1` replace inline magic numbers in `topup.ts` (was `0.09` in two places) and `sandbox-provision.ts` (was `?? 1`). Single source of truth so the wizard summary, the `anima topup --sandbox` runway hint, and the provisioning default never drift.
+
+### Fixed
+
+- **Stale `~0.07 0G/min` rate comment in `init.ts` deploy-target hint.** Was off by ~47x vs the canonical 0.09 0G/hour rate surfaced everywhere else; replaced with `~0.09 0G/h burn` to match the wizard's actual runway math.
+
+[0.24.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.2
+
 ## [0.24.1] - 2026-05-14
 
 ### Added

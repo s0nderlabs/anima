@@ -91,7 +91,7 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   // while CLI runs; sandbox = harness in 0G Sandbox TDX TEE on Galileo testnet
   // (Hybrid Path 1 — iNFT/wallet/Storage/Compute on mainnet, container on
   // Galileo). Sandbox mode requires the operator to also hold testnet 0G for
-  // the provider deposit (~1 0G + ~0.07 0G/min runtime).
+  // the provider deposit (~1 0G initial, ~0.09 0G/hour burn; free via faucet).
   const deployTarget = (await select({
     message: 'Where will this agent run?',
     options: [
@@ -102,7 +102,7 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
       {
         value: 'sandbox' as const,
         label: '0G Sandbox (Galileo TDX TEE, persistent)',
-        hint: 'requires testnet 0G for provider deposit + per-min runtime',
+        hint: 'free testnet 0G via faucet (~1 0G initial, ~0.09 0G/h burn)',
       },
     ],
     initialValue: 'local',
@@ -228,6 +228,7 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   const costs = estimateCosts({
     ledgerSizeOg: ledgerSize,
     withSubname: !!requestedSubname,
+    deployTarget: deployTarget as 'local' | 'sandbox',
   })
   note(renderCostSummary(costs), 'cost summary (0G ~$0.50)')
 
