@@ -2,7 +2,13 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { RawPrivkeyOperatorSigner, agentPaths, iNFTAgentId } from '@s0nderlabs/anima-core'
+import {
+  OPERATOR_BLOB_SCOPES,
+  RawPrivkeyOperatorSigner,
+  agentPaths,
+  deriveBlobKey,
+  iNFTAgentId,
+} from '@s0nderlabs/anima-core'
 import { type Address, generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import {
   loadTelegramHandoffSecrets,
@@ -172,5 +178,50 @@ describe('loadTelegramHandoffSecrets', () => {
     expect(result).toBeUndefined()
     expect(notices.length).toBe(1)
     expect(notices[0]).toMatch(/telegram secrets read failed:/)
+  })
+
+  // v0.24.3: precomputedKey path — used by init wizard so the derived TELEGRAM
+  // scope key can be passed to saveTelegramSecrets AND stashed in
+  // `.operator-session` in a single derive. Without this, the daemon
+  // fail-louds at boot ("telegram secrets present but no telegram scope key").
+  it('round-trips with precomputedKey (init-wizard fast path)', async () => {
+    const operatorPrivkey = generatePrivateKey()
+    const signer = new RawPrivkeyOperatorSigner({ privkey: operatorPrivkey })
+    const agentAddress = privateKeyToAccount(generatePrivateKey()).address
+    // Derive the TELEGRAM scope key explicitly (mirrors what runTelegramStep
+    // does so it can both encrypt AND stash the key in operator-session).
+    const tgKey = await deriveBlobKey(signer, agentAddress, OPERATOR_BLOB_SCOPES.TELEGRAM)
+    expect(tgKey.length).toBe(32)
+
+    await saveTelegramSecrets({
+      signer,
+      agentAddress,
+      agentId: TEST_AGENT_ID,
+      plaintext: {
+        botToken: '8152506307:AAFbXSJ0qnfJNbLWkxbmzYEM9fc74uaznJs',
+        botUsername: 'anima_init_test_bot',
+        botId: 8152506307,
+        allowedUserIds: [1140813034],
+      },
+      precomputedKey: tgKey,
+    })
+    expect(existsSync(telegramSecretsPath(TEST_AGENT_ID))).toBe(true)
+
+    const result = await loadTelegramHandoffSecrets({
+      signer,
+      agentAddress,
+      contractAddress: TEST_CONTRACT,
+      tokenId: TEST_TOKEN_ID,
+    })
+    expect(result).toEqual({
+      botToken: '8152506307:AAFbXSJ0qnfJNbLWkxbmzYEM9fc74uaznJs',
+      allowedUserIds: [1140813034],
+    })
+
+    // Independent re-derive must produce the SAME 32-byte key (deterministic
+    // HKDF output). This is what lets the daemon load the cached key from
+    // `.operator-session` and successfully decrypt the blob the wizard wrote.
+    const tgKey2 = await deriveBlobKey(signer, agentAddress, OPERATOR_BLOB_SCOPES.TELEGRAM)
+    expect(Buffer.compare(tgKey, tgKey2)).toBe(0)
   })
 })

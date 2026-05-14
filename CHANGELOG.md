@@ -4,6 +4,14 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.3] - 2026-05-14
+
+### Fixed
+
+- **`anima init` Telegram step now caches the `anima-telegram-v1` scope key in `.operator-session`.** Pre-fix, when an operator pasted a bot token in init's Phase E, the wizard called `saveTelegramSecrets()` which derived the TELEGRAM AES key inside `encryptOperatorBlob` and threw it away after encrypting the blob. On first chat after init, `chat.tsx` ran `requiredScopesForAgent(agentId)` which detected `telegram-secrets.encrypted` on disk and demanded the TELEGRAM scope key in the cached session. Missing → daemon auto-spawn refused → fall through to embedded mode → TG listener silently dropped with only a `note:` line. Operators only noticed when phone messages went unanswered. Fix: `runTelegramStep` now derives the scope key explicitly via `deriveBlobKey`, passes it as `precomputedKey` to `saveTelegramSecrets` (no redundant sign), and returns it to init.ts which appends to `operatorKeys` and re-writes `.operator-session` with all three scope keys (`keystore` + `anima-profile-v1` + `anima-telegram-v1`). Fresh-init agents now land in chat.tsx's Mode B (auto-spawn full gateway) instead of Mode C (degraded embedded). Zero added Touch ID prompts; the TELEGRAM derive already happened inside `encryptOperatorBlob` pre-fix, the wizard just discarded its output.
+
+[0.24.3]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.3
+
 ## [0.24.2] - 2026-05-14
 
 ### Changed

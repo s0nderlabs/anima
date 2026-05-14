@@ -679,6 +679,32 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
             botUsername: tgResult.botUsername,
             mode: tgResult.modeUsed,
           }
+          // v0.24.3: append TELEGRAM key to `.operator-session` so the gateway
+          // daemon auto-spawns on first chat without re-prompting Touch ID.
+          // Without it, requiredScopesForAgent reports TELEGRAM missing →
+          // daemon fail-louds at boot → chat.tsx degrades to embedded mode
+          // (TG listener silently dropped).
+          if (tgResult.telegramScopeKeyHex) {
+            try {
+              const sess = buildOperatorSession({
+                agent: agent.address as Address,
+                keys: {
+                  ...operatorKeys,
+                  [OPERATOR_BLOB_SCOPES.TELEGRAM]: tgResult.telegramScopeKeyHex,
+                },
+              })
+              writeOperatorSession(finalAgentId, sess)
+            } catch (e) {
+              // Surface to wizard UI (not console.warn) — silent failure here
+              // would only manifest as the daemon fail-loud above, hours later
+              // with no breadcrumb back to init. Matches the boot-restore
+              // visibility lesson (`feedback-silent-restore-failure-bites`).
+              note(
+                `operator-session rewrite skipped: ${(e as Error).message.slice(0, 160)}\nRun \`anima telegram setup\` later to re-derive the TG scope key.`,
+                'telegram (non-fatal)',
+              )
+            }
+          }
         }
       } catch (e) {
         note(

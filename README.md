@@ -212,7 +212,7 @@ Structural sandbox is a separate floor under `sandbox.mode`: `none` (default, pa
 
 ## Packages
 
-Seven workspace packages, all published as `@s0nderlabs/anima-*` at the same version (changesets fixed group). Current: v0.24.2.
+Seven workspace packages, all published as `@s0nderlabs/anima-*` at the same version (changesets fixed group). Current: v0.24.3.
 
 | Dir | npm |
 |---|---|
@@ -292,7 +292,7 @@ Testing rules and integration scripts live under `test/local/`. The `/e2e` skill
 
 ## Status
 
-Pre-alpha. Hackathon build, target the 0G APAC Hackathon (May 16 2026). Current release: v0.24.2.
+Pre-alpha. Hackathon build, target the 0G APAC Hackathon (May 16 2026). Current release: v0.24.3.
 
 ## License
 

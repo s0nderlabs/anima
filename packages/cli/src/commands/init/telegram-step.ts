@@ -14,8 +14,14 @@
  * Caller frames its own intro/outro. This helper is content-only.
  */
 import { cancel, confirm, isCancel, note, password, select, spinner, text } from '@clack/prompts'
-import type { AnimaConfig, AnimaNetwork, OperatorSigner } from '@s0nderlabs/anima-core'
-import type { Address } from 'viem'
+import {
+  type AnimaConfig,
+  type AnimaNetwork,
+  OPERATOR_BLOB_SCOPES,
+  type OperatorSigner,
+  deriveBlobKey,
+} from '@s0nderlabs/anima-core'
+import { type Address, type Hex, bytesToHex } from 'viem'
 import { writeConfigTs } from '../../config/render'
 import {
   fetchBotInfo,
@@ -51,6 +57,12 @@ export interface TelegramStepResult {
   allowedUserIds?: number[]
   /** Set when configured aborted by user (cancel / no-overwrite). */
   cancelled?: boolean
+  /**
+   * v0.24.3: derived TELEGRAM scope key as 0x-prefixed hex. Caller stashes
+   * this in `.operator-session` so the daemon auto-spawns without re-prompting
+   * Touch ID. Hex (not Buffer) to match `OperatorSessionKeys`' on-disk shape.
+   */
+  telegramScopeKeyHex?: Hex
 }
 
 const PAIR_OPTION_LABEL =
@@ -146,6 +158,24 @@ export async function runTelegramStep(opts: TelegramStepOpts): Promise<TelegramS
     )
   }
 
+  // v0.24.3: derive TELEGRAM key explicitly so we can both pass it as
+  // `precomputedKey` (skip the redundant sign inside encryptOperatorBlob)
+  // AND return it to init.ts to stash in `.operator-session`.
+  const sDerive = spinner()
+  sDerive.start('Deriving TELEGRAM scope key')
+  let telegramScopeKey: Buffer
+  try {
+    telegramScopeKey = await deriveBlobKey(
+      opts.signer,
+      opts.agentAddress,
+      OPERATOR_BLOB_SCOPES.TELEGRAM,
+    )
+    sDerive.stop('TELEGRAM scope key derived')
+  } catch (e) {
+    sDerive.stop(`TELEGRAM scope derive failed: ${(e as Error).message.slice(0, 200)}`)
+    return { configured: false, cancelled: true }
+  }
+
   const sSave = spinner()
   sSave.start('Encrypting + saving telegram secrets locally')
   try {
@@ -159,6 +189,7 @@ export async function runTelegramStep(opts: TelegramStepOpts): Promise<TelegramS
         botId: botInfo.id,
         allowedUserIds,
       },
+      precomputedKey: telegramScopeKey,
     })
     sSave.stop(`saved → ~/.anima/agents/${opts.agentId}/telegram-secrets.encrypted`)
   } catch (e) {
@@ -177,5 +208,6 @@ export async function runTelegramStep(opts: TelegramStepOpts): Promise<TelegramS
     botUsername: botInfo.username,
     modeUsed: mode,
     allowedUserIds,
+    telegramScopeKeyHex: bytesToHex(telegramScopeKey),
   }
 }

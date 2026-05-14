@@ -129,6 +129,13 @@ export async function saveTelegramSecrets(opts: {
   agentAddress: Address
   agentId: string
   plaintext: TelegramSecretsPlaintext
+  /**
+   * v0.24.3: pre-derived TELEGRAM scope key (32 bytes). The init wizard
+   * derives this once and passes it both here AND into `.operator-session`,
+   * so encryptOperatorBlob skips the redundant sign it would otherwise make.
+   * Threads through to encryptOperatorBlob; see that helper for fallback.
+   */
+  precomputedKey?: Buffer
 }): Promise<void> {
   const path = telegramSecretsPath(opts.agentId)
   await mkdir(dirname(path), { recursive: true })
@@ -138,6 +145,7 @@ export async function saveTelegramSecrets(opts: {
     scope: OPERATOR_BLOB_SCOPES.TELEGRAM,
     agentAddress: opts.agentAddress,
     plaintext: ptBytes,
+    precomputedKey: opts.precomputedKey,
   })
   await writeFile(path, encodeOperatorBlobBytes(blob))
 }
