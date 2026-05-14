@@ -9,7 +9,10 @@ The pitch in one line: Hermes, OpenClaw, and Claude Code are always-on daemons o
 Full documentation: [anima.s0nderlabs.xyz/docs](https://anima.s0nderlabs.xyz/docs)
 Operator console: [anima.s0nderlabs.xyz/console](https://anima.s0nderlabs.xyz/console)
 
-## For hackathon judges
+<details>
+<summary><b>For hackathon judges</b> · click to expand (30-second on-chain verification, contract table, reproduction)</summary>
+
+<br>
 
 > Anima: a CLI-spawned agent whose identity, memory, brain, and wallet all live on 0G. Close the laptop, the agent persists. Transfer the iNFT, the agent migrates. (26 words)
 
@@ -50,6 +53,8 @@ anima           # drops into the TUI, every chat turn anchors memory on chain
 The browser-only [operator console](https://anima.s0nderlabs.xyz/console) accepts any wallet that owns one of the 11 minted iNFTs: SIWE sign-in, EIP-712 unlock, then the encrypted memory partition is fetched from 0G Storage and decrypted in-browser (no key material ever leaves the tab).
 
 How the five sponsor-accepted components plug in, with code paths and tx-level evidence: see the **[0G integration](#0g-integration)** section below.
+
+</details>
 
 ## Install
 
