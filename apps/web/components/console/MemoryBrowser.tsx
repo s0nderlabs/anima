@@ -16,8 +16,8 @@ import { useEffect, useState } from 'react'
 import type { Hex } from 'viem'
 import { useAccount, useSignTypedData } from 'wagmi'
 import { usePublicClient } from 'wagmi'
-import { useAgentContext } from './agent-context'
 import { MarkdownView } from './MarkdownView'
+import { useAgentContext } from './agent-context'
 
 type ViewMode = 'prose' | 'source'
 
@@ -61,6 +61,16 @@ const slotDescription: Record<RailSlot, string> = {
   profile: 'Your private notes. Operator-only, purged on transfer.',
   keystore: 'Encrypted agent privkey. Used to unlock this view.',
   'activity-log': 'Tool-calls, brain responses, errors.',
+}
+
+// Which on-disk partition each slot's bytes live under. Today only memory-index
+// and profile actually pack siblings (so PackedSiblingList only reads those two),
+// but the mapping is true for all four memory slots.
+const slotPartition: Record<MemorySlotName, 'agent/' | 'user/'> = {
+  'memory-index': 'agent/',
+  identity: 'agent/',
+  persona: 'agent/',
+  profile: 'user/',
 }
 
 export function MemoryBrowser({
@@ -213,6 +223,16 @@ function statusToken(state: RailState): { dot: string; tone: string; label: stri
   }
 }
 
+// Slots 0 + 3 may pack multiple .md files inside one envelope. Returns undefined
+// pre-decrypt so the rail stays quiet while the slot is still loading.
+function railFileCount(slot: RailSlot, files: Record<MemorySlotName, MemFile>): number | undefined {
+  if (slot === 'keystore' || slot === 'activity-log') return undefined
+  const file = files[slot]
+  if (file.status !== 'ready') return undefined
+  const siblings = file.packedFiles ? Object.keys(file.packedFiles).length : 0
+  return 1 + siblings
+}
+
 function Rail({
   tokenId,
   files,
@@ -233,6 +253,8 @@ function Rail({
           const isActive = active === slot
           const token = statusToken(state)
           const isExternal = state.kind === 'external'
+          const count = railFileCount(slot, files)
+          const showCount = count !== undefined && count > 1
           const className = `group grid shrink-0 gap-1 rounded-md px-3 py-2.5 text-left transition-colors duration-200 md:shrink ${
             isActive
               ? 'bg-[color-mix(in_oklab,var(--color-ink)_4%,transparent)]'
@@ -248,12 +270,24 @@ function Rail({
                 >
                   {slotLabel[slot]}
                 </span>
-                <span
-                  aria-hidden
-                  className={`font-mono text-[12px] leading-none ${token.tone}`}
-                  title={token.label}
-                >
-                  {token.dot}
+                <span className="flex items-center gap-1.5">
+                  {showCount ? (
+                    <span
+                      className={`font-mono text-[10.5px] tracking-[0.18em] leading-none ${
+                        isActive ? 'text-[var(--color-ink-2)]' : 'text-[var(--color-ink-3)]'
+                      }`}
+                      title={`${count} files packed in this slot`}
+                    >
+                      {count}
+                    </span>
+                  ) : null}
+                  <span
+                    aria-hidden
+                    className={`font-mono text-[12px] leading-none ${token.tone}`}
+                    title={token.label}
+                  >
+                    {token.dot}
+                  </span>
                 </span>
               </div>
               <p
@@ -267,7 +301,11 @@ function Rail({
           )
           if (isExternal) {
             return (
-              <Link key={slot} href={`/console/${tokenId.toString()}/activity`} className={className}>
+              <Link
+                key={slot}
+                href={`/console/${tokenId.toString()}/activity`}
+                className={className}
+              >
                 {content}
               </Link>
             )
@@ -326,17 +364,29 @@ function FileDetail({
   const packedNames = packed ? Object.keys(packed).sort() : []
   // v0.24.0: when a v2 envelope is detected, viewing a sibling pulls its
   // content from the packed map instead of the root body.
-  const visibleBody =
-    selected && packed ? (packed[selected] ?? '') : (file.body ?? '')
+  const visibleBody = selected && packed ? (packed[selected] ?? '') : (file.body ?? '')
+  const viewingSibling = selected !== undefined && packedNames.includes(selected)
   return (
     <section className="flex flex-col gap-3">
       <header className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
-        <h2
-          className="font-display text-[clamp(26px,2.6vw,36px)] font-light leading-[1.1] tracking-tight text-[var(--color-ink)]"
-          style={{ fontVariationSettings: '"opsz" 96, "SOFT" 30, "WONK" 0' }}
-        >
-          {selected ?? label}
-        </h2>
+        <div className="flex flex-col gap-1">
+          {viewingSibling ? (
+            <button
+              type="button"
+              onClick={() => setSelected(undefined)}
+              className="self-start font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--color-ink-3)] transition-colors hover:text-[var(--color-ink)]"
+              title={`Back to ${label}`}
+            >
+              ← {label}
+            </button>
+          ) : null}
+          <h2
+            className="font-display text-[clamp(26px,2.6vw,36px)] font-light leading-[1.1] tracking-tight text-[var(--color-ink)]"
+            style={{ fontVariationSettings: '"opsz" 96, "SOFT" 30, "WONK" 0' }}
+          >
+            {selected ?? label}
+          </h2>
+        </div>
         {canToggle ? <ViewToggle mode={mode} onChange={setMode} /> : null}
       </header>
       {file.status === 'loading' ? (
@@ -390,41 +440,70 @@ function PackedSiblingList({
   onSelect: (name: string | undefined) => void
   slotName: MemorySlotName
 }) {
-  const partition = slotName === 'memory-index' ? 'agent/' : 'user/'
+  const partition = slotPartition[slotName]
+  const totalFiles = siblings.length + 1
+  const [filter, setFilter] = useState('')
+  const showFilter = totalFiles > 8
+  const needle = filter.trim().toLowerCase()
+  const visibleSiblings = needle
+    ? siblings.filter(n => n.toLowerCase().includes(needle))
+    : siblings
+  const rootMatches = !needle || rootLabel.toLowerCase().includes(needle)
+  const matchCount = visibleSiblings.length + (rootMatches ? 1 : 0)
+  const chipBase =
+    'inline-flex items-center rounded-full border px-3 py-1 font-mono text-[12px] tracking-tight transition-colors'
+  const chipInactive =
+    'border-[var(--color-border)] bg-transparent text-[var(--color-ink-2)] hover:border-[color-mix(in_oklab,var(--color-ink)_30%,transparent)] hover:text-[var(--color-ink)]'
+  const chipActive = 'border-[var(--color-ink)] bg-[var(--color-ink)] text-[var(--color-paper)]'
   return (
-    <nav
-      aria-label="Packed sibling files"
-      className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-lg border border-dashed border-[var(--color-border)] bg-[var(--color-paper)] px-4 py-3"
-    >
-      <span className="font-mono text-[11.5px] uppercase tracking-[0.22em] text-[var(--color-ink-3)]">
-        packed · {siblings.length + 1} files
+    <nav aria-label="Packed sibling files" className="flex flex-col gap-2">
+      <span className="font-mono text-[11.5px] tracking-tight text-[var(--color-ink-3)]">
+        packed · {totalFiles} {totalFiles === 1 ? 'file' : 'files'}
+        {needle ? <span> · {matchCount} shown</span> : null}
       </span>
-      <button
-        type="button"
-        onClick={() => onSelect(undefined)}
-        className={`font-mono text-[12.5px] tracking-tight transition-colors ${
-          selected === undefined
-            ? 'text-[var(--color-ink)] underline decoration-[var(--color-ink)] underline-offset-[3px]'
-            : 'text-[var(--color-ink-2)] hover:text-[var(--color-ink)]'
+      {showFilter ? (
+        <input
+          type="search"
+          value={filter}
+          onChange={e => setFilter(e.target.value)}
+          placeholder={`filter ${siblings.length} files…`}
+          aria-label="Filter packed files"
+          className="w-full rounded-md border border-[var(--color-border)] bg-transparent px-3 py-1.5 font-mono text-[12px] tracking-tight text-[var(--color-ink)] placeholder:text-[var(--color-ink-3)] focus:border-[var(--color-ink-2)] focus:outline-none"
+        />
+      ) : null}
+      <div
+        className={`flex flex-wrap items-center gap-1.5 ${
+          showFilter ? 'max-h-44 overflow-y-auto pr-1' : ''
         }`}
       >
-        {rootLabel}
-      </button>
-      {siblings.map(name => (
-        <button
-          key={name}
-          type="button"
-          onClick={() => onSelect(name)}
-          className={`font-mono text-[12.5px] tracking-tight transition-colors ${
-            selected === name
-              ? 'text-[var(--color-ink)] underline decoration-[var(--color-ink)] underline-offset-[3px]'
-              : 'text-[var(--color-ink-2)] hover:text-[var(--color-ink)]'
-          }`}
-          title={`${partition}${name}`}
-        >
-          {name}
-        </button>
-      ))}
+        {rootMatches ? (
+          <button
+            type="button"
+            onClick={() => onSelect(undefined)}
+            className={`${chipBase} ${selected === undefined ? chipActive : chipInactive}`}
+            title={`${rootLabel} (root)`}
+          >
+            <span className="mr-1.5 opacity-60">●</span>
+            {rootLabel}
+          </button>
+        ) : null}
+        {visibleSiblings.map(name => (
+          <button
+            key={name}
+            type="button"
+            onClick={() => onSelect(name)}
+            className={`${chipBase} ${selected === name ? chipActive : chipInactive}`}
+            title={`${partition}${name}`}
+          >
+            {name}
+          </button>
+        ))}
+        {needle && matchCount === 0 ? (
+          <span role="status" className="font-mono text-[12px] text-[var(--color-ink-3)]">
+            no matches
+          </span>
+        ) : null}
+      </div>
     </nav>
   )
 }
@@ -527,8 +606,8 @@ function KeystoreCard() {
         unwraps the key, the key decrypts memory.
       </p>
       <p className="max-w-[60ch] text-[15.5px] leading-[1.6] text-[var(--color-ink-2)]">
-        You are already past this gate; that’s why the rest of the tab is readable. The contents
-        are not displayed because revealing them would defeat the gate.
+        You are already past this gate; that’s why the rest of the tab is readable. The contents are
+        not displayed because revealing them would defeat the gate.
       </p>
     </section>
   )
