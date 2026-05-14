@@ -7,6 +7,8 @@ export type UnlockedKeys = {
   agentPrivkey: Hex
   memoryKey: CryptoKey
   unlockedAt: number
+  /** PROFILE scope key, derived on-demand via a second operator signature. */
+  profileKey?: CryptoKey
 }
 
 type AgentContextValue = {
@@ -19,6 +21,7 @@ type AgentContextValue = {
   setAgentEOA: (a: Address | null) => void
   unlocked: UnlockedKeys | null
   setUnlocked: (k: UnlockedKeys) => void
+  setProfileKey: (k: CryptoKey) => void
   clearUnlocked: () => void
 }
 
@@ -40,6 +43,10 @@ export function AgentContextProvider({
   const setSubname = useCallback((s: string | null) => setSubnameState(s), [])
   const setAgentEOA = useCallback((a: Address | null) => setAgentEOAState(a), [])
   const setUnlocked = useCallback((k: UnlockedKeys) => setUnlockedState(k), [])
+  const setProfileKey = useCallback(
+    (k: CryptoKey) => setUnlockedState(prev => (prev ? { ...prev, profileKey: k } : prev)),
+    [],
+  )
   const clearUnlocked = useCallback(() => setUnlockedState(null), [])
 
   const value = useMemo<AgentContextValue>(
@@ -53,6 +60,7 @@ export function AgentContextProvider({
       setAgentEOA,
       unlocked,
       setUnlocked,
+      setProfileKey,
       clearUnlocked,
     }),
     [
@@ -65,6 +73,7 @@ export function AgentContextProvider({
       setAgentEOA,
       unlocked,
       setUnlocked,
+      setProfileKey,
       clearUnlocked,
     ],
   )

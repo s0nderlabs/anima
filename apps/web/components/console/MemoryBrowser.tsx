@@ -3,19 +3,30 @@
 import { zgMainnet } from '@/lib/chain/chain'
 import { type SlotEntry, fetchSlots } from '@/lib/chain/inft'
 import { decryptMemoryToText } from '@/lib/crypto/memory'
+import {
+  OPERATOR_BLOB_SCOPES,
+  decryptOperatorBlobToText,
+  deriveOperatorBlobKey,
+  isOperatorBlobBytes,
+} from '@/lib/crypto/operator-blob'
 import { fetchBlobByRootHash } from '@/lib/storage/og'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
+import type { Hex } from 'viem'
+import { useAccount, useSignTypedData } from 'wagmi'
 import { usePublicClient } from 'wagmi'
+import { useAgentContext } from './agent-context'
 import { MarkdownView } from './MarkdownView'
 
 type ViewMode = 'prose' | 'source'
 
 type MemFile = {
   slot: SlotEntry
-  status: 'loading' | 'ready' | 'placeholder' | 'error'
+  status: 'loading' | 'ready' | 'placeholder' | 'error' | 'needs-operator-sig'
   body?: string
   error?: string
+  /** Raw bytes cached so the operator-sign button can decrypt without refetch. */
+  rawBytes?: Uint8Array
 }
 
 const MEMORY_SLOTS = ['memory-index', 'identity', 'persona', 'profile'] as const
@@ -53,8 +64,11 @@ export function MemoryBrowser({
   memoryKey: CryptoKey
 }) {
   const client = usePublicClient({ chainId: zgMainnet.id })
+  const ctx = useAgentContext()
   const [files, setFiles] = useState<Record<MemorySlotName, MemFile> | null>(null)
   const [active, setActive] = useState<RailSlot>('memory-index')
+
+  const profileKey = ctx.unlocked?.profileKey
 
   useEffect(() => {
     if (!client) return
@@ -79,6 +93,31 @@ export function MemoryBrowser({
         ;(async () => {
           try {
             const bytes = await fetchBlobByRootHash(f.slot.hash)
+            // PROFILE slot is operator-encrypted (operator HKDF, scope
+            // anima-profile-v1). Detect the JSON envelope and route through
+            // the operator-blob path, which needs a separate signature.
+            if (name === 'profile' && isOperatorBlobBytes(bytes)) {
+              if (profileKey) {
+                const text = await decryptOperatorBlobToText(bytes, profileKey)
+                if (!alive) return
+                setFiles(prev =>
+                  prev
+                    ? { ...prev, [name]: { ...prev[name], status: 'ready', body: text } }
+                    : prev,
+                )
+                return
+              }
+              if (!alive) return
+              setFiles(prev =>
+                prev
+                  ? {
+                      ...prev,
+                      [name]: { ...prev[name], status: 'needs-operator-sig', rawBytes: bytes },
+                    }
+                  : prev,
+              )
+              return
+            }
             const text = await decryptMemoryToText(bytes, memoryKey)
             if (!alive) return
             setFiles(prev =>
@@ -105,7 +144,7 @@ export function MemoryBrowser({
     return () => {
       alive = false
     }
-  }, [client, tokenId, memoryKey])
+  }, [client, tokenId, memoryKey, profileKey])
 
   if (!files) {
     return (
@@ -153,6 +192,8 @@ function statusToken(state: RailState): { dot: string; tone: string; label: stri
       return { dot: '●', tone: 'text-[var(--color-ink)]', label: 'anchored' }
     case 'placeholder':
       return { dot: '○', tone: 'text-[var(--color-ink-3)]', label: 'placeholder' }
+    case 'needs-operator-sig':
+      return { dot: '◆', tone: 'text-[var(--color-ink-2)]', label: 'sign to read' }
     case 'error':
       return { dot: '●', tone: 'text-[var(--color-ink-2)]', label: 'error' }
   }
@@ -239,7 +280,7 @@ function DetailPane({
 }) {
   if (active === 'keystore') return <KeystoreCard />
   if (active === 'activity-log') return <ActivityRedirectCard tokenId={tokenId} />
-  return <FileDetail file={files[active]} label={slotLabel[active]} />
+  return <FileDetail slotName={active} file={files[active]} label={slotLabel[active]} />
 }
 
 /**
@@ -254,7 +295,15 @@ function stripFrontmatter(body: string): string {
   return match ? body.slice(match[0].length).replace(/^\s+/, '') : body
 }
 
-function FileDetail({ file, label }: { file: MemFile; label: string }) {
+function FileDetail({
+  slotName,
+  file,
+  label,
+}: {
+  slotName: MemorySlotName
+  file: MemFile
+  label: string
+}) {
   const [mode, setMode] = useState<ViewMode>('prose')
   const canToggle = file.status === 'ready' && !!file.body
   return (
@@ -274,6 +323,8 @@ function FileDetail({ file, label }: { file: MemFile; label: string }) {
         </p>
       ) : file.status === 'placeholder' ? (
         <PlaceholderInline />
+      ) : file.status === 'needs-operator-sig' ? (
+        <ProfileDecryptPrompt />
       ) : file.status === 'error' ? (
         <p className="font-mono text-[12.5px] tracking-[0.22em] text-[var(--color-ink-2)]">
           could not decrypt · {file.error}
@@ -290,6 +341,77 @@ function FileDetail({ file, label }: { file: MemFile; label: string }) {
         </article>
       )}
     </section>
+  )
+}
+
+function ProfileDecryptPrompt() {
+  const ctx = useAgentContext()
+  const account = useAccount()
+  const { signTypedDataAsync } = useSignTypedData()
+  const [state, setState] = useState<
+    { kind: 'idle' } | { kind: 'signing' } | { kind: 'error'; message: string }
+  >({ kind: 'idle' })
+
+  async function decrypt() {
+    if (!ctx.agentEOA) {
+      setState({ kind: 'error', message: 'no agent address' })
+      return
+    }
+    if (!account.address) {
+      setState({ kind: 'error', message: 'connect a wallet first' })
+      return
+    }
+    try {
+      setState({ kind: 'signing' })
+      const sig = (await signTypedDataAsync({
+        domain: { name: 'Anima Keystore', version: '1' },
+        types: {
+          AgentKeystore: [
+            { name: 'agent', type: 'address' },
+            { name: 'purpose', type: 'string' },
+          ],
+        },
+        primaryType: 'AgentKeystore',
+        message: {
+          agent: ctx.agentEOA,
+          purpose: OPERATOR_BLOB_SCOPES.PROFILE,
+        },
+      })) as Hex
+      const key = await deriveOperatorBlobKey(sig, OPERATOR_BLOB_SCOPES.PROFILE)
+      ctx.setProfileKey(key)
+      setState({ kind: 'idle' })
+    } catch (err) {
+      const message =
+        (err as { shortMessage?: string; message?: string }).shortMessage ||
+        (err as Error).message ||
+        'sign failed'
+      setState({ kind: 'error', message })
+    }
+  }
+
+  return (
+    <article className="rounded-xl border border-[var(--color-border)] bg-[var(--color-paper)] px-6 py-7 shadow-[var(--shadow-card)] sm:px-9 sm:py-10">
+      <div className="grid gap-4">
+        <p className="max-w-[60ch] text-[15.5px] leading-[1.65] text-[var(--color-ink-2)]">
+          PROFILE.md is operator-scoped. It uses a different key than the rest of memory, so it
+          needs one more signature to derive. The signature stays in this tab; nothing is sent on
+          chain.
+        </p>
+        <div className="flex flex-wrap items-center gap-4">
+          <button
+            type="button"
+            onClick={decrypt}
+            disabled={state.kind === 'signing'}
+            className="rounded-full bg-[var(--color-ink)] px-6 py-3 text-[14.5px] font-medium tracking-tight text-[var(--color-cream)] shadow-[0_18px_40px_-22px_rgba(16,15,9,0.7)] transition-transform hover:-translate-y-0.5 hover:scale-[1.01] active:scale-[0.99] disabled:cursor-wait disabled:opacity-70"
+          >
+            {state.kind === 'signing' ? 'Signing…' : 'Sign to decrypt PROFILE.md'}
+          </button>
+          {state.kind === 'error' ? (
+            <p className="font-mono text-[12.5px] text-[var(--color-ink-2)]">{state.message}</p>
+          ) : null}
+        </div>
+      </div>
+    </article>
   )
 }
 
