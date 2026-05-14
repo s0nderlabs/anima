@@ -1,8 +1,9 @@
 import { cancel, intro, isCancel, note, outro, select, spinner } from '@clack/prompts'
-import { NETWORK_CHAIN_ID } from '@s0nderlabs/anima-core'
+import { NETWORK_CHAIN_ID, iNFTAgentId } from '@s0nderlabs/anima-core'
 import type { Address, Hex } from 'viem'
 import { findAndLoadConfig } from '../config/load'
 import { writeConfigTs } from '../config/render'
+import { loadProfileScopeKeyHex } from '../util/profile-key'
 import { loadTelegramHandoffSecrets } from '../util/telegram-secrets'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 import {
@@ -115,6 +116,11 @@ export async function runDeploy(): Promise<void> {
     tokenId,
     onNotice: msg => sBox.message(msg),
   })
+  const deployAgentId = iNFTAgentId({ contractAddress, tokenId })
+  const deployProfileKeyHex = loadProfileScopeKeyHex(deployAgentId)
+  if (!deployProfileKeyHex) {
+    sBox.message('no cached PROFILE key; sandbox will boot without profile-slot anchoring')
+  }
   let sandboxResult: Awaited<ReturnType<typeof runSandboxProvision>>
   try {
     sandboxResult = await runSandboxProvision({
@@ -131,6 +137,7 @@ export async function runDeploy(): Promise<void> {
       ref: process.env.ANIMA_BOOTSTRAP_REF ?? 'main',
       subname: config.subname,
       telegramSecrets: telegramSecretsPlain,
+      profileScopeKeyHex: deployProfileKeyHex,
       onProgress: msg => sBox.message(msg),
     })
     sBox.stop(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`)

@@ -5,6 +5,7 @@ import {
   type OperatorSigner,
   SANDBOX_PROVIDER_URL_GALILEO,
   SandboxProviderClient,
+  iNFTAgentId,
 } from '@s0nderlabs/anima-core'
 import {
   type BootstrapMode,
@@ -21,6 +22,7 @@ import { writeConfigTs } from '../config/render'
 import { SandboxClient } from '../sandbox/client'
 import { resolveCliVersion } from '../util/cli-version'
 import { checkTagExists } from '../util/github-releases'
+import { loadProfileScopeKeyHex } from '../util/profile-key'
 import {
   ANIMA_REPO_URL,
   LATEST_KEYWORD,
@@ -427,6 +429,14 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
     tokenId: args.tokenId,
     onNotice: msg => sBox.message(msg),
   })
+  const inPlaceAgentId = iNFTAgentId({
+    contractAddress: args.contractAddress,
+    tokenId: args.tokenId,
+  })
+  const inPlaceProfileKeyHex = loadProfileScopeKeyHex(inPlaceAgentId)
+  if (!inPlaceProfileKeyHex) {
+    sBox.message('no cached PROFILE key; sandbox will boot without profile-slot anchoring')
+  }
   try {
     await handoffAgentToGateway({
       sandboxClient,
@@ -438,6 +448,7 @@ async function runInPlaceUpgrade(args: InPlaceUpgradeArgs): Promise<void> {
       subname: args.subname,
       plugins: args.plugins,
       telegramSecrets: telegramSecretsPlain,
+      profileScopeKeyHex: inPlaceProfileKeyHex,
       onProgress: msg => sBox.message(msg),
     })
     sBox.stop(`sandbox ${args.sandboxId.slice(0, 8)} ready @ ${args.sandboxEndpoint}`)
@@ -510,6 +521,14 @@ async function runReprovisionUpgrade(args: ReprovisionUpgradeArgs): Promise<void
     tokenId: args.tokenId,
     onNotice: msg => sBox.message(msg),
   })
+  const reprovisionAgentId = iNFTAgentId({
+    contractAddress: args.contractAddress,
+    tokenId: args.tokenId,
+  })
+  const reprovisionProfileKeyHex = loadProfileScopeKeyHex(reprovisionAgentId)
+  if (!reprovisionProfileKeyHex) {
+    sBox.message('no cached PROFILE key; fresh sandbox will boot without profile-slot anchoring')
+  }
   let sandboxResult: Awaited<ReturnType<typeof runSandboxProvision>>
   try {
     sandboxResult = await runSandboxProvision({
@@ -527,6 +546,7 @@ async function runReprovisionUpgrade(args: ReprovisionUpgradeArgs): Promise<void
       subname: args.config.subname,
       plugins: args.config.plugins,
       telegramSecrets: telegramSecretsPlain,
+      profileScopeKeyHex: reprovisionProfileKeyHex,
       onProgress: msg => sBox.message(msg),
     })
     sBox.stop(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`)

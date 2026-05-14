@@ -3,9 +3,11 @@ import {
   type AnimaNetwork,
   SANDBOX_PROVIDER_URL_GALILEO,
   SandboxProviderClient,
+  iNFTAgentId,
 } from '@s0nderlabs/anima-core'
 import type { Address, Hex } from 'viem'
 import { findAndLoadConfig } from '../config/load'
+import { loadProfileScopeKeyHex } from '../util/profile-key'
 import { loadTelegramHandoffSecrets } from '../util/telegram-secrets'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 import {
@@ -123,6 +125,11 @@ export async function runResume(opts: ResumeOpts = {}): Promise<void> {
     tokenId,
     onNotice: msg => note(`${msg}; resume continues without TG.`, 'warning'),
   })
+  const resumeAgentId = iNFTAgentId({ contractAddress, tokenId })
+  const resumeProfileKeyHex = loadProfileScopeKeyHex(resumeAgentId)
+  if (!resumeProfileKeyHex) {
+    note('no cached PROFILE key; resumed sandbox will boot without profile-slot anchoring', 'note')
+  }
 
   const sBox = spinner()
   sBox.start('Resuming sandbox')
@@ -140,6 +147,7 @@ export async function runResume(opts: ResumeOpts = {}): Promise<void> {
       subname: config.subname,
       plugins: config.plugins,
       telegramSecrets: telegramSecretsPlain,
+      profileScopeKeyHex: resumeProfileKeyHex,
       onProgress: msg => sBox.message(msg),
     })
     if (result.alreadyReady) {

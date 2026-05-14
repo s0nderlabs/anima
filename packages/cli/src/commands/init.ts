@@ -17,8 +17,11 @@ import {
   AnimaRegistrarClient,
   NETWORK_CHAIN_ID,
   NETWORK_RPC,
+  OPERATOR_BLOB_SCOPES,
+  type OperatorSessionKeys,
   SannClient,
   agentPaths,
+  buildOperatorSession,
   defineConfig,
   derivePubkeyHex,
   explorerTokenUrl,
@@ -31,13 +34,15 @@ import {
   mintAgent,
   openComputeLedger,
   placeholderAgentId,
+  precomputeAllScopes,
   saveKeystoreLocally,
   subnameNode,
   uploadAndAnchorKeystore,
   validateSubnameLabel,
   waitForReceiptResilient,
+  writeOperatorSession,
 } from '@s0nderlabs/anima-core'
-import { type Address, type Hex, formatEther, parseEther } from 'viem'
+import { type Address, type Hex, formatEther, hexToBytes, parseEther } from 'viem'
 import { writeConfigTs } from '../config/render'
 import { withSilencedConsole } from '../util/silence-console'
 import { estimateCosts, renderCostSummary } from './init/cost'
@@ -309,21 +314,44 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   }
   const paths = agentPaths.agent(finalAgentId)
 
-  // Save the agent keystore to disk BEFORE funding the agent EOA. Operator
-  // signs once now to derive the AEAD key; the encrypted blob lives at
-  // <agentDir>/keystore.json. Even if every subsequent step fails (storage
-  // upload, chain anchor, subname), the operator can recover the agent
-  // privkey from this file. See `feedback-init-must-save-keystore-before-
-  // funding.md` for why this ordering is mandatory.
+  // v0.23.1: derive BOTH operator-scope keys (keystore + profile) in parallel
+  // up front, then reuse them everywhere. This is the single "two signatures
+  // back to back" moment in the wizard: keystore scope (for the encrypted
+  // privkey blob) + profile scope (for the operator-private user-partition
+  // memory slot). Folding profile derivation into init removes the v0.23.0
+  // need for `anima profile init` as a follow-up command.
+  const sKeys = spinner()
+  sKeys.start('Deriving operator scope keys (may prompt twice: keystore + profile)')
+  let operatorKeys: OperatorSessionKeys
+  let keystoreKeyBuf: Buffer
+  let profileScopeKeyHex: `0x${string}` | undefined
+  try {
+    operatorKeys = await precomputeAllScopes(operator, agent.address as Address, [
+      OPERATOR_BLOB_SCOPES.PROFILE,
+    ])
+    keystoreKeyBuf = Buffer.from(hexToBytes(operatorKeys.keystore))
+    const profileHex = operatorKeys[OPERATOR_BLOB_SCOPES.PROFILE]
+    profileScopeKeyHex = profileHex as `0x${string}` | undefined
+    sKeys.stop('scope keys derived')
+  } catch (e) {
+    sKeys.stop(`scope key derive failed: ${(e as Error).message.slice(0, 160)}`)
+    cancel('Aborted (operator signature required for keystore + profile scopes).')
+    await operator.close?.()
+    return
+  }
+
+  // Pass the already-derived keystoreKey so saveKeystoreLocally skips
+  // signing again. Save BEFORE funding the agent EOA per
+  // `feedback-init-must-save-keystore-before-funding.md`.
   const sLocal = spinner()
   sLocal.start('Encrypting agent keystore to operator wallet (local insurance)')
   let encryptedBytes: Uint8Array
   try {
     const saved = await saveKeystoreLocally({
-      signer: operator,
       agentAddress: agent.address as Address,
       agentPrivkey: agent.privkeyHex as Hex,
       cachePath: paths.keystore,
+      precomputedKey: keystoreKeyBuf,
     })
     encryptedBytes = saved.bytes
     await updateWizardState(paths.dir, draft => {
@@ -332,7 +360,7 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     sLocal.stop(`keystore saved locally at ${paths.keystore}`)
   } catch (e) {
     sLocal.stop(`local keystore save failed: ${(e as Error).message.slice(0, 120)}`)
-    cancel('Aborted before funding (operator wallet could not derive AEAD key).')
+    cancel('Aborted before funding (keystore encryption failed).')
     await operator.close?.()
     return
   }
@@ -425,6 +453,21 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     brainProvider: modelPick?.provider ?? null,
     brainModel: modelPick?.model ?? null,
   })
+
+  // v0.23.1: cache the operator scope keys to `.operator-session` so:
+  //   - First `anima` chat does NOT re-prompt Touch ID (`gateway-start` will
+  //     find both keystore + profile scopes already cached and skip
+  //     re-derivation).
+  //   - First sync after init can encrypt + anchor the PROFILE slot
+  //     transparently — operator never needs to run `anima profile init`.
+  // requiredScopesForAgent now returns ['keystore', 'anima-profile-v1']
+  // because seedStarterMemoryFiles just wrote user/profile.md.
+  try {
+    const sess = buildOperatorSession({ agent: agent.address as Address, keys: operatorKeys })
+    writeOperatorSession(finalAgentId, sess)
+  } catch (e) {
+    console.warn(`operator-session write skipped: ${(e as Error).message.slice(0, 160)}`)
+  }
 
   if (!skipLedger) {
     const sLedger = spinner()
@@ -519,6 +562,7 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
         name: requestedSubname || 'anima',
         ref: process.env.ANIMA_BOOTSTRAP_REF ?? 'main',
         subname: registeredSubname,
+        profileScopeKeyHex,
         onProgress: msg => sBox.message(msg),
       })
       await updateWizardState(paths.dir, draft => {

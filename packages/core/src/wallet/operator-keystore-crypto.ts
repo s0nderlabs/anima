@@ -124,11 +124,29 @@ async function deriveKey(signer: OperatorSigner, agent: Address): Promise<Buffer
 }
 
 export async function encryptAgentKey(opts: {
-  signer: OperatorSigner
+  signer?: OperatorSigner
   agentAddress: Address
   agentPrivkey: Hex
+  /**
+   * v0.23.1: Optional pre-derived AES-256 key (32 bytes). When present, skips
+   * `signer.signTypedData` entirely. Used by `anima init` to share the same
+   * key derivation between the keystore encryption and the operator-session
+   * cache write, so the operator signs once (not twice) for the keystore scope.
+   */
+  precomputedKey?: Buffer
 }): Promise<OperatorEncryptedKeystore> {
-  const key = await deriveKey(opts.signer, opts.agentAddress)
+  let key: Buffer
+  if (opts.precomputedKey) {
+    if (opts.precomputedKey.length !== 32) {
+      throw new Error(`Precomputed key must be 32 bytes, got ${opts.precomputedKey.length}`)
+    }
+    key = opts.precomputedKey
+  } else {
+    if (!opts.signer) {
+      throw new Error('encryptAgentKey requires either signer or precomputedKey')
+    }
+    key = await deriveKey(opts.signer, opts.agentAddress)
+  }
   const iv = randomBytes(12)
   const cipher = createCipheriv('aes-256-gcm', key, iv)
   const pt = Buffer.from(hexToBytes(opts.agentPrivkey))

@@ -1,5 +1,5 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
-import { cancel, intro, outro, spinner } from '@clack/prompts'
+import { cancel, intro, note, outro, spinner } from '@clack/prompts'
 import {
   MemorySyncManager,
   OPERATOR_BLOB_SCOPES,
@@ -32,6 +32,14 @@ import { loadOrPickOperatorSigner } from './init/operator-picker'
  */
 export async function runProfileInit(): Promise<void> {
   intro('anima profile init')
+
+  note(
+    [
+      'Legacy command. v0.23.1+ folds profile-key derivation into anima init.',
+      'Run this only if your agent was created before v0.23.1.',
+    ].join('\n'),
+    'profile init (legacy)',
+  )
 
   const loaded = await findAndLoadConfig()
   if (!loaded) {

@@ -66,6 +66,15 @@ export interface SandboxProvisionOpts {
    * via `loadTelegramHandoffSecrets` (util/telegram-secrets.ts).
    */
   telegramSecrets?: TelegramHandoffSecrets
+  /**
+   * v0.23.1: operator-derived PROFILE scope key (32 bytes hex with 0x prefix).
+   * Threaded into the same secondary ECIES envelope as telegramSecrets so the
+   * freshly provisioned harness boots with `slots.profile` ready to anchor
+   * instead of `{ status: 'skipped', reason: 'no-profile-key' }`. Source via
+   * `loadProfileScopeKeyHex` (util/profile-key.ts) when called from upgrade
+   * paths; init derives it inline as part of the operator-sign step.
+   */
+  profileScopeKeyHex?: `0x${string}`
   /** Network the iNFT lives on (mainnet for hybrid path 1). */
   iNFTNetwork: AnimaNetwork
   /** Sandbox name (sent to provider; surfaces in dashboards). */
@@ -311,6 +320,7 @@ export async function runSandboxProvision(
     promptAppend: opts.promptAppend,
     subname: opts.subname,
     telegramSecrets: opts.telegramSecrets,
+    profileScopeKeyHex: opts.profileScopeKeyHex,
     onProgress: progress,
   })
 
@@ -695,6 +705,15 @@ export interface ResumeArchivedSandboxOpts {
    * callers may pass `undefined` to keep the harness TG-less.
    */
   telegramSecrets?: TelegramHandoffSecrets
+  /**
+   * v0.23.1: operator-derived PROFILE scope key (32 bytes hex with 0x prefix).
+   * Threaded into the same secondary ECIES envelope as telegramSecrets so the
+   * resumed harness boots with `slots.profile` ready to anchor. Source via
+   * `loadProfileScopeKeyHex` (util/profile-key.ts). Without it the resumed
+   * daemon comes back with `slots.profile = no-profile-key` until the operator
+   * re-runs `anima profile init`.
+   */
+  profileScopeKeyHex?: `0x${string}`
   onProgress?: (msg: string) => void
   ensureStartedOpts?: EnsureSandboxStartedOpts
 }
@@ -766,6 +785,7 @@ export async function resumeArchivedSandbox(
     promptAppend: opts.promptAppend,
     subname: opts.subname,
     telegramSecrets: opts.telegramSecrets,
+    profileScopeKeyHex: opts.profileScopeKeyHex,
     onProgress: progress,
   })
 

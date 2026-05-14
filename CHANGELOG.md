@@ -4,6 +4,24 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.1] - 2026-05-14
+
+### Changed
+
+- **PROFILE key derivation folded into `anima init` wizard.** Operator signs twice in one sitting during init (keystore scope + profile scope, computed in parallel via `precomputeAllScopes`). The wizard caches both keys to `~/.anima/agents/<id>/.operator-session`, so the first chat does NOT re-prompt Touch ID and user-partition memory works out of the box without `anima profile init`. The previous v0.23.0 design required operators to run `anima profile init` as a follow-up command before user memory would ever anchor on chain.
+- **`saveKeystoreLocally` + `encryptAgentKey` accept `precomputedKey`.** Init reuses the keystore scope key it just derived via `precomputeAllScopes` instead of doing a redundant second `signTypedData` for the same scope. Operator-facing sig count stays at 2 (keystore + profile) regardless of wallet backend.
+
+### Fixed
+
+- **`anima upgrade --reprovision` and `--in-place` now ship the cached PROFILE key.** Post-upgrade sandbox daemons start with `slots.profile` ready to anchor instead of `{ status: 'skipped', reason: 'no-profile-key' }`. Without the fix, every upgrade silently broke profile-slot anchoring until the operator re-ran `anima profile init`. New helper: `loadProfileScopeKeyHex(agentId)` in `packages/cli/src/util/profile-key.ts` mirrors the existing `loadTelegramHandoffSecrets` pattern.
+- **`SandboxProvisionOpts` + `ResumeArchivedSandboxOpts`** now declare `profileScopeKeyHex?` so the field can thread through the existing secondary ECIES envelope into `handoffAgentToGateway`. `anima resume` benefits automatically the next time it's wired by a caller passing the key in.
+
+### Deprecated
+
+- **`anima profile init`** kept as a legacy escape hatch for agents minted before v0.23.1. v0.23.1 init wizards do everything that command did; v0.24.0 removes it.
+
+[0.23.1]: https://github.com/s0nderlabs/anima/releases/tag/v0.23.1
+
 ## [0.23.0] - 2026-05-14
 
 ### Added

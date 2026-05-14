@@ -67,15 +67,25 @@ export interface UploadKeystoreResult {
  * `feedback-init-must-save-keystore-before-funding.md`.)
  */
 export async function saveKeystoreLocally(opts: {
-  signer: OperatorSigner
+  signer?: OperatorSigner
   agentAddress: Address
   agentPrivkey: Hex
   cachePath: string
+  /**
+   * v0.23.1: Optional pre-derived AES key (32 bytes). When provided, the
+   * caller has already derived the keystore-scope key via
+   * `precomputeAllScopes` and wants to avoid a second `signTypedData` call.
+   * Used by `anima init` so the operator-session cache and the encrypted
+   * keystore share the same derive (operator signs once for the keystore
+   * scope, once for the profile scope, never for keystore again).
+   */
+  precomputedKey?: Buffer
 }): Promise<{ keystore: OperatorEncryptedKeystore; bytes: Uint8Array }> {
   const keystore = await encryptAgentKey({
     signer: opts.signer,
     agentAddress: opts.agentAddress,
     agentPrivkey: opts.agentPrivkey,
+    precomputedKey: opts.precomputedKey,
   })
   await writeKeystoreCache(opts.cachePath, keystore)
   const bytes = encodeKeystoreBytes(keystore)

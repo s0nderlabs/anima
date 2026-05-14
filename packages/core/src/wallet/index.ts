@@ -27,6 +27,7 @@ export {
   OPERATOR_SESSION_VERSION,
   DEFAULT_OPERATOR_SESSION_TTL_MS,
   type OperatorSession,
+  type OperatorSessionKeys,
   operatorSessionPath,
   writeOperatorSession,
   readOperatorSession,
