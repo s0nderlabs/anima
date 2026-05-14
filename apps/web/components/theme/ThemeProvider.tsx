@@ -9,6 +9,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
+import { THEME_STORAGE_KEY } from './constants'
 
 export type ThemeMode = 'light' | 'dark' | 'system'
 export type ResolvedTheme = 'light' | 'dark'
@@ -21,8 +22,6 @@ type ThemeContextValue = {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null)
 
-export const THEME_STORAGE_KEY = 'anima-theme'
-
 function systemPrefersDark() {
   if (typeof window === 'undefined') return false
   return window.matchMedia('(prefers-color-scheme: dark)').matches
@@ -33,6 +32,20 @@ function readStored(): ThemeMode {
   const raw = window.localStorage.getItem(THEME_STORAGE_KEY)
   if (raw === 'light' || raw === 'dark' || raw === 'system') return raw
   return 'system'
+}
+
+function writeThemeCookie(mode: ThemeMode) {
+  if (typeof document === 'undefined') return
+  document.cookie = `${THEME_STORAGE_KEY}=${mode}; path=/; max-age=31536000; SameSite=Lax`
+}
+
+function readCookieTheme(): ThemeMode | null {
+  if (typeof document === 'undefined') return null
+  const m = document.cookie.match(new RegExp(`(?:^|;\\s*)${THEME_STORAGE_KEY}=([^;]+)`))
+  if (!m) return null
+  const v = m[1]
+  if (v === 'light' || v === 'dark' || v === 'system') return v
+  return null
 }
 
 function resolveTheme(mode: ThemeMode): ResolvedTheme {
@@ -62,6 +75,12 @@ function applyDocumentTheme(theme: ThemeMode) {
   // pre-hydration script set. Re-stamp so globals.css's body-transition
   // gate stays armed.
   root.setAttribute('data-theme-ready', '1')
+  // Lift the pre-hydration <style> override now that the class is
+  // (re-)applied. Doing this here, not in the script's rAF, avoids the
+  // gap between hydration (which strips the class) and useEffect (which
+  // re-adds it). With the override held until now, the page paints the
+  // correct theme continuously from first paint through hydration.
+  document.getElementById('__theme-init')?.remove()
 }
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -77,6 +96,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setThemeState(stored)
     setResolved(resolveTheme(stored))
     applyDocumentTheme(stored)
+    // Ensure cookie is in sync with localStorage so subsequent navigations
+    // get the right server-rendered <html class>. Users who set their pick
+    // before the cookie sync was added still have a localStorage value;
+    // this back-fills the cookie on next visit.
+    const cookieTheme = readCookieTheme()
+    if (cookieTheme !== stored) writeThemeCookie(stored)
   }, [])
 
   // Track system preference while theme === 'system'. Detaches when
@@ -97,6 +122,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setThemeState(next)
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(THEME_STORAGE_KEY, next)
+      // Mirror to cookie so SSR can render the right <html class> on the
+      // next navigation, eliminating the no-class race that lets the
+      // @media (prefers-color-scheme: dark) rule paint dark for a
+      // light-picked dark-OS user before JS has a chance to override.
+      writeThemeCookie(next)
     }
     setResolved(resolveTheme(next))
     applyDocumentTheme(next)

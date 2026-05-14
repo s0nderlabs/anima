@@ -1,9 +1,11 @@
 import { MotionProvider } from '@/components/MotionProvider'
 import { PaperNoise } from '@/components/PaperNoise'
+import { THEME_STORAGE_KEY } from '@/components/theme/constants'
 import { ThemeProvider } from '@/components/theme/ThemeProvider'
 import { ThemeScript } from '@/components/theme/ThemeScript'
 import type { Metadata, Viewport } from 'next'
 import { Fraunces, Geist_Mono, Instrument_Serif, Outfit } from 'next/font/google'
+import { cookies } from 'next/headers'
 import localFont from 'next/font/local'
 import { Providers } from './providers'
 import './globals.css'
@@ -92,11 +94,23 @@ export const viewport: Viewport = {
   initialScale: 1,
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Read theme cookie server-side so the first byte of HTML carries the
+  // right <html class>. Without this, dark-OS users with an explicit
+  // light pick see a flash of dark: the @media (prefers-color-scheme: dark)
+  // rule applies because no .light class is on <html> yet, the inline
+  // script later adds the class but several paints (and the browser's
+  // navigation theme-color background) have already rendered dark.
+  // The cookie is mirrored from localStorage by ThemeProvider on mount.
+  const cookieStore = await cookies()
+  const cookieTheme = cookieStore.get(THEME_STORAGE_KEY)?.value
+  const themeClass = cookieTheme === 'dark' || cookieTheme === 'light' ? cookieTheme : ''
+
   return (
     <html
       lang="en"
-      className={`${fraunces.variable} ${instrumentSerif.variable} ${outfit.variable} ${geistMono.variable} ${calSans.variable}`}
+      className={`${themeClass} ${fraunces.variable} ${instrumentSerif.variable} ${outfit.variable} ${geistMono.variable} ${calSans.variable}`}
+      data-theme-ssr={cookieTheme || 'unset'}
       suppressHydrationWarning
     >
       <head>
