@@ -2,6 +2,8 @@
 
 import ReactMarkdown, { type Components } from 'react-markdown'
 import rehypeSanitize from 'rehype-sanitize'
+import remarkBreaks from 'remark-breaks'
+import remarkGfm from 'remark-gfm'
 
 // Slots whose content is rendered as its own in-page panel by MemoryBrowser.
 // Memory-index markdown links like `[identity](agent/identity.md)` should
@@ -137,7 +139,11 @@ const components: Components = {
 
 export function MarkdownView({ content }: { content: string }) {
   return (
-    <ReactMarkdown rehypePlugins={[rehypeSanitize]} components={components}>
+    <ReactMarkdown
+      remarkPlugins={[remarkGfm, remarkBreaks]}
+      rehypePlugins={[rehypeSanitize]}
+      components={components}
+    >
       {content}
     </ReactMarkdown>
   )

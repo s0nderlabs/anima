@@ -51,7 +51,7 @@ const slotDescription: Record<RailSlot, string> = {
   'memory-index': 'The agent’s index of every memory file it tends.',
   identity: 'Facts the agent knows about itself.',
   persona: 'How the agent prefers to speak. Optional.',
-  profile: 'Reserved. Likely empty for now.',
+  profile: 'Your private notes. Operator-only, purged on transfer.',
   keystore: 'Encrypted agent privkey. Used to unlock this view.',
   'activity-log': 'Tool-calls, brain responses, errors.',
 }
