@@ -35,6 +35,14 @@ const saveSchema = z.object({
 
 export type MemorySaveArgs = z.infer<typeof saveSchema>
 
+/** Shape returned in `data` from a successful memory.save call. */
+export interface MemorySaveData {
+  file: string
+  partition: MemoryPartition
+  slug: string
+  updated: boolean
+}
+
 export interface MakeMemorySaveToolArgs {
   agentId: string
   /**
@@ -71,9 +79,12 @@ export function makeMemorySaveTool({
       const now = new Date().toISOString()
 
       const existing = await readTopic(dir, partition, slug)
+      const isProfile = slug === PROFILE_SLUG && partition === 'user'
       const fm: MemoryFrontmatter = {
-        name: args.name,
-        description: args.description,
+        name: isProfile ? PROFILE_SLUG : args.name,
+        description: isProfile
+          ? (existing?.frontmatter.description ?? args.description)
+          : args.description,
         type: args.type,
         createdAt: existing?.frontmatter.createdAt ?? now,
         updatedAt: now,
@@ -82,7 +93,7 @@ export function makeMemorySaveTool({
         partition,
         slug,
         frontmatter: fm,
-        body: existing ? appendBody(existing.body, args.content) : args.content,
+        body: existing ? mergeBody(existing.body, args.content, slug) : args.content,
       }
       await writeTopic(dir, topic)
 
@@ -100,10 +111,8 @@ export function makeMemorySaveTool({
         await writeIndexFile(indexPath, index)
       }
 
-      return {
-        ok: true,
-        data: { file, partition, slug, updated: existing !== null },
-      }
+      const data: MemorySaveData = { file, partition, slug, updated: existing !== null }
+      return { ok: true, data }
     },
   }
 }
@@ -112,15 +121,30 @@ function partitionForType(type: MemoryType): MemoryPartition {
   return type.startsWith('agent-') ? 'agent' : 'user'
 }
 
-function toSlug(name: string, type: MemoryType): string {
-  // Type sub-prefix: drop the partition root from compound types so a
-  // `user-favorite-color` save lands at `user/favorite-color.md`, not
-  // `user/user-favorite-color.md`. Bare `user`/`agent` types also collapse
-  // (no compound subtype) — they get just the slug, no prefix.
+/**
+ * Canonical operator-facts file in the user partition. Anchors to iNFT slot 3.
+ * Any user/<other>.md file is local-only scratchpad until v0.24.0 ships the
+ * multi-file user partition.
+ */
+export const PROFILE_SLUG = 'profile' as const
+
+/**
+ * Brain often picks ambiguous names for operator facts ("preferences",
+ * "operator profile", "about me", "my preferences"). Consolidate them all
+ * into user/profile.md so the fact actually anchors to chain instead of
+ * being lost on reprovision.
+ */
+const PROFILE_NAME_PATTERN =
+  /^(my[\s_-]?)?(profile|preferences?|about[\s_-]?me|operator[\s_-]?profile|user[\s_-]?profile|operator[\s_-]?preferences?|user[\s_-]?preferences?)$/i
+
+export function toSlug(name: string, type: MemoryType): string {
+  if (type === 'user' && PROFILE_NAME_PATTERN.test(name.trim())) {
+    return PROFILE_SLUG
+  }
+
   let prefix = ''
   if (type.startsWith('user-')) prefix = type.replace(/^user-/, '')
   else if (type.startsWith('agent-')) prefix = type.replace(/^agent-/, '')
-  // For bare 'user' or 'agent', prefix stays empty.
 
   const base = name
     .toLowerCase()
@@ -128,6 +152,35 @@ function toSlug(name: string, type: MemoryType): string {
     .replace(/^-|-$/g, '')
     .slice(0, 48)
   return prefix ? `${prefix}-${base}` : base
+}
+
+function mergeBody(prev: string, add: string, slug: string): string {
+  return slug === PROFILE_SLUG ? mergeProfileBody(prev, add) : appendBody(prev, add)
+}
+
+/**
+ * Profile.md grows over time as the brain learns operator facts. Plain append
+ * accumulates duplicates ("Operator likes coffee black" written 5 times across
+ * sessions). Dedup at line granularity: skip any non-blank line that already
+ * appears verbatim in the previous body. Append only fresh lines.
+ *
+ * Section-level merge (replace `## Heading` blocks) is intentionally NOT done
+ * here — the brain doesn't reliably structure profile writes with stable
+ * headings, so a line-dedup is the cheapest correct semantics.
+ */
+export function mergeProfileBody(prev: string, add: string): string {
+  const prevLines = new Set(
+    prev
+      .split('\n')
+      .map(l => l.trim())
+      .filter(l => l.length > 0),
+  )
+  const freshLines = add
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0 && !prevLines.has(l))
+  if (freshLines.length === 0) return prev
+  return `${prev.trimEnd()}\n\n${freshLines.join('\n')}`
 }
 
 function appendBody(prev: string, add: string): string {

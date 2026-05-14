@@ -50,13 +50,25 @@ export async function runGatewayStart(opts: GatewayStartOpts): Promise<void> {
   const agentAddress = getAddress(config.identity.agent as Address)
   const socketPath = join(paths.dir, 'gateway.sock')
 
-  // If the socket exists, the gateway might already be running. Heuristic:
-  // try to connect. For now: abort if socket file exists.
+  // v0.23.2: if the socket exists, check for version drift. If the running
+  // daemon's version differs from the on-disk CLI binary, auto-restart so
+  // operators don't have to remember `anima gateway restart` after every
+  // `bun add -g @s0nderlabs/anima@N`. If versions match, bail with the
+  // legacy "already running" error.
   if (existsSync(socketPath)) {
-    console.error(
-      `anima gateway start: socket already exists at ${socketPath} — gateway may be running. Try \`anima gateway stop\` first.`,
-    )
-    process.exit(1)
+    const { createHash } = await import('node:crypto')
+    const { homedir } = await import('node:os')
+    const identityHash = createHash('sha256').update(agentId).digest('hex').slice(0, 16)
+    const lockFile = join(homedir(), '.anima', 'locks', `anima-gateway-${identityHash}.lock`)
+    const { ensureGatewayVersionMatchesCli } = await import('../util/gateway-version')
+    const drift = await ensureGatewayVersionMatchesCli({ socketPath, lockFile })
+    if (drift.action === 'ok' || drift.action === 'no-cli-version') {
+      console.error(
+        `anima gateway start: socket already exists at ${socketPath} — gateway may be running (version ${drift.daemonVersion ?? 'unknown'}). Try \`anima gateway stop\` first.`,
+      )
+      process.exit(1)
+    }
+    console.log(`note: ${drift.note}`)
   }
 
   // v0.21.12: derive the set of scope keys this agent's daemon will need

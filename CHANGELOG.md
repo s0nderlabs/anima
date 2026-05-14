@@ -4,6 +4,20 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.23.2] - 2026-05-14
+
+### Changed
+
+- **Brain consolidates operator facts into `user/profile.md`.** New `MEMORY_SAVE_GUIDANCE` rule pushes the brain to route "remember X about me" style facts to `name: "profile"` instead of inventing per-fact slugs like `user/operator-preferences.md` or `user/dark-mode-preference.md`. Only `user/profile.md` anchors to iNFT slot 3; every other `user/*.md` is local-only scratchpad until v0.24.0 ships the multi-file user partition. Pre-fix the brain spawned a new file per fact and operators saw `/console` show stale seed content despite a full session of `memory.save type=user` calls.
+- **`memory.save` slug routing.** `toSlug()` now collapses profile-like names (`profile`, `preferences`, `about me`, `operator profile`, `user preferences`, `my preferences`, etc.) to the canonical `profile` slug when `type=user`. Compound types like `user-feedback` keep their existing behavior. `name=` still wins for genuinely distinct topics — only ambiguous "this is operator-intrinsic" names get consolidated.
+- **`memory.save` profile.md merge semantics.** Subsequent saves to `user/profile.md` now dedup at line granularity instead of blindly appending. The line "Operator drinks coffee black" written 5 times across sessions ends up in the file exactly once. `appendBody` keeps the old behavior for non-profile slugs.
+
+### Fixed
+
+- **Gateway daemon version drift auto-detected on reattach.** When the operator upgrades the global CLI (`bun add -g @s0nderlabs/anima@0.23.2`) while a v0.23.1 daemon is still running, `anima` (chat) and `anima gateway start` now fetch `/healthz` over the unix socket, compare the running daemon's `version` field to the on-disk gateway package version, and if they drift: SIGTERM the daemon, clean the stale socket, and respawn. Operators no longer need to remember `anima gateway restart` after every upgrade. New helper: `ensureGatewayVersionMatchesCli` in `packages/cli/src/util/gateway-version.ts` with 5 unit tests covering ok / unreachable / drift / no-cli-version paths.
+
+[0.23.2]: https://github.com/s0nderlabs/anima/releases/tag/v0.23.2
+
 ## [0.23.1] - 2026-05-14
 
 ### Changed

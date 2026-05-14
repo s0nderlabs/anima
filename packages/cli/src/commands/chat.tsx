@@ -132,11 +132,28 @@ export async function runChat(opts?: { cwd?: string; yolo?: boolean }): Promise<
     const _aid = iNFTAgentId({ contractAddress: _contractAddr, tokenId: _tokId })
     const _gatewaySock = join(agentPaths.agent(_aid).dir, 'gateway.sock')
     const forceEmbedded = process.env.ANIMA_FORCE_EMBEDDED === '1'
-    if (existsSync(_gatewaySock)) {
-      const { runChatSandbox } = await import('./chat-sandbox')
-      return runChatSandbox(config, { unixSocketPath: _gatewaySock })
+    let _socketExisted = existsSync(_gatewaySock)
+    if (_socketExisted) {
+      // v0.23.2: if the running daemon's version differs from the on-disk
+      // CLI binary's version, the operator just ran `bun add -g @s0nderlabs/anima@N`
+      // and expects the new behavior. Auto-restart the daemon so resume always
+      // resolves to the latest version.
+      const { ensureGatewayVersionMatchesCli } = await import('../util/gateway-version')
+      const { createHash } = await import('node:crypto')
+      const _identityHash = createHash('sha256').update(_aid).digest('hex').slice(0, 16)
+      const _lockFile = join(homedir(), '.anima', 'locks', `anima-gateway-${_identityHash}.lock`)
+      const drift = await ensureGatewayVersionMatchesCli({
+        socketPath: _gatewaySock,
+        lockFile: _lockFile,
+      })
+      if (drift.action === 'ok' || drift.action === 'no-cli-version') {
+        const { runChatSandbox } = await import('./chat-sandbox')
+        return runChatSandbox(config, { unixSocketPath: _gatewaySock })
+      }
+      console.log(`note: ${drift.note}`)
+      _socketExisted = false
     }
-    if (!forceEmbedded) {
+    if (!_socketExisted && !forceEmbedded) {
       // v0.21.12: only auto-spawn the gateway daemon when the cached session
       // contains every scope key the daemon will need. A "fresh by ts" session
       // missing the TELEGRAM scope causes the daemon to silently drop all
