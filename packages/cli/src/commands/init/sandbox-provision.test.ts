@@ -8,6 +8,7 @@ import {
   ensureSandboxStarted,
   extractBootstrapProgressLine,
   pickPermissionMode,
+  resolveHandoffPlugins,
 } from './sandbox-provision'
 
 describe('pickPermissionMode', () => {
@@ -461,5 +462,36 @@ describe('extractBootstrapProgressLine (v0.24.4 STAGE-aware surfacing)', () => {
       const tail = ['some prior line', `STAGE: ${stage}`, 'noise after'].join('\n')
       expect(extractBootstrapProgressLine(tail)).toBe(stage)
     }
+  })
+})
+
+describe('resolveHandoffPlugins (v0.24.5 auto-include telegram)', () => {
+  test('no caller list + no TG secrets → safe default', () => {
+    expect(resolveHandoffPlugins(undefined, false)).toEqual(['system', 'comms', 'onchain'])
+  })
+
+  test('no caller list + TG secrets → default plus telegram', () => {
+    expect(resolveHandoffPlugins(undefined, true)).toEqual([
+      'system',
+      'comms',
+      'onchain',
+      'telegram',
+    ])
+  })
+
+  test('caller list already has telegram + TG secrets → unchanged', () => {
+    const caller = ['system', 'telegram'] as const
+    const out = resolveHandoffPlugins([...caller], true)
+    expect(out).toEqual(['system', 'telegram'])
+  })
+
+  test('caller list missing telegram + TG secrets → appends telegram', () => {
+    const out = resolveHandoffPlugins(['system', 'onchain'], true)
+    expect(out).toEqual(['system', 'onchain', 'telegram'])
+  })
+
+  test('caller list missing telegram + no TG secrets → unchanged (no implicit add)', () => {
+    const out = resolveHandoffPlugins(['system', 'onchain'], false)
+    expect(out).toEqual(['system', 'onchain'])
   })
 })

@@ -4,6 +4,15 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.5] - 2026-05-15
+
+### Fixed
+
+- **Sandbox TG listener stays disabled after `anima init` despite Phase E configuring a bot.** Root cause: `handoffAgentToGateway` defaulted `runtimeConfig.plugins` to `['system','comms','onchain']` and callers never wired `plugins` through, so the runtime config sent to the sandbox omitted `'telegram'`. `build-runtime.ts` gates the listener on `pluginNames.includes('telegram')` and skipped registration. Telegram secrets reached the harness via the secondary ECIES envelope but the listener never started. New `resolveHandoffPlugins(caller, shipsTelegramSecrets)` helper auto-includes `'telegram'` in the plugin list whenever secrets are shipped, so all three handoff paths (init, in-place upgrade, reprovision-upgrade) activate the listener first try. Surfaced live during the v0.24.4 final init drive on nova.anima.0g — `/healthz` reported `listeners.telegram: "disabled"` even though `telegram-secrets.encrypted` was on disk and the config plugin list was correct. Same helper also dedupes the in-config-write path in `telegram-step.ts`.
+- **Bootstrap progress spinner never updated during `anima init` sandbox provisioning.** Pre-fix, the poll loop only called `progress(...)` when a new `STAGE:` marker arrived from the bootstrap log. For the first ~30s of warmup the log is empty, and clack's spinner doesn't auto-refresh, so the operator saw `launching bootstrap...` pinned for the entire ~3 min run, then it jumped straight to `sandbox ... ready`. v0.24.5 unconditionally fires `progress(\`bootstrap waiting (Ns elapsed, tick N)\`)` every 5s tick when no new STAGE marker is available — guarantees the spinner reflects movement throughout the wait. STAGE markers from `bootstrap.ts` still take priority when present.
+
+[0.24.5]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.5
+
 ## [0.24.4] - 2026-05-15
 
 ### Fixed

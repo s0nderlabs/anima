@@ -30,6 +30,7 @@ import {
   saveTelegramSecrets,
   telegramSecretsExist,
 } from '../../util/telegram-secrets'
+import { resolveHandoffPlugins } from './sandbox-provision'
 
 export type TelegramAuthMode = 'pair' | 'allowlist'
 
@@ -210,7 +211,7 @@ export async function runTelegramStep(opts: TelegramStepOpts): Promise<TelegramS
   // build the final cfg with `'telegram'` in plugins and write once. Avoids the
   // partial-write hazard where Phase E runs before init's main config build.
   if (!opts.skipConfigWrite) {
-    const plugins = Array.from(new Set([...(opts.config.plugins ?? []), 'telegram' as const]))
+    const plugins = resolveHandoffPlugins(opts.config.plugins, true)
     if (plugins.length !== (opts.config.plugins ?? []).length) {
       const updated = { ...opts.config, plugins }
       await writeConfigTs(opts.configPath, updated, { subname: opts.config.subname })

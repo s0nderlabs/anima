@@ -261,18 +261,16 @@ export async function runSandboxProvision(
   // the progress log so STAGE markers are findable. The progress surfacing
   // logic prefers any `STAGE: ...` line over the raw tail line.
   const execRead = makeExecRead(provider, sandboxId)
-  const FAST_POLL = `echo --F--; cat ${BOOTSTRAP_FAIL_MARKER} 2>/dev/null; echo --D--; cat ${BOOTSTRAP_DONE_MARKER} 2>/dev/null`
-  const SLOW_POLL = `${FAST_POLL}; echo --P--; tail -n 20 ${BOOTSTRAP_PROGRESS_LOG} 2>/dev/null`
+  const POLL = `echo --F--; cat ${BOOTSTRAP_FAIL_MARKER} 2>/dev/null; echo --D--; cat ${BOOTSTRAP_DONE_MARKER} 2>/dev/null; echo --P--; tail -n 20 ${BOOTSTRAP_PROGRESS_LOG} 2>/dev/null`
+  const bootstrapStart = Date.now()
   let lastDone = ''
   let lastSurfaced = ''
+  let tick = 0
   while (Date.now() < bootstrapDeadline) {
-    // v0.24.4: surface progress every 5s tick (was every 6th tick / ~30s).
-    // STAGE markers from the bootstrap script give the operator a meaningful
-    // update on every poll without spamming repeats — `lastSurfaced` dedupes.
-    const surfaceProgress = true
-    const out = await execRead(surfaceProgress ? SLOW_POLL : FAST_POLL)
+    tick += 1
+    const out = await execRead(POLL)
     const fail = sliceBetween(out, '--F--', '--D--')
-    const done = surfaceProgress ? sliceBetween(out, '--D--', '--P--') : sliceAfter(out, '--D--')
+    const done = sliceBetween(out, '--D--', '--P--')
     const failKeyword = BOOTSTRAP_FAIL_KEYWORDS.find(k => fail.includes(k))
     if (failKeyword) {
       const log = await execRead(`tail -n 80 ${BOOTSTRAP_PROGRESS_LOG} 2>/dev/null`)
@@ -288,12 +286,19 @@ export async function runSandboxProvision(
       progress(`bootstrap complete (${pidLine})`)
       break
     }
-    if (surfaceProgress) {
-      const real = extractBootstrapProgressLine(sliceAfter(out, '--P--'))
-      if (real && real !== lastSurfaced) {
-        lastSurfaced = real
-        progress(`bootstrap: ${real}`)
-      }
+    // v0.24.5: ALWAYS update progress every tick. Prefer a STAGE marker from
+    // the log; else fall back to an elapsed-time heartbeat so the spinner
+    // never sits silent. Previous version (v0.24.4) only fired progress when
+    // a new STAGE line arrived — but the log can be empty for ~30s during
+    // sandbox warmup, and clack's spinner doesn't refresh by itself, so the
+    // operator saw `launching bootstrap...` pinned for the entire run.
+    const real = extractBootstrapProgressLine(sliceAfter(out, '--P--'))
+    if (real && real !== lastSurfaced) {
+      lastSurfaced = real
+      progress(`bootstrap: ${real}`)
+    } else {
+      const elapsedSec = Math.round((Date.now() - bootstrapStart) / 1000)
+      progress(`bootstrap waiting (${elapsedSec}s elapsed, tick ${tick})`)
     }
     await sleep(5000)
   }
@@ -417,6 +422,7 @@ export async function handoffAgentToGateway(
   }
 
   progress('sending provision envelope to harness')
+  const finalPlugins = resolveHandoffPlugins(opts.plugins, Boolean(opts.telegramSecrets))
   const runtimeConfig = {
     network: opts.iNFTNetwork,
     brain: opts.brain,
@@ -427,7 +433,7 @@ export async function handoffAgentToGateway(
       },
       agent: opts.agentAddress,
     },
-    plugins: opts.plugins ?? ['system', 'comms', 'onchain'],
+    plugins: finalPlugins,
     permissions: pickPermissionMode(),
     promptAppend: opts.promptAppend,
     subname: opts.subname,
@@ -889,6 +895,23 @@ export function makeExecRead(
 export function extractExecOutput(r: ToolboxExecResponse): string {
   if (typeof r.result === 'string') return r.result
   return r.stdout ?? r.stderr ?? ''
+}
+
+/**
+ * Resolve the runtime plugin list for a sandbox handoff. Auto-includes
+ * `'telegram'` when telegram secrets are being shipped via the secondary
+ * envelope; otherwise `build-runtime.ts` would gate the listener on
+ * `pluginNames.includes('telegram')` and skip registration. Default base:
+ * `['system', 'comms', 'onchain']`. Idempotent.
+ */
+export function resolveHandoffPlugins(
+  caller: AnimaPlugin[] | undefined,
+  shipsTelegramSecrets: boolean,
+): AnimaPlugin[] {
+  const base = caller ?? (['system', 'comms', 'onchain'] satisfies AnimaPlugin[])
+  if (!shipsTelegramSecrets) return base
+  if (base.includes('telegram')) return base
+  return [...base, 'telegram']
 }
 
 /**
