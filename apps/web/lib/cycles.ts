@@ -81,7 +81,7 @@ export const CYCLES: Cycle[] = [
 
 **0G Storage** , DA + KV + blob layers. $11/TB/month. Indexer: indexer-storage-turbo.0g.ai.
 
-**0G Compute** , TeeML inference w/ attestation receipts. GLM-5 flagship (744B MoE, fp8 quant) routed natively via @0glabs/0g-serving-broker v0.7.5+.
+**0G Compute** , TeeML inference w/ attestation receipts. Multiple open-weight models in the catalog (GLM-5, DeepSeek v3, Qwen3.6, gpt-oss-120b), routed natively via @0glabs/0g-serving-broker v0.7.5+.
 
 **0G Sandbox** , TDX TEE app deployment for hosting agentic harnesses. Galileo-only today (mainnet pending).
 
