@@ -33,7 +33,7 @@ Anima is six layers wired into one runtime. Identity on 0G Chain, memory on 0G S
   └───────────────────────────────┘
             │
             ├────────▶  0G Storage    encrypted keystore + packed-blob memory
-            ├────────▶  0G Compute    TeeML inference (GLM-5-FP8 default)
+            ├────────▶  0G Compute    TeeML inference (model picked live at init)
             └────────▶  0G Sandbox    TDX TEE container (optional, Galileo)
 ```
 
