@@ -1,4 +1,4 @@
-import { cancel, confirm, intro, isCancel, note, outro, spinner } from '@clack/prompts'
+import { cancel, confirm, intro, isCancel, log, note, outro, spinner } from '@clack/prompts'
 import {
   type AnimaNetwork,
   type AnimaPlugin,
@@ -20,6 +20,7 @@ import type { Address, Hex } from 'viem'
 import { findAndLoadConfig } from '../config/load'
 import { writeConfigTs } from '../config/render'
 import { SandboxClient } from '../sandbox/client'
+import { BootstrapProgressController } from '../util/bootstrap-progress-box'
 import { resolveCliVersion } from '../util/cli-version'
 import { checkTagExists } from '../util/github-releases'
 import { loadProfileScopeKeyHex } from '../util/profile-key'
@@ -541,6 +542,11 @@ async function runReprovisionUpgrade(args: ReprovisionUpgradeArgs): Promise<void
     sBox.message('no cached PROFILE key; fresh sandbox will boot without profile-slot anchoring')
   }
   let sandboxResult: Awaited<ReturnType<typeof runSandboxProvision>>
+  const boxCtl = new BootstrapProgressController({
+    spinner: sBox,
+    cliVersion: await resolveCliVersion(),
+    startedMsg: 'fresh sandbox started, running bootstrap',
+  })
   try {
     sandboxResult = await runSandboxProvision({
       operator: args.operator,
@@ -558,11 +564,15 @@ async function runReprovisionUpgrade(args: ReprovisionUpgradeArgs): Promise<void
       plugins: args.config.plugins,
       telegramSecrets: telegramSecretsPlain,
       profileScopeKeyHex: reprovisionProfileKeyHex,
-      onProgress: msg => sBox.message(msg),
+      onProgress: boxCtl.onProgress,
+      onStageEvent: boxCtl.onStageEvent,
+      onTick: boxCtl.onTick,
     })
-    sBox.stop(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`)
+    boxCtl.finalize(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`, msg =>
+      log.step(msg),
+    )
   } catch (e) {
-    sBox.stop(`re-provision failed: ${(e as Error).message.slice(0, 200)}`)
+    boxCtl.fail(`re-provision failed: ${(e as Error).message.slice(0, 200)}`, msg => log.error(msg))
     note(
       [
         'Old sandbox was deleted but the new one did not provision.',

@@ -6,6 +6,7 @@ import {
   confirm,
   intro,
   isCancel,
+  log,
   note,
   outro,
   select,
@@ -44,6 +45,8 @@ import {
 } from '@s0nderlabs/anima-core'
 import { type Address, type Hex, formatEther, hexToBytes, parseEther } from 'viem'
 import { writeConfigTs } from '../config/render'
+import { BootstrapProgressController } from '../util/bootstrap-progress-box'
+import { resolveCliVersion } from '../util/cli-version'
 import { withSilencedConsole } from '../util/silence-console'
 import { loadTelegramHandoffSecrets } from '../util/telegram-secrets'
 import { estimateCosts, renderCostSummary } from './init/cost'
@@ -624,6 +627,11 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
   if (deployTarget === 'sandbox' && mintedTokenId !== null && contractAddress && modelPick) {
     const sBox = spinner()
     sBox.start('Deploying harness into 0G Sandbox (Galileo testnet)')
+    const boxCtl = new BootstrapProgressController({
+      spinner: sBox,
+      cliVersion: await resolveCliVersion(),
+      startedMsg: 'sandbox started, running bootstrap',
+    })
     try {
       sandboxResult = await runSandboxProvision({
         operator,
@@ -637,13 +645,17 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
         subname: registeredSubname,
         profileScopeKeyHex,
         telegramSecrets: telegramHandoff,
-        onProgress: msg => sBox.message(msg),
+        onProgress: boxCtl.onProgress,
+        onStageEvent: boxCtl.onStageEvent,
+        onTick: boxCtl.onTick,
       })
       await updateWizardState(paths.dir, draft => {
         draft.steps.sandboxId = sandboxResult!.sandboxId
         draft.steps.sandboxEndpoint = sandboxResult!.endpoint
       })
-      sBox.stop(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`)
+      boxCtl.finalize(`sandbox ${sandboxResult.sandboxId} ready @ ${sandboxResult.endpoint}`, msg =>
+        log.step(msg),
+      )
 
       // Publish agent:endpoint text record on the subname so the chat client
       // can discover where to talk. Skipped if subname registration failed.
@@ -666,10 +678,12 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
         }
       }
     } catch (e) {
-      sBox.stop(`sandbox deploy failed: ${(e as Error).message.slice(0, 200)}`)
+      boxCtl.fail(`sandbox deploy failed: ${(e as Error).message.slice(0, 200)}`, msg =>
+        log.error(msg),
+      )
       note(
         [
-          'iNFT minted, agent funded, keystore on 0G Storage — recoverable.',
+          'iNFT minted, agent funded, keystore on 0G Storage, recoverable.',
           'Re-run `anima deploy` after fixing the sandbox-side issue.',
           `Likely cause: insufficient testnet 0G at ${operatorAddress}, or provider 504/upstream timeout.`,
         ].join('\n'),

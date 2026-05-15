@@ -4,6 +4,14 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.7] - 2026-05-15
+
+### Changed
+
+- **`anima init` and `anima upgrade --reprovision` now render a multi-line boxed progress UI during the bootstrap phase** instead of pinning a single-line clack spinner that scrolls past 1400+ identical frames on iPad SSH terminals. Stages render in a fixed-width box with elapsed-time stamps, a live spinner glyph on the current stage, and ✓ checkmarks as each stage completes. Box covers 8 stages: launchScript upload, apt update, system deps, bun runtime, anima install, browser deps, harness daemon spawn, /healthz Ready. Non-TTY callers (CI, piped stdout) fall back to per-transition log lines. Closes the v0.24.6 "(live progress below)" promise that the single-line clack spinner couldn't deliver. New `BootstrapProgressBox` helper (`packages/cli/src/util/bootstrap-progress-box.ts`) + new `onStageEvent` / `onTick` callbacks on `SandboxProvisionOpts` so structured stage transitions stream from the poll loop to the renderer instead of being formatted as free text.
+
+[0.24.7]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.7
+
 ## [0.24.6] - 2026-05-15
 
 ### Fixed

@@ -38,9 +38,13 @@ import { type Address, type Hex, formatEther, hexToBytes, parseEther } from 'vie
 import type { LocalAccount } from 'viem/accounts'
 import { SandboxClient } from '../../sandbox/client'
 import { resolveBootstrapMode } from '../../util/bootstrap-mode'
+import type { BootstrapStageId, BootstrapStageStatus } from '../../util/bootstrap-progress-box'
+import { mapBootstrapMarkerToStage } from '../../util/bootstrap-progress-box'
 import { resolveCliVersion } from '../../util/cli-version'
 import { withSilencedConsole } from '../../util/silence-console'
 import type { TelegramHandoffSecrets } from '../../util/telegram-secrets'
+
+export type { BootstrapStageId, BootstrapStageStatus }
 
 export interface SandboxProvisionOpts {
   /** OperatorSigner. Used for both Galileo settlement txs AND provision sig. */
@@ -110,6 +114,19 @@ export interface SandboxProvisionOpts {
   githubToken?: string
   /** Optional progress callback for spinner UX. */
   onProgress?: (msg: string) => void
+  /**
+   * Structured stage-event callback. When set, the bootstrap phase + /healthz
+   * wait emit `(stage, status)` transitions instead of free-text progress
+   * messages, so callers can render a boxed multi-line UI. The pre-bootstrap
+   * phase (deposit/createSandbox) still uses `onProgress`.
+   */
+  onStageEvent?: (id: BootstrapStageId, status: BootstrapStageStatus) => void
+  /**
+   * Periodic tick from the 5s heartbeat during the launchScript upload + poll
+   * loop. Lets a box renderer refresh spinner glyphs and elapsed counters
+   * between marker transitions.
+   */
+  onTick?: () => void
 }
 
 export interface SandboxProvisionResult {
@@ -142,6 +159,8 @@ export async function runSandboxProvision(
   opts: SandboxProvisionOpts,
 ): Promise<SandboxProvisionResult> {
   const progress = opts.onProgress ?? (() => {})
+  const stageEvent = opts.onStageEvent
+  const tick = opts.onTick
   const snapshotName = opts.snapshotName ?? 'daytonaio/sandbox:0.5.0-slim'
   const repoUrl = opts.repoUrl ?? 'https://github.com/s0nderlabs/anima.git'
   const depositWei = parseEther(String(opts.depositOg ?? SANDBOX_DEFAULT_INITIAL_DEPOSIT_OG))
@@ -241,23 +260,34 @@ export async function runSandboxProvision(
   })
   const installLabel =
     mode === 'npm'
-      ? 'apt + bun + npm install + browser deps + harness daemon, ~90-150s (live progress below)'
+      ? 'apt + bun + npm install + browser deps + harness daemon, ~90-150s'
       : 'apt + bun + git clone + harness daemon, runs ~3-5 min'
   // v0.24.6: ticker keeps the spinner text alive while `execInToolbox` blocks
   // in HTTP retries against Daytona (worst case ~252s = 3 retries x 60s timeout
   // + linear backoff). Without this, the spinner sits on `launching bootstrap`
-  // for 30-180s before the poll-loop heartbeat (line 269+) ever runs. Reported
-  // by elpabl0 with screenshots of 1400+ identical frames during atlas init.
+  // for 30-180s before the poll-loop heartbeat (line 269+) ever runs.
+  //
+  // v0.24.7: when a stage-event consumer is registered, route the elapsed
+  // signal through `onTick()` so the boxed renderer advances its spinner +
+  // counters; the legacy text-based path still fires when callbacks are
+  // unset (CI / scripted flows).
   const launchLabel = `launching bootstrap (${installLabel})`
-  progress(launchLabel)
+  if (stageEvent) {
+    stageEvent('launch-upload', 'running')
+  } else {
+    progress(launchLabel)
+  }
   const launchStart = Date.now()
   let launchTickerRunning = true
   ;(async () => {
     while (launchTickerRunning) {
       await sleep(5000)
       if (!launchTickerRunning) break
-      const elapsedSec = Math.round((Date.now() - launchStart) / 1000)
-      progress(`${launchLabel}, ${elapsedSec}s elapsed (uploading script)`)
+      if (tick) tick()
+      if (!stageEvent) {
+        const elapsedSec = Math.round((Date.now() - launchStart) / 1000)
+        progress(`${launchLabel}, ${elapsedSec}s elapsed (uploading script)`)
+      }
     }
   })().catch(() => {})
   let launchRes: ToolboxExecResponse
@@ -276,7 +306,12 @@ export async function runSandboxProvision(
   // Poll the done/fail markers. Bootstrap runs ~3-8 min depending on the
   // image cache; surface progress every 5s so the operator sees real
   // movement instead of a static spinner.
-  progress('waiting for bootstrap completion (apt + bun + git clone + harness ready)')
+  if (stageEvent) {
+    // Box renderer owns the visual; emit no extra text. The launch-upload
+    // row stays "running" until the first STAGE marker arrives.
+  } else {
+    progress('waiting for bootstrap completion (apt + bun + git clone + harness ready)')
+  }
   const bootstrapDeadline = Date.now() + 600_000 // 10 min max
   // Lean poll: cheap `cat` of FAIL + DONE markers, plus a 20-line tail of
   // the progress log so STAGE markers are findable. The progress surfacing
@@ -286,10 +321,11 @@ export async function runSandboxProvision(
   const bootstrapStart = Date.now()
   let lastDone = ''
   let lastSurfaced = ''
-  let tick = 0
+  let pollTick = 0
   while (Date.now() < bootstrapDeadline) {
-    tick += 1
+    pollTick += 1
     const out = await execRead(POLL)
+    if (tick) tick()
     const fail = sliceBetween(out, '--F--', '--D--')
     const done = sliceBetween(out, '--D--', '--P--')
     const failKeyword = BOOTSTRAP_FAIL_KEYWORDS.find(k => fail.includes(k))
@@ -304,22 +340,29 @@ export async function runSandboxProvision(
           .split('\n')
           .find(l => l.includes(BOOTSTRAP_SUCCESS_MARKER_PREFIX))
           ?.trim() ?? done.trim()
-      progress(`bootstrap complete (${pidLine})`)
+      if (stageEvent) {
+        stageEvent('harness-spawn', 'done')
+      } else {
+        progress(`bootstrap complete (${pidLine})`)
+      }
       break
     }
     // v0.24.5: ALWAYS update progress every tick. Prefer a STAGE marker from
     // the log; else fall back to an elapsed-time heartbeat so the spinner
-    // never sits silent. Previous version (v0.24.4) only fired progress when
-    // a new STAGE line arrived — but the log can be empty for ~30s during
-    // sandbox warmup, and clack's spinner doesn't refresh by itself, so the
-    // operator saw `launching bootstrap...` pinned for the entire run.
+    // never sits silent. v0.24.7: when a stage-event consumer is registered,
+    // we promote STAGE transitions to structured events for the box renderer.
     const real = extractBootstrapProgressLine(sliceAfter(out, '--P--'))
     if (real && real !== lastSurfaced) {
       lastSurfaced = real
-      progress(`bootstrap: ${real}`)
-    } else {
+      if (stageEvent) {
+        const stageId = mapBootstrapMarkerToStage(real)
+        if (stageId) stageEvent(stageId, 'running')
+      } else {
+        progress(`bootstrap: ${real}`)
+      }
+    } else if (!stageEvent) {
       const elapsedSec = Math.round((Date.now() - bootstrapStart) / 1000)
-      progress(`bootstrap waiting (${elapsedSec}s elapsed, tick ${tick})`)
+      progress(`bootstrap waiting (${elapsedSec}s elapsed, tick ${pollTick})`)
     }
     await sleep(5000)
   }
@@ -351,6 +394,8 @@ export async function runSandboxProvision(
     telegramSecrets: opts.telegramSecrets,
     profileScopeKeyHex: opts.profileScopeKeyHex,
     onProgress: progress,
+    onStageEvent: stageEvent,
+    onTick: tick,
   })
 
   return {
@@ -408,15 +453,20 @@ export interface HandoffAgentToGatewayOpts {
   /** Default 180_000. */
   readyTimeoutMs?: number
   onProgress?: (msg: string) => void
+  /** Structured stage events for the boxed progress renderer. */
+  onStageEvent?: (id: BootstrapStageId, status: BootstrapStageStatus) => void
+  /** Periodic tick (5s) to refresh spinner glyphs. */
+  onTick?: () => void
 }
 
 export async function handoffAgentToGateway(
   opts: HandoffAgentToGatewayOpts,
 ): Promise<{ bootstrapPubkey: Hex }> {
   const progress = opts.onProgress ?? (() => {})
+  const stageEvent = opts.onStageEvent
   const endpoint = opts.sandboxClient.endpoint
 
-  progress(`polling ${endpoint}/bootstrap/pubkey`)
+  if (!stageEvent) progress(`polling ${endpoint}/bootstrap/pubkey`)
   const pubkeyRes = await pollPubkey(opts.sandboxClient, opts.pubkeyTimeoutMs ?? 60_000)
 
   const agentPrivkeyBytes = hexToBytes(opts.agentPrivkey)
@@ -439,10 +489,10 @@ export async function handoffAgentToGateway(
       opts.telegramSecrets && 'telegram',
       opts.profileScopeKeyHex && 'profile-key',
     ].filter(Boolean)
-    progress(`shipping ${parts.join(' + ')} via secondary envelope`)
+    if (!stageEvent) progress(`shipping ${parts.join(' + ')} via secondary envelope`)
   }
 
-  progress('sending provision envelope to harness')
+  if (!stageEvent) progress('sending provision envelope to harness')
   const finalPlugins = resolveHandoffPlugins(opts.plugins, Boolean(opts.telegramSecrets))
   const runtimeConfig = {
     network: opts.iNFTNetwork,
@@ -469,8 +519,13 @@ export async function handoffAgentToGateway(
     pubkeyRes.pubkeyHex,
   )
 
-  progress(`polling ${endpoint}/healthz for Ready`)
+  if (stageEvent) {
+    stageEvent('healthz-ready', 'running')
+  } else {
+    progress(`polling ${endpoint}/healthz for Ready`)
+  }
   await opts.sandboxClient.waitReady({ timeoutMs: opts.readyTimeoutMs ?? 180_000 })
+  if (stageEvent) stageEvent('healthz-ready', 'done')
 
   return { bootstrapPubkey: pubkeyRes.pubkeyHex }
 }

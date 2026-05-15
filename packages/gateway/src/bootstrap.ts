@@ -117,6 +117,23 @@ const DONE_MARKER = '/tmp/anima-bootstrap-done'
 const FAIL_MARKER = '/tmp/anima-bootstrap-failed'
 
 /**
+ * Stage marker bodies emitted as `STAGE: <body>` lines into the progress log.
+ * Single source of truth for both the script generator (writes them) and the
+ * CLI poll loop (reads them via `extractBootstrapProgressLine` and routes to
+ * `BootstrapProgressBox`). Strings are prefixes — the apt/anima/chrome rows
+ * append details after a space.
+ */
+export const BOOTSTRAP_STAGE_MARKERS = {
+  aptUpdate: 'updating package index',
+  systemDeps: 'installing system deps',
+  bunInstall: 'installing bun runtime',
+  animaInstall: 'installing anima',
+  browserDeps: 'installing chrome for browser tools',
+  harnessSpawn: 'starting harness daemon',
+  harnessReady: 'harness ready',
+} as const
+
+/**
  * Shell literal (NOT a Node path). Where Bun symlinks third-party global bins
  * after `bun add -g`. Don't pass to `path.join` — `$HOME` won't expand.
  */
@@ -144,13 +161,13 @@ function buildPreambleLines(
     '  return 1',
     '}',
     'export DEBIAN_FRONTEND=noninteractive',
-    'echo "STAGE: updating package index"',
+    `echo "STAGE: ${BOOTSTRAP_STAGE_MARKERS.aptUpdate}"`,
     `retry 'apt update' sudo -n apt-get update -qq || { echo "apt-update-failed" > ${FAIL_MARKER}; exit 11; }`,
-    'echo "STAGE: installing system deps (build-essential, curl, git, xvfb)"',
+    `echo "STAGE: ${BOOTSTRAP_STAGE_MARKERS.systemDeps} (build-essential, curl, git, xvfb)"`,
     `retry 'apt install' sudo -n apt-get install -y -qq ${aptList} || { echo "apt-install-failed" > ${FAIL_MARKER}; exit 12; }`,
     'install_bun() { curl -fsSL https://bun.sh/install | bash; }',
     'if ! command -v bun >/dev/null 2>&1; then',
-    '  echo "STAGE: installing bun runtime"',
+    `  echo "STAGE: ${BOOTSTRAP_STAGE_MARKERS.bunInstall}"`,
     `  retry 'bun binary' install_bun || { echo "bun-install-failed" > ${FAIL_MARKER}; exit 13; }`,
     'fi',
     'export PATH="$HOME/.bun/bin:$PATH"',
@@ -169,7 +186,7 @@ function buildLaunchLines(opts: BuildBootstrapScriptOpts, gatewayLaunchCmd: stri
     '',
     `fuser -k ${port}/tcp 2>/dev/null || true`,
     'sleep 2',
-    'echo "STAGE: starting harness daemon"',
+    `echo "STAGE: ${BOOTSTRAP_STAGE_MARKERS.harnessSpawn}"`,
     'echo "[launch harness daemon]"',
     'HARNESS_PID=""',
     'HARNESS_OK=0',
@@ -198,7 +215,7 @@ function buildLaunchLines(opts: BuildBootstrapScriptOpts, gatewayLaunchCmd: stri
     `  echo "harness-died-early" > ${FAIL_MARKER}`,
     '  exit 18',
     'fi',
-    'echo "STAGE: harness ready"',
+    `echo "STAGE: ${BOOTSTRAP_STAGE_MARKERS.harnessReady}"`,
     `echo "anima-gateway-pid=$HARNESS_PID" > ${DONE_MARKER}`,
     'echo "[$(date -u +%FT%TZ)] bootstrap-done pid=$HARNESS_PID"',
     '',
@@ -218,7 +235,7 @@ function buildGitInnerScript(opts: BuildBootstrapScriptOpts, aptList: string): s
     `echo "  ref=${opts.ref}"`,
     `echo "  repo=${repoUrl}"`,
     'ANIMA_DIR="$HOME/anima"',
-    `echo "STAGE: installing anima (git ${opts.ref})"`,
+    `echo "STAGE: ${BOOTSTRAP_STAGE_MARKERS.animaInstall} (git ${opts.ref})"`,
     `git_clone_one() { rm -rf "$ANIMA_DIR"; git clone --depth 1 --branch ${shQuote(opts.ref)} ${shQuote(cloneUrl)} "$ANIMA_DIR"; }`,
     `retry 'git clone' git_clone_one || { echo "git-clone-failed" > ${FAIL_MARKER}; exit 14; }`,
     `cd "$ANIMA_DIR" && git remote set-url origin ${shQuote(repoUrl)}`,
@@ -232,7 +249,7 @@ function buildGitInnerScript(opts: BuildBootstrapScriptOpts, aptList: string): s
     // Invoked via `node_modules/.bin/agent-browser` directly (not `bunx`)
     // because Daytona's `curl bun.sh/install` install path doesn't always
     // ship a `bunx` symlink.
-    'echo "STAGE: installing chrome for browser tools"',
+    `echo "STAGE: ${BOOTSTRAP_STAGE_MARKERS.browserDeps}"`,
     'echo "[browser deps]"',
     'if node_modules/.bin/agent-browser doctor >/dev/null 2>&1; then',
     '  echo "[browser deps] already installed, skipping"',
@@ -252,7 +269,7 @@ function buildNpmInnerScript(opts: BuildBootstrapScriptOpts, aptList: string): s
   const preamble = buildPreambleLines(opts, 'npm', aptList)
   const installLines = [
     `echo "  package=@s0nderlabs/anima@${opts.packageVersion}"`,
-    `echo "STAGE: installing anima (${opts.packageVersion})"`,
+    `echo "STAGE: ${BOOTSTRAP_STAGE_MARKERS.animaInstall} (${opts.packageVersion})"`,
     // Install anima from npm. `bun add -g <pkg>@<exact-version>` is idempotent
     // and overwrites whatever is in the global store. Atomic on success; on
     // failure the prior version remains (which may be empty on a fresh container).
@@ -264,7 +281,7 @@ function buildNpmInnerScript(opts: BuildBootstrapScriptOpts, aptList: string): s
     '',
     // Browser deps (Chrome-for-Testing + Linux libs) installed via the global
     // agent-browser binary. `doctor` is the idempotent guard.
-    'echo "STAGE: installing chrome for browser tools"',
+    `echo "STAGE: ${BOOTSTRAP_STAGE_MARKERS.browserDeps}"`,
     'echo "[browser deps]"',
     `if ${BUN_GLOBAL_BIN_SHELL}/agent-browser doctor >/dev/null 2>&1; then`,
     '  echo "[browser deps] already installed, skipping"',

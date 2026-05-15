@@ -71,6 +71,7 @@ export {
   BOOTSTRAP_FAIL_MARKER,
   BOOTSTRAP_PROGRESS_LOG,
   BOOTSTRAP_FAIL_KEYWORDS,
+  BOOTSTRAP_STAGE_MARKERS,
   buildBootstrapScript,
 } from './bootstrap'
 
