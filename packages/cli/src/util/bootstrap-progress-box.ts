@@ -267,7 +267,7 @@ export class BootstrapProgressBox {
       timeText === null ? ' '.repeat(TIME_SLOT_WIDTH) : `[${timeText}]`.padEnd(TIME_SLOT_WIDTH)
     const labelText = truncate(s.label, LABEL_WIDTH).padEnd(LABEL_WIDTH)
     const glyph = pickGlyph(s, this.tickIdx)
-    return `│  ${timeCol} ${labelText}${glyph}  │`
+    return `│  ${timeCol} ${labelText} ${glyph} │`
   }
 }
 

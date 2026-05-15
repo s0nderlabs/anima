@@ -4,6 +4,14 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.8] - 2026-05-15
+
+### Fixed
+
+- **Glyph touched the label when a stage label hit exactly 32 chars (`LABEL_WIDTH`).** Visible only on the launchScript row (`launchScript uploaded to Daytona` is 32 chars exact); rendered as `Daytona✓` instead of `Daytona  ✓`. Shifted one trailing pad space to between label and glyph so every row has a 1-space gap regardless of label length. Caught live during the v0.24.7 enigma reprovision demo. No behavior change.
+
+[0.24.8]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.8
+
 ## [0.24.7] - 2026-05-15
 
 ### Changed
