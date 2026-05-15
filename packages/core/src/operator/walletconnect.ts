@@ -9,6 +9,7 @@ import {
   createPublicClient,
   createWalletClient,
   custom,
+  getTypesForEIP712Domain,
   numberToHex,
 } from 'viem'
 import { type LocalAccount, toAccount } from 'viem/accounts'
@@ -283,7 +284,7 @@ export class WalletConnectOperatorSigner implements OperatorSigner {
     const provider = await this.ensureProvider()
     const addr = await this.address()
 
-    return toAccount({
+    const account = toAccount({
       address: addr,
       async signMessage({ message }) {
         const raw =
@@ -302,13 +303,51 @@ export class WalletConnectOperatorSigner implements OperatorSigner {
         return result as `0x${string}`
       },
       async signTypedData(typedData) {
+        // v0.24.9: inject canonical `EIP712Domain` into `types` so the
+        // domain separator matches viem's `hashTypedData`. Without this MM's
+        // `sanitizeData` adds `EIP712Domain: []` (empty) and the resulting
+        // sig diverges from LocalAccount sigs over the same payload.
+        // `signTypedDataLegacyEmptyDomain` (attached below) preserves the
+        // pre-v0.24.9 verbatim shape so legacy WC-init'd keystores still
+        // decrypt via the keystore-crypto fallback. See
+        // feedback-wc-signTypedData-eip712domain-trap.md.
+        const td = typedData as Parameters<typeof getTypesForEIP712Domain>[0] & {
+          types?: Record<string, unknown>
+          primaryType: string
+          message: Record<string, unknown>
+        }
+        const withDomain = {
+          ...td,
+          types: {
+            EIP712Domain: getTypesForEIP712Domain({ domain: td.domain }),
+            ...(td.types ?? {}),
+          },
+        }
+        const result = await provider.request({
+          method: 'eth_signTypedData_v4',
+          params: [addr, JSON.stringify(withDomain)],
+        })
+        return result as `0x${string}`
+      },
+    })
+    // Attach the legacy variant as a sibling method on the Account. The
+    // keystore-crypto fallback path discovers it via duck-typing and calls
+    // it only after canonical-key decrypt fails AES-GCM (i.e. when a
+    // pre-v0.24.9 WC-init'd keystore is being unlocked). LocalAccount
+    // signers (raw-privkey, keystore-file, keychain) never expose this
+    // method, so canonical-only behavior is preserved for them.
+    Object.defineProperty(account, 'signTypedDataLegacyEmptyDomain', {
+      value: async (typedData: unknown) => {
         const result = await provider.request({
           method: 'eth_signTypedData_v4',
           params: [addr, JSON.stringify(typedData)],
         })
         return result as `0x${string}`
       },
+      enumerable: false,
+      writable: false,
     })
+    return account
   }
 
   /**

@@ -4,6 +4,14 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.9] - 2026-05-15
+
+### Fixed
+
+- **WalletConnect operator signer now injects the canonical `EIP712Domain` field set into `eth_signTypedData_v4` payloads.** Pre-v0.24.9 the WC signer shipped typed-data verbatim, so MetaMask Mobile's `sanitizeData` inserted `EIP712Domain: []` (empty) and hashed the domain separator over `keccak256("EIP712Domain()")`. That diverged from viem's `hashTypedData` canonical hash (over the populated field list), so WC-init'd keystores produced a different AES key from LocalAccount-init'd keystores for the same operator + agent. New WC keystores now match LocalAccount + the apps/web `/console` canonical-decrypt path. Existing pre-v0.24.9 WC-init'd keystores remain decryptable via the new dual-path fallback: `decryptAgentKey` and `decryptOperatorBlob` try the canonical key first, and on AES-GCM auth failure call the legacy `signTypedDataLegacyEmptyDomain` escape hatch attached to the WC Account (raw-privkey / keystore-file / keychain signers never expose this method, so they keep canonical-only behavior). Verified via unit tests (3 new WC payload-shape tests + 5 new keystore-crypto dual-path tests). No live WC drive needed; the crypto path is fully self-contained.
+
+[0.24.9]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.9
+
 ## [0.24.8] - 2026-05-15
 
 ### Fixed

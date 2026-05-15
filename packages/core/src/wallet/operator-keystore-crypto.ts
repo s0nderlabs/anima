@@ -77,6 +77,70 @@ export interface OperatorEncryptedBlob {
   blob: string
 }
 
+function hkdfKeyFromSigHex(sigHex: string, info: Buffer): Buffer {
+  const rs = sigHex.slice(2, 130)
+  const ikm = Buffer.from(rs, 'hex')
+  if (ikm.length !== 64) {
+    throw new Error(
+      `Operator signature has unexpected length: ${ikm.length} bytes (expected 64). This source may not produce a 65-byte ECDSA signature; switch operator wallets.`,
+    )
+  }
+  return Buffer.from(hkdfSync('sha256', ikm, Buffer.alloc(0), info, 32))
+}
+
+/**
+ * v0.24.9: backward-compat fallback used during decrypt when the canonical
+ * key fails AES-GCM. Only the pre-v0.24.9 WalletConnect signer exposes
+ * `signTypedDataLegacyEmptyDomain` on its Account object (raw-privkey,
+ * keystore-file, keychain all go through viem's canonical hashTypedData).
+ * Returns null when the signer doesn't expose the legacy method (canonical
+ * path was correct, AES-GCM failure means actually-wrong-key).
+ *
+ * See `feedback-wc-signTypedData-eip712domain-trap.md` for the full root
+ * cause: legacy WC shipped typed-data verbatim without `EIP712Domain` in
+ * types, so MetaMask's `sanitizeData` inserted `EIP712Domain: []` (empty)
+ * and hashed the domain separator over `keccak256("EIP712Domain()")`,
+ * diverging from viem's canonical hash over the populated field list.
+ */
+type LegacyEmptyDomainSigner = {
+  signTypedDataLegacyEmptyDomain?: (typedData: unknown) => Promise<`0x${string}`>
+}
+
+async function tryDeriveLegacyEmptyDomainKey(
+  signer: OperatorSigner,
+  agent: Address,
+  scope: OperatorBlobScope,
+  info: Buffer,
+): Promise<Buffer | null> {
+  const account = (await signer.account()) as unknown as LegacyEmptyDomainSigner
+  const legacy = account.signTypedDataLegacyEmptyDomain
+  if (!legacy) return null
+  try {
+    const sigHex = await legacy({
+      domain: KS_DOMAIN,
+      types: KS_TYPES,
+      primaryType: KS_PRIMARY,
+      message: { agent, purpose: scope },
+    })
+    return hkdfKeyFromSigHex(sigHex, info)
+  } catch {
+    return null
+  }
+}
+
+function isAesGcmAuthError(e: unknown): boolean {
+  const msg = (e as Error | undefined)?.message ?? ''
+  // Node + Bun crypto both surface AES-GCM tag failures as
+  // "Unsupported state or unable to authenticate data". Any other
+  // crypto error (wrong key length, bad input length) should rethrow
+  // so callers see the real cause.
+  return msg.includes('Unsupported state or unable to authenticate')
+}
+
+function hkdfInfoForScope(scope: OperatorBlobScope): Buffer {
+  return Buffer.from(`anima-aead-${scope}`, 'utf8')
+}
+
 async function deriveScopedKey(
   signer: OperatorSigner,
   scope: OperatorBlobScope,
@@ -89,23 +153,12 @@ async function deriveScopedKey(
     primaryType: KS_PRIMARY,
     message: { agent, purpose: scope },
   })
-  const rs = sigHex.slice(2, 130)
-  const ikm = Buffer.from(rs, 'hex')
-  if (ikm.length !== 64) {
-    throw new Error(
-      `Operator signature has unexpected length: ${ikm.length} bytes (expected 64). This source may not produce a 65-byte ECDSA signature; switch operator wallets.`,
-    )
-  }
-  // Scope's HKDF info string keeps key separation across scopes even if the
-  // EIP-712 sig were ever leaked for one scope.
-  const info = Buffer.from(`anima-aead-${scope}`, 'utf8')
-  return Buffer.from(hkdfSync('sha256', ikm, Buffer.alloc(0), info, 32))
+  return hkdfKeyFromSigHex(sigHex, hkdfInfoForScope(scope))
 }
 
 async function deriveKey(signer: OperatorSigner, agent: Address): Promise<Buffer> {
-  // Legacy pathway kept for backward-compat with the original keystore HKDF
-  // info string. New keystore writes also reach this fn (scope = KS_PURPOSE)
-  // so the on-disk format is unchanged.
+  // Uses HKDF_INFO_KEYSTORE (not the per-scope info) to keep the on-disk
+  // format backward-compatible with pre-Phase-12 keystores.
   const account = await signer.account()
   const sigHex = await account.signTypedData({
     domain: KS_DOMAIN,
@@ -113,14 +166,7 @@ async function deriveKey(signer: OperatorSigner, agent: Address): Promise<Buffer
     primaryType: KS_PRIMARY,
     message: { agent, purpose: KS_PURPOSE },
   })
-  const rs = sigHex.slice(2, 130)
-  const ikm = Buffer.from(rs, 'hex')
-  if (ikm.length !== 64) {
-    throw new Error(
-      `Operator signature has unexpected length: ${ikm.length} bytes (expected 64). This source may not produce a 65-byte ECDSA signature; switch operator wallets.`,
-    )
-  }
-  return Buffer.from(hkdfSync('sha256', ikm, Buffer.alloc(0), HKDF_INFO_KEYSTORE, 32))
+  return hkdfKeyFromSigHex(sigHex, HKDF_INFO_KEYSTORE)
 }
 
 export async function encryptAgentKey(opts: {
@@ -156,6 +202,50 @@ export async function encryptAgentKey(opts: {
   return { version: OPERATOR_KEYSTORE_VERSION, blob }
 }
 
+function decryptAesGcmStrict(key: Buffer, iv: Buffer, tag: Buffer, ct: Buffer): Buffer {
+  const decipher = createDecipheriv('aes-256-gcm', key, iv)
+  decipher.setAuthTag(tag)
+  return Buffer.concat([decipher.update(ct), decipher.final()])
+}
+
+/**
+ * v0.24.9: try canonical key first; on AES-GCM auth failure, try the
+ * legacy empty-EIP712Domain variant for backwards-compat decrypt of
+ * pre-v0.24.9 WalletConnect-init'd blobs. Only the legacy-WC Account
+ * exposes `signTypedDataLegacyEmptyDomain`, so this fallback is a no-op
+ * for LocalAccount signers (raw-privkey, keystore-file, keychain) which
+ * always produce the canonical hash. When `precomputedKey` is supplied
+ * the fallback is intentionally skipped: callers cache one variant and
+ * we trust the cache.
+ */
+async function decryptAesGcmWithLegacyFallback(opts: {
+  canonicalKey: Buffer
+  iv: Buffer
+  tag: Buffer
+  ct: Buffer
+  signer?: OperatorSigner
+  agentAddress: Address
+  scope: OperatorBlobScope
+  hkdfInfo: Buffer
+  hadPrecomputedKey: boolean
+}): Promise<Buffer> {
+  try {
+    return decryptAesGcmStrict(opts.canonicalKey, opts.iv, opts.tag, opts.ct)
+  } catch (canonicalError) {
+    if (!isAesGcmAuthError(canonicalError) || opts.hadPrecomputedKey || !opts.signer) {
+      throw canonicalError
+    }
+    const legacyKey = await tryDeriveLegacyEmptyDomainKey(
+      opts.signer,
+      opts.agentAddress,
+      opts.scope,
+      opts.hkdfInfo,
+    )
+    if (!legacyKey) throw canonicalError
+    return decryptAesGcmStrict(legacyKey, opts.iv, opts.tag, opts.ct)
+  }
+}
+
 export async function decryptAgentKey(opts: {
   signer?: OperatorSigner
   agentAddress: Address
@@ -183,21 +273,29 @@ export async function decryptAgentKey(opts: {
   const iv = buf.subarray(0, 12)
   const tag = buf.subarray(12, 28)
   const ct = buf.subarray(28)
-  let key: Buffer
+  let canonicalKey: Buffer
   if (opts.precomputedKey) {
     if (opts.precomputedKey.length !== 32) {
       throw new Error(`Precomputed key must be 32 bytes, got ${opts.precomputedKey.length}`)
     }
-    key = opts.precomputedKey
+    canonicalKey = opts.precomputedKey
   } else {
     if (!opts.signer) {
       throw new Error('decryptAgentKey requires either signer or precomputedKey')
     }
-    key = await deriveKey(opts.signer, opts.agentAddress)
+    canonicalKey = await deriveKey(opts.signer, opts.agentAddress)
   }
-  const decipher = createDecipheriv('aes-256-gcm', key, iv)
-  decipher.setAuthTag(tag)
-  const pt = Buffer.concat([decipher.update(ct), decipher.final()])
+  const pt = await decryptAesGcmWithLegacyFallback({
+    canonicalKey,
+    iv,
+    tag,
+    ct,
+    signer: opts.signer,
+    agentAddress: opts.agentAddress,
+    scope: KS_PURPOSE,
+    hkdfInfo: HKDF_INFO_KEYSTORE,
+    hadPrecomputedKey: Boolean(opts.precomputedKey),
+  })
   return bytesToHex(new Uint8Array(pt))
 }
 
@@ -282,21 +380,29 @@ export async function decryptOperatorBlob(opts: {
   const iv = buf.subarray(0, 12)
   const tag = buf.subarray(12, 28)
   const ct = buf.subarray(28)
-  let key: Buffer
+  let canonicalKey: Buffer
   if (opts.precomputedKey) {
     if (opts.precomputedKey.length !== 32) {
       throw new Error(`Precomputed key must be 32 bytes, got ${opts.precomputedKey.length}`)
     }
-    key = opts.precomputedKey
+    canonicalKey = opts.precomputedKey
   } else {
     if (!opts.signer) {
       throw new Error('decryptOperatorBlob requires either signer or precomputedKey')
     }
-    key = await deriveScopedKey(opts.signer, opts.scope, opts.agentAddress)
+    canonicalKey = await deriveScopedKey(opts.signer, opts.scope, opts.agentAddress)
   }
-  const decipher = createDecipheriv('aes-256-gcm', key, iv)
-  decipher.setAuthTag(tag)
-  const pt = Buffer.concat([decipher.update(ct), decipher.final()])
+  const pt = await decryptAesGcmWithLegacyFallback({
+    canonicalKey,
+    iv,
+    tag,
+    ct,
+    signer: opts.signer,
+    agentAddress: opts.agentAddress,
+    scope: opts.scope,
+    hkdfInfo: hkdfInfoForScope(opts.scope),
+    hadPrecomputedKey: Boolean(opts.precomputedKey),
+  })
   return new Uint8Array(pt)
 }
 

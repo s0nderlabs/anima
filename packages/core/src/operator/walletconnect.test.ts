@@ -68,4 +68,142 @@ describe('WalletConnectOperatorSigner', () => {
     expect(seenMethods).toContain('eth_sendTransaction')
     expect(seenMethods).not.toContain('eth_signTransaction')
   })
+
+  /**
+   * Regression test for the EIP712Domain trap (v0.24.9). The legacy WC signer
+   * shipped `eth_signTypedData_v4` payloads verbatim without `EIP712Domain`
+   * in `types`, so MetaMask's `sanitizeData` inserted `EIP712Domain: []`
+   * (empty), producing a different domain separator than viem's canonical
+   * hash. New WC keystores encrypted via that path could not be decrypted by
+   * any LocalAccount signer (raw-privkey, keystore-file, keychain) or the
+   * /console wagmi flow. After the v0.24.9 fix, the signer MUST inject the
+   * canonical EIP712Domain field set before serializing.
+   */
+  test('signTypedData injects canonical EIP712Domain before eth_signTypedData_v4', async () => {
+    const s = new WalletConnectOperatorSigner()
+    const fakeAddr: Address = '0x06b74fe8070c96d92e3a2a8a871849ac81e4c09e'
+    const capturedPayloads: string[] = []
+    const fakeProvider = {
+      session: { topic: 'fake' },
+      accounts: [fakeAddr],
+      async request({ method, params }: { method: string; params?: unknown[] }) {
+        if (method === 'eth_signTypedData_v4') {
+          capturedPayloads.push((params as [string, string])[1])
+          return '0xaa'.padEnd(132, '0') as `0x${string}`
+        }
+        return null
+      },
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: test-only access to private state
+    const slf = s as any
+    slf.provider = fakeProvider
+    slf.connectedAddress = fakeAddr
+
+    const account = await s.account()
+    await account.signTypedData({
+      domain: { name: 'Anima Keystore', version: '1' },
+      types: {
+        AgentKeystore: [
+          { name: 'agent', type: 'address' },
+          { name: 'purpose', type: 'string' },
+        ],
+      },
+      primaryType: 'AgentKeystore',
+      message: { agent: fakeAddr, purpose: 'anima-keystore-v1' },
+    })
+    expect(capturedPayloads.length).toBe(1)
+    const sent = JSON.parse(capturedPayloads[0]!)
+    expect(sent.types.EIP712Domain).toEqual([
+      { name: 'name', type: 'string' },
+      { name: 'version', type: 'string' },
+    ])
+    // primaryType + message preserved
+    expect(sent.primaryType).toBe('AgentKeystore')
+    expect(sent.message.purpose).toBe('anima-keystore-v1')
+  })
+
+  test('signTypedData omits absent domain fields from EIP712Domain (only name+version when those are all that is set)', async () => {
+    const s = new WalletConnectOperatorSigner()
+    const fakeAddr: Address = '0x06b74fe8070c96d92e3a2a8a871849ac81e4c09e'
+    const capturedPayloads: string[] = []
+    const fakeProvider = {
+      session: { topic: 'fake' },
+      accounts: [fakeAddr],
+      async request({ method, params }: { method: string; params?: unknown[] }) {
+        if (method === 'eth_signTypedData_v4') {
+          capturedPayloads.push((params as [string, string])[1])
+          return '0xaa'.padEnd(132, '0') as `0x${string}`
+        }
+        return null
+      },
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: test-only access to private state
+    const slf = s as any
+    slf.provider = fakeProvider
+    slf.connectedAddress = fakeAddr
+
+    const account = await s.account()
+    await account.signTypedData({
+      domain: {
+        name: 'Anima',
+        version: '1',
+        chainId: 16661,
+        verifyingContract: '0x0000000000000000000000000000000000000001',
+      },
+      types: { X: [{ name: 'a', type: 'string' }] },
+      primaryType: 'X',
+      message: { a: 'b' },
+    })
+    const sent = JSON.parse(capturedPayloads[0]!)
+    expect(sent.types.EIP712Domain).toEqual([
+      { name: 'name', type: 'string' },
+      { name: 'version', type: 'string' },
+      { name: 'chainId', type: 'uint256' },
+      { name: 'verifyingContract', type: 'address' },
+    ])
+  })
+
+  test('signTypedDataLegacyEmptyDomain escape hatch ships verbatim (no EIP712Domain injection)', async () => {
+    const s = new WalletConnectOperatorSigner()
+    const fakeAddr: Address = '0x06b74fe8070c96d92e3a2a8a871849ac81e4c09e'
+    const capturedPayloads: string[] = []
+    const fakeProvider = {
+      session: { topic: 'fake' },
+      accounts: [fakeAddr],
+      async request({ method, params }: { method: string; params?: unknown[] }) {
+        if (method === 'eth_signTypedData_v4') {
+          capturedPayloads.push((params as [string, string])[1])
+          return '0xbb'.padEnd(132, '0') as `0x${string}`
+        }
+        return null
+      },
+    }
+    // biome-ignore lint/suspicious/noExplicitAny: test-only access to private state
+    const slf = s as any
+    slf.provider = fakeProvider
+    slf.connectedAddress = fakeAddr
+
+    const account = await s.account()
+    // biome-ignore lint/suspicious/noExplicitAny: testing the non-typed escape-hatch method
+    const legacy = (account as any).signTypedDataLegacyEmptyDomain
+    expect(typeof legacy).toBe('function')
+    await legacy({
+      domain: { name: 'Anima Keystore', version: '1' },
+      types: {
+        AgentKeystore: [
+          { name: 'agent', type: 'address' },
+          { name: 'purpose', type: 'string' },
+        ],
+      },
+      primaryType: 'AgentKeystore',
+      message: { agent: fakeAddr, purpose: 'anima-keystore-v1' },
+    })
+    expect(capturedPayloads.length).toBe(1)
+    const sent = JSON.parse(capturedPayloads[0]!)
+    // Verbatim: types has AgentKeystore but NO EIP712Domain. This is the
+    // exact byte pattern that triggered MM's empty-EIP712Domain insertion
+    // on legacy v0.8-v0.24.8 WC keystores.
+    expect(sent.types.AgentKeystore).toBeDefined()
+    expect(sent.types.EIP712Domain).toBeUndefined()
+  })
 })

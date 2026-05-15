@@ -3,9 +3,16 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Wallet as EthersWallet } from 'ethers'
-import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
+import type { Address, Chain, LocalAccount, PublicClient, WalletClient } from 'viem'
+import {
+  type PrivateKeyAccount,
+  generatePrivateKey,
+  privateKeyToAccount,
+  toAccount,
+} from 'viem/accounts'
 import { KeystoreFileOperatorSigner } from '../operator/keystore-file'
 import { RawPrivkeyOperatorSigner } from '../operator/raw-privkey'
+import type { OperatorSigner } from '../operator/signer'
 import {
   OPERATOR_BLOB_SCOPES,
   OPERATOR_KEYSTORE_VERSION,
@@ -192,6 +199,197 @@ describe('operator-keystore-crypto', () => {
         blob: tampered,
       }),
     ).rejects.toThrow()
+  })
+
+  // -- v0.24.9 WC EIP712Domain canonical + legacy fallback
+
+  /**
+   * MockDualVariantSigner simulates the post-v0.24.9 WC Account that signs
+   * canonically by default but exposes `signTypedDataLegacyEmptyDomain` for
+   * backwards-compat decrypt of pre-v0.24.9 keystores. The mock backs the
+   * two paths with two DIFFERENT operator privkeys so the resulting ECDSA
+   * signatures (and the HKDF-derived AES keys) genuinely differ. This is
+   * exactly the divergence the real WC + MM behavior caused: same operator
+   * EOA, two different domain-separator hashes, two different sigs.
+   */
+  class MockDualVariantSigner implements OperatorSigner {
+    readonly source = 'mock-dual-variant'
+    constructor(
+      private readonly canonicalAcct: PrivateKeyAccount,
+      private readonly legacyAcct: PrivateKeyAccount,
+    ) {}
+    async address(): Promise<Address> {
+      return this.canonicalAcct.address
+    }
+    async account(): Promise<LocalAccount> {
+      const canonical = this.canonicalAcct
+      const legacy = this.legacyAcct
+      const acct = toAccount({
+        address: canonical.address,
+        async signMessage({ message }) {
+          return canonical.signMessage({ message })
+        },
+        async signTransaction(tx) {
+          return canonical.signTransaction(tx)
+        },
+        // biome-ignore lint/suspicious/noExplicitAny: forwarding typed-data
+        async signTypedData(td: any) {
+          return canonical.signTypedData(td)
+        },
+      })
+      Object.defineProperty(acct, 'signTypedDataLegacyEmptyDomain', {
+        // biome-ignore lint/suspicious/noExplicitAny: escape hatch is intentionally untyped
+        value: async (td: any) => legacy.signTypedData(td),
+        enumerable: false,
+        writable: false,
+      })
+      return acct
+    }
+    async walletClient(): Promise<WalletClient> {
+      throw new Error('walletClient unused in test')
+    }
+    async publicClient(): Promise<PublicClient> {
+      throw new Error('publicClient unused in test')
+    }
+    chain(): Chain {
+      throw new Error('chain unused in test')
+    }
+  }
+
+  test('legacy fallback: keystore encrypted under empty-domain variant decrypts via fallback', async () => {
+    // Simulate pre-v0.24.9: legacy WC's "canonical" was the empty-EIP712Domain
+    // hash, so the on-disk keystore is bound to privkey L's signature. After
+    // the v0.24.9 fix, the same operator's signTypedData now produces the
+    // canonical hash (different sig → different AES key). The mock signer
+    // returns canonical-acct's sig on signTypedData (which fails AES-GCM)
+    // and legacy-acct's sig on signTypedDataLegacyEmptyDomain (which is what
+    // the keystore was encrypted under, so the fallback succeeds).
+    const canonicalPrivkey = generatePrivateKey()
+    const legacyPrivkey = generatePrivateKey()
+    const canonicalAcct = privateKeyToAccount(canonicalPrivkey)
+    const legacyAcct = privateKeyToAccount(legacyPrivkey)
+    const agentPrivkey = generatePrivateKey()
+    const agentAddress = privateKeyToAccount(agentPrivkey).address
+
+    // Encrypt the keystore with the LEGACY privkey acting as the operator
+    // (mirrors what a pre-v0.24.9 WC init wrote to disk).
+    const legacyOnlySigner = new RawPrivkeyOperatorSigner({ privkey: legacyPrivkey })
+    const keystore = await encryptAgentKey({
+      signer: legacyOnlySigner,
+      agentAddress,
+      agentPrivkey,
+    })
+
+    // Decrypt with the dual-variant mock: canonical sig fails AES-GCM, but
+    // the legacy fallback method returns legacy-acct's sig and succeeds.
+    const dualSigner = new MockDualVariantSigner(canonicalAcct, legacyAcct)
+    const decrypted = await decryptAgentKey({
+      signer: dualSigner,
+      agentAddress,
+      keystore,
+    })
+    expect(decrypted).toBe(agentPrivkey)
+  })
+
+  test('legacy fallback: post-v0.24.9 keystore (canonical) decrypts first try without invoking fallback', async () => {
+    // After v0.24.9: same canonical privkey encrypts + decrypts. Legacy method
+    // exists on the signer but is never invoked because canonical AES-GCM
+    // succeeds on the first attempt. We assert this by routing the legacy
+    // method through a privkey that would produce a totally different sig if
+    // ever called — decrypt must still succeed cleanly.
+    const canonicalAcct = privateKeyToAccount(generatePrivateKey())
+    const legacyAcct = privateKeyToAccount(generatePrivateKey())
+    const agentPrivkey = generatePrivateKey()
+    const agentAddress = privateKeyToAccount(agentPrivkey).address
+
+    const dualSigner = new MockDualVariantSigner(canonicalAcct, legacyAcct)
+    const keystore = await encryptAgentKey({
+      signer: dualSigner,
+      agentAddress,
+      agentPrivkey,
+    })
+    const decrypted = await decryptAgentKey({
+      signer: dualSigner,
+      agentAddress,
+      keystore,
+    })
+    expect(decrypted).toBe(agentPrivkey)
+  })
+
+  test('legacy fallback: LocalAccount signers without the escape hatch keep canonical-only behavior', async () => {
+    // RawPrivkeyOperatorSigner (LocalAccount) never exposes
+    // signTypedDataLegacyEmptyDomain. A keystore encrypted under operator A's
+    // canonical sig cannot be decrypted by operator B; the fallback is a
+    // no-op and the original AES-GCM failure surfaces unchanged.
+    const operatorA = new RawPrivkeyOperatorSigner({ privkey: generatePrivateKey() })
+    const operatorB = new RawPrivkeyOperatorSigner({ privkey: generatePrivateKey() })
+    const agentPrivkey = generatePrivateKey()
+    const agentAddress = privateKeyToAccount(agentPrivkey).address
+
+    const keystore = await encryptAgentKey({ signer: operatorA, agentAddress, agentPrivkey })
+    await expect(decryptAgentKey({ signer: operatorB, agentAddress, keystore })).rejects.toThrow(
+      /Unsupported state or unable to authenticate/,
+    )
+  })
+
+  test('legacy fallback: precomputedKey path skips fallback (cached key is trusted)', async () => {
+    // The headless gateway path caches the canonical AES key in
+    // .operator-session and passes it as precomputedKey. If the cache is
+    // stale or wrong, fail loud, never try to silently re-sign via the
+    // legacy fallback.
+    const canonicalPrivkey = generatePrivateKey()
+    const legacyPrivkey = generatePrivateKey()
+    const canonicalAcct = privateKeyToAccount(canonicalPrivkey)
+    const legacyAcct = privateKeyToAccount(legacyPrivkey)
+    const agentPrivkey = generatePrivateKey()
+    const agentAddress = privateKeyToAccount(agentPrivkey).address
+
+    const legacyOnlySigner = new RawPrivkeyOperatorSigner({ privkey: legacyPrivkey })
+    const keystore = await encryptAgentKey({
+      signer: legacyOnlySigner,
+      agentAddress,
+      agentPrivkey,
+    })
+
+    // Pass a wrong 32-byte precomputedKey. Even with a dual-variant signer
+    // available, the fallback must NOT be attempted because the caller
+    // explicitly opted into cached-key mode.
+    const wrongKey = Buffer.alloc(32, 0)
+    const dualSigner = new MockDualVariantSigner(canonicalAcct, legacyAcct)
+    await expect(
+      decryptAgentKey({
+        signer: dualSigner,
+        agentAddress,
+        keystore,
+        precomputedKey: wrongKey,
+      }),
+    ).rejects.toThrow(/Unsupported state or unable to authenticate/)
+  })
+
+  test('legacy fallback: operator-blob decrypt also threads the dual-path on scoped blobs', async () => {
+    // The same EIP712Domain trap affected Phase 12 telegram blobs + the v0.23
+    // PROFILE slot. Verify decryptOperatorBlob applies the same fallback.
+    const canonicalPrivkey = generatePrivateKey()
+    const legacyPrivkey = generatePrivateKey()
+    const canonicalAcct = privateKeyToAccount(canonicalPrivkey)
+    const legacyAcct = privateKeyToAccount(legacyPrivkey)
+    const agentAddress = privateKeyToAccount(generatePrivateKey()).address
+
+    const legacyOnlySigner = new RawPrivkeyOperatorSigner({ privkey: legacyPrivkey })
+    const blob = await encryptOperatorBlob({
+      signer: legacyOnlySigner,
+      scope: OPERATOR_BLOB_SCOPES.PROFILE,
+      agentAddress,
+      plaintext: new TextEncoder().encode('legacy-profile-payload'),
+    })
+    const dualSigner = new MockDualVariantSigner(canonicalAcct, legacyAcct)
+    const pt = await decryptOperatorBlob({
+      signer: dualSigner,
+      scope: OPERATOR_BLOB_SCOPES.PROFILE,
+      agentAddress,
+      blob,
+    })
+    expect(new TextDecoder().decode(pt)).toBe('legacy-profile-payload')
   })
 
   test('operator blob: encode/decode bytes round-trip', async () => {
