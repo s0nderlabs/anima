@@ -26,6 +26,7 @@ import {
   type OperatorBlobScope,
   deriveBlobKey,
   deriveKeystoreKey,
+  deriveLegacyEmptyDomainKey,
 } from './operator-keystore-crypto'
 
 export const OPERATOR_SESSION_VERSION = 1 as const
@@ -209,28 +210,116 @@ export function getSessionKey(
 }
 
 /**
+ * Optional verifier called by `precomputeAllScopes` after each scope's
+ * canonical key is derived. Returning false triggers the v0.24.10 legacy
+ * empty-EIP712Domain fallback for that scope (and propagates legacy
+ * derivation to any later scope keys, since the EIP712Domain trap is a
+ * signer-wide property, not a per-scope one).
+ */
+export type PrecomputeVerifyKey = (
+  scope: 'keystore' | OperatorBlobScope,
+  key: Buffer,
+) => boolean | Promise<boolean>
+
+export interface PrecomputeAllScopesOpts {
+  /**
+   * v0.24.10: Optional verifier. When unset, `precomputeAllScopes` behaves
+   * exactly as it did in v0.24.9 (parallel canonical-only derivation). When
+   * set, the verifier runs after each derive — failure swaps to the legacy
+   * variant via the signer's `signTypedDataLegacyEmptyDomain` escape hatch.
+   *
+   * The verifier is supplied by the caller because it owns the disk layout:
+   * gateway-start verifies against `keystore.json` + `telegram-secrets.encrypted`
+   * on disk; `init` doesn't pass a verifier because the keystore is being
+   * freshly encrypted under the just-derived canonical key.
+   */
+  verifyKey?: PrecomputeVerifyKey
+}
+
+/**
  * Derive all requested scope keys from the operator signer in parallel.
  * Each derive triggers `signer.signTypedData`. Many signer backends (keychain)
  * serialize the underlying transport, so parallel is a free win for backends
  * that don't (raw-privkey, in-memory) and a no-op for those that do.
  *
  * `extraScopes` — additional scopes to derive beyond the always-on
- * `keystore`. Phase 12 telegram passes [OPERATOR_BLOB_SCOPES.TELEGRAM].
+ * `keystore`. Phase 12 telegram passes [OPERATOR_BLOB_SCOPES.TELEGRAM];
+ * v0.23.0 PROFILE adds [OPERATOR_BLOB_SCOPES.PROFILE] when the agent's
+ * user-partition memory exists.
+ *
+ * v0.24.10: when `opts.verifyKey` is supplied, the keystore canonical key is
+ * trial-decrypted against the on-disk blob; if the verifier rejects it, the
+ * signer's `signTypedDataLegacyEmptyDomain` escape hatch is invoked to derive
+ * the pre-v0.24.9 WC variant. The detection cascades to remaining scopes —
+ * once the signer is known to be in legacy mode, every scope key is derived
+ * via the legacy method so the daemon boots with keys that actually decrypt
+ * the on-disk artifacts (single MM popup per scope on the first launch
+ * post-v0.24.9 for legacy WC agents; canonical-success agents see zero
+ * behavior change).
  */
 export async function precomputeAllScopes(
   signer: OperatorSigner,
   agent: Address,
   extraScopes: OperatorBlobScope[] = [],
+  opts: PrecomputeAllScopesOpts = {},
 ): Promise<OperatorSessionKeys> {
-  const [keystore, ...extras] = await Promise.all([
-    deriveKeystoreKey(signer, agent),
-    ...extraScopes.map(scope => deriveBlobKey(signer, agent, scope)),
-  ])
-  const result: OperatorSessionKeys = { keystore: bytesToHex(keystore) }
-  extraScopes.forEach((scope, i) => {
-    const buf = extras[i]
-    if (buf) result[scope] = bytesToHex(buf)
-  })
+  if (!opts.verifyKey) {
+    const [keystore, ...extras] = await Promise.all([
+      deriveKeystoreKey(signer, agent),
+      ...extraScopes.map(scope => deriveBlobKey(signer, agent, scope)),
+    ])
+    const result: OperatorSessionKeys = { keystore: bytesToHex(keystore) }
+    extraScopes.forEach((scope, i) => {
+      const buf = extras[i]
+      if (buf) result[scope] = bytesToHex(buf)
+    })
+    return result
+  }
+
+  // Verify-and-swap path. Serialize keystore first so the legacy detection
+  // cascades to remaining scopes uniformly.
+  const verifyKey = opts.verifyKey
+  let keystoreKey = await deriveKeystoreKey(signer, agent)
+  let useLegacyForRest = false
+  if (!(await verifyKey('keystore', keystoreKey))) {
+    const legacyKey = await deriveLegacyEmptyDomainKey(signer, agent, 'keystore')
+    if (!legacyKey) {
+      throw new Error(
+        'precomputeAllScopes: keystore decrypt verification failed with canonical key and signer does not expose a legacy variant. Verify the operator wallet matches the agent keystore.',
+      )
+    }
+    if (!(await verifyKey('keystore', legacyKey))) {
+      throw new Error(
+        'precomputeAllScopes: keystore decrypt verification failed with both canonical and legacy variants. The operator wallet may not match the agent keystore.',
+      )
+    }
+    keystoreKey = legacyKey
+    useLegacyForRest = true
+  }
+
+  const extras = await Promise.all(
+    extraScopes.map(async (scope): Promise<{ scope: OperatorBlobScope; key: Buffer | null }> => {
+      let key: Buffer | null = useLegacyForRest
+        ? await deriveLegacyEmptyDomainKey(signer, agent, scope)
+        : await deriveBlobKey(signer, agent, scope)
+      if (key && !(await verifyKey(scope, key))) {
+        const altKey: Buffer | null = useLegacyForRest
+          ? await deriveBlobKey(signer, agent, scope)
+          : await deriveLegacyEmptyDomainKey(signer, agent, scope)
+        if (altKey && (await verifyKey(scope, altKey))) {
+          key = altKey
+        } else {
+          key = null
+        }
+      }
+      return { scope, key }
+    }),
+  )
+
+  const result: OperatorSessionKeys = { keystore: bytesToHex(keystoreKey) }
+  for (const { scope, key } of extras) {
+    if (key) result[scope] = bytesToHex(key)
+  }
   return result
 }
 

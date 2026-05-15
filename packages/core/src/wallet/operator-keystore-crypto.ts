@@ -128,6 +128,23 @@ async function tryDeriveLegacyEmptyDomainKey(
   }
 }
 
+/**
+ * v0.24.10: Public wrapper around `tryDeriveLegacyEmptyDomainKey` so the
+ * operator-session verify-and-swap path can derive a legacy variant key for
+ * any scope without re-implementing the EIP-712 plumbing. Returns null when
+ * the signer doesn't expose the legacy escape hatch (every LocalAccount
+ * signer) OR the legacy sign call throws.
+ */
+export async function deriveLegacyEmptyDomainKey(
+  signer: OperatorSigner,
+  agent: Address,
+  scope: 'keystore' | OperatorBlobScope,
+): Promise<Buffer | null> {
+  const rawScope = scope === 'keystore' ? KS_PURPOSE : scope
+  const info = scope === 'keystore' ? HKDF_INFO_KEYSTORE : hkdfInfoForScope(scope)
+  return tryDeriveLegacyEmptyDomainKey(signer, agent, rawScope, info)
+}
+
 function isAesGcmAuthError(e: unknown): boolean {
   const msg = (e as Error | undefined)?.message ?? ''
   // Node + Bun crypto both surface AES-GCM tag failures as
@@ -445,6 +462,54 @@ export function decodeOperatorBlobBytes(bytes: Uint8Array): OperatorEncryptedBlo
     throw new Error('Operator blob bytes have invalid scope/blob fields')
   }
   return parsed as unknown as OperatorEncryptedBlob
+}
+
+/**
+ * v0.24.10: Trial-decrypt a keystore blob with a candidate AES key. Returns
+ * true on success, false on AES-GCM auth failure or any malformed-input
+ * issue. Used by `precomputeAllScopes`'s verify-and-swap path to detect
+ * whether a freshly derived canonical key actually decrypts the on-disk
+ * keystore (a wrong key surfaces as an AES-GCM auth failure here, which
+ * triggers the legacy fallback).
+ */
+export function tryDecryptKeystoreWithKey(
+  keystore: OperatorEncryptedKeystore,
+  key: Buffer,
+): boolean {
+  if (keystore.version !== OPERATOR_KEYSTORE_VERSION) return false
+  if (key.length !== 32) return false
+  const buf = Buffer.from(keystore.blob, 'base64')
+  if (buf.length < 12 + 16 + 1) return false
+  try {
+    decryptAesGcmStrict(key, buf.subarray(0, 12), buf.subarray(12, 28), buf.subarray(28))
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * v0.24.10: Same as `tryDecryptKeystoreWithKey` for a scoped operator blob.
+ * Verifies the blob's stored scope matches `expectedScope` before attempting
+ * decrypt so a key derived for one scope can't accidentally "verify" against
+ * a blob from another scope.
+ */
+export function tryDecryptOperatorBlobWithKey(
+  blob: OperatorEncryptedBlob,
+  key: Buffer,
+  expectedScope: OperatorBlobScope,
+): boolean {
+  if (blob.version !== OPERATOR_KEYSTORE_VERSION) return false
+  if (blob.scope !== expectedScope) return false
+  if (key.length !== 32) return false
+  const buf = Buffer.from(blob.blob, 'base64')
+  if (buf.length < 12 + 16 + 1) return false
+  try {
+    decryptAesGcmStrict(key, buf.subarray(0, 12), buf.subarray(12, 28), buf.subarray(28))
+    return true
+  } catch {
+    return false
+  }
 }
 
 /**

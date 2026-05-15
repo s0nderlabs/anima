@@ -20,11 +20,16 @@ import {
   decodeOperatorBlobBytes,
   decryptAgentKey,
   decryptOperatorBlob,
+  deriveBlobKey,
+  deriveKeystoreKey,
+  deriveLegacyEmptyDomainKey,
   encodeKeystoreBytes,
   encodeOperatorBlobBytes,
   encryptAgentKey,
   encryptOperatorBlob,
   sniffKeystoreVersion,
+  tryDecryptKeystoreWithKey,
+  tryDecryptOperatorBlobWithKey,
 } from './operator-keystore-crypto'
 
 describe('operator-keystore-crypto', () => {
@@ -406,5 +411,82 @@ describe('operator-keystore-crypto', () => {
     expect(decoded.version).toBe(blob.version)
     expect(decoded.scope).toBe(blob.scope)
     expect(decoded.blob).toBe(blob.blob)
+  })
+
+  // -- v0.24.10 verify helpers + legacy derive wrapper --------------------
+
+  test('tryDecryptKeystoreWithKey: true with matching key, false with wrong key', async () => {
+    const signer = new RawPrivkeyOperatorSigner({ privkey: generatePrivateKey() })
+    const agentPrivkey = generatePrivateKey()
+    const agentAddress = privateKeyToAccount(agentPrivkey).address
+    const keystore = await encryptAgentKey({ signer, agentAddress, agentPrivkey })
+    const rightKey = await deriveKeystoreKey(signer, agentAddress)
+    const wrongKey = Buffer.alloc(32, 0xab)
+    expect(tryDecryptKeystoreWithKey(keystore, rightKey)).toBe(true)
+    expect(tryDecryptKeystoreWithKey(keystore, wrongKey)).toBe(false)
+  })
+
+  test('tryDecryptKeystoreWithKey: rejects key with wrong length without throwing', async () => {
+    const signer = new RawPrivkeyOperatorSigner({ privkey: generatePrivateKey() })
+    const agentPrivkey = generatePrivateKey()
+    const agentAddress = privateKeyToAccount(agentPrivkey).address
+    const keystore = await encryptAgentKey({ signer, agentAddress, agentPrivkey })
+    expect(tryDecryptKeystoreWithKey(keystore, Buffer.alloc(16, 0))).toBe(false)
+    expect(tryDecryptKeystoreWithKey(keystore, Buffer.alloc(64, 0))).toBe(false)
+  })
+
+  test('tryDecryptOperatorBlobWithKey: scope mismatch returns false even with correct key', async () => {
+    const signer = new RawPrivkeyOperatorSigner({ privkey: generatePrivateKey() })
+    const agent = privateKeyToAccount(generatePrivateKey()).address
+    const blob = await encryptOperatorBlob({
+      signer,
+      scope: OPERATOR_BLOB_SCOPES.PROFILE,
+      agentAddress: agent,
+      plaintext: new TextEncoder().encode('hi'),
+    })
+    const profileKey = await deriveBlobKey(signer, agent, OPERATOR_BLOB_SCOPES.PROFILE)
+    expect(tryDecryptOperatorBlobWithKey(blob, profileKey, OPERATOR_BLOB_SCOPES.PROFILE)).toBe(true)
+    // Wrong scope label refuses even though the AES key is otherwise correct.
+    expect(tryDecryptOperatorBlobWithKey(blob, profileKey, OPERATOR_BLOB_SCOPES.TELEGRAM)).toBe(
+      false,
+    )
+  })
+
+  test('deriveLegacyEmptyDomainKey: returns null when signer has no legacy escape', async () => {
+    const signer = new RawPrivkeyOperatorSigner({ privkey: generatePrivateKey() })
+    const agent = privateKeyToAccount(generatePrivateKey()).address
+    expect(await deriveLegacyEmptyDomainKey(signer, agent, 'keystore')).toBeNull()
+    expect(await deriveLegacyEmptyDomainKey(signer, agent, OPERATOR_BLOB_SCOPES.PROFILE)).toBeNull()
+  })
+
+  test('deriveLegacyEmptyDomainKey: returns the legacy-variant key for dual signer (matches direct derive)', async () => {
+    const canonicalAcct = privateKeyToAccount(generatePrivateKey())
+    const legacyPrivkey = generatePrivateKey()
+    const legacyAcct = privateKeyToAccount(legacyPrivkey)
+    const agent = privateKeyToAccount(generatePrivateKey()).address
+    const dualSigner = new MockDualVariantSigner(canonicalAcct, legacyAcct)
+
+    // The legacy-variant key derived via the escape hatch should equal the
+    // key derived directly from the legacy privkey acting as a normal signer
+    // (same EIP-712 message, same HKDF info, same RFC-6979 deterministic sig).
+    const legacyDirectSigner = new RawPrivkeyOperatorSigner({ privkey: legacyPrivkey })
+    const legacyViaEscape = await deriveLegacyEmptyDomainKey(dualSigner, agent, 'keystore')
+    const legacyDirect = await deriveKeystoreKey(legacyDirectSigner, agent)
+    expect(legacyViaEscape).not.toBeNull()
+    expect(legacyViaEscape!.equals(legacyDirect)).toBe(true)
+
+    // Same for PROFILE scope.
+    const legacyProfileViaEscape = await deriveLegacyEmptyDomainKey(
+      dualSigner,
+      agent,
+      OPERATOR_BLOB_SCOPES.PROFILE,
+    )
+    const legacyProfileDirect = await deriveBlobKey(
+      legacyDirectSigner,
+      agent,
+      OPERATOR_BLOB_SCOPES.PROFILE,
+    )
+    expect(legacyProfileViaEscape).not.toBeNull()
+    expect(legacyProfileViaEscape!.equals(legacyProfileDirect)).toBe(true)
   })
 })

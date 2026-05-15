@@ -4,6 +4,14 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.10] - 2026-05-15
+
+### Fixed
+
+- **`anima gateway start` verifies each derived scope key against the on-disk encrypted artifact before caching it in `.operator-session`, and falls back to the legacy `signTypedDataLegacyEmptyDomain` variant when the canonical key fails AES-GCM auth.** v0.24.9 shipped a dual-path decrypt in `decryptAgentKey` + `decryptOperatorBlob`, but the daemon-boot path always loads via the cached `precomputedKey` (which intentionally skips the fallback). For pre-v0.24.9 WC-init'd agents (only known instance: fox tokenId #5), gateway-start would derive the canonical key, cache the wrong key, and the daemon would panic on first AES-GCM decrypt because the keystore-on-disk was encrypted under the legacy empty-EIP712Domain hash. `precomputeAllScopes` now accepts an optional `verifyKey` callback; gateway-start passes one that trial-decrypts `keystore.json` + `telegram-secrets.encrypted` with the candidate key. On verify failure, `precomputeAllScopes` calls the signer's legacy escape hatch, verifies the legacy key works, caches it, and propagates the legacy variant to remaining scopes (the EIP712Domain trap is a signer-wide property). LocalAccount signers (raw-privkey / keystore-file / keychain) skip the fallback path entirely since they don't expose the legacy method. Single MM popup per scope on a legacy-WC agent's first v0.24.10+ launch; zero behavior change for everyone else. Verified via 11 new unit tests (5 helpers + 6 verify-and-swap scenarios), 1270 unit tests pass total.
+
+[0.24.10]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.10
+
 ## [0.24.9] - 2026-05-15
 
 ### Fixed

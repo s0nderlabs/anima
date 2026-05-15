@@ -14,22 +14,29 @@
  *   8. Print pid + socket path
  */
 
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { spinner } from '@clack/prompts'
 import {
+  OPERATOR_BLOB_SCOPES,
+  type OperatorBlobScope,
   agentPaths,
   buildOperatorSession,
+  decodeKeystoreBytes,
+  decodeOperatorBlobBytes,
   iNFTAgentId,
   isOperatorSessionComplete,
   precomputeAllScopes,
   readOperatorSession,
   requiredScopesForAgent,
+  tryDecryptKeystoreWithKey,
+  tryDecryptOperatorBlobWithKey,
   writeOperatorSession,
 } from '@s0nderlabs/anima-core'
 import { type Address, getAddress } from 'viem'
 import { findAndLoadConfig } from '../config/load'
 import { spawnGatewayDaemon } from '../util/gateway-spawn'
+import { telegramSecretsPath } from '../util/telegram-secrets'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
 
 export interface GatewayStartOpts {
@@ -102,7 +109,16 @@ export async function runGatewayStart(opts: GatewayStartOpts): Promise<void> {
 
     sUnlock.message(`Deriving scope keys (${required.join(' + ')})`)
     try {
-      const keys = await precomputeAllScopes(operator, agentAddress, extraScopes)
+      // v0.24.10: verify each derived canonical key against the on-disk
+      // encrypted artifact. If verify fails (e.g. fox's pre-v0.24.9 WC
+      // keystore was encrypted with the legacy empty-EIP712Domain hash),
+      // `precomputeAllScopes` falls back to the legacy variant via the WC
+      // signer's escape hatch and caches the WORKING key. Without this,
+      // the daemon would boot with a stale canonical key + the
+      // `precomputedKey skips fallback` semantic and panic on first
+      // AES-GCM decrypt.
+      const verifyKey = buildKeystoreVerifier(agentId)
+      const keys = await precomputeAllScopes(operator, agentAddress, extraScopes, { verifyKey })
       const sess = buildOperatorSession({ agent: agentAddress, keys })
       writeOperatorSession(agentId, sess)
       sUnlock.stop('operator-session written (24h TTL)')
@@ -148,4 +164,55 @@ export async function runGatewayStart(opts: GatewayStartOpts): Promise<void> {
 // Stub — wired by gateway-status when needed.
 export function _operatorSessionPresent(agentId: string): boolean {
   return readOperatorSession(agentId) !== null
+}
+
+/**
+ * v0.24.10: returns a verifier that `precomputeAllScopes` calls after each
+ * canonical key derive. The verifier:
+ *
+ * - For 'keystore': trial-decrypts `<agentDir>/keystore.json` with the
+ *   candidate key. Returns true on success, false on AES-GCM auth failure.
+ *   False triggers the legacy empty-EIP712Domain fallback inside
+ *   `precomputeAllScopes` so pre-v0.24.9 WC-init'd keystores (only known
+ *   instance is fox, tokenId #5) can still flip to the correct AES key on
+ *   first boot under v0.24.10+.
+ *
+ * - For TELEGRAM: trial-decrypts `<agentDir>/telegram-secrets.encrypted`
+ *   when present. Same legacy-fallback semantic.
+ *
+ * - For PROFILE / unknown: returns true unconditionally. PROFILE has no
+ *   on-disk artifact to verify against (the encrypted blob lives in iNFT
+ *   slot 3 on chain); the keystore-scope detection above already cascades
+ *   the legacy flag to PROFILE via `precomputeAllScopes`'s
+ *   `useLegacyForRest` branch, so the PROFILE key is derived via the
+ *   matching variant without needing a verify here.
+ *
+ * - On missing keystore (init flow never reached this code path, so this
+ *   is a defensive fallback): returns true so the derive completes; the
+ *   daemon's own decrypt at boot will surface the real error.
+ */
+function buildKeystoreVerifier(agentId: string) {
+  const keystorePath = agentPaths.agent(agentId).keystore
+  const tgSecretsPath = telegramSecretsPath(agentId)
+  return async (scope: 'keystore' | OperatorBlobScope, key: Buffer): Promise<boolean> => {
+    if (scope === 'keystore') {
+      if (!existsSync(keystorePath)) return true
+      try {
+        const ks = decodeKeystoreBytes(new TextEncoder().encode(readFileSync(keystorePath, 'utf8')))
+        return tryDecryptKeystoreWithKey(ks, key)
+      } catch {
+        return true
+      }
+    }
+    if (scope === OPERATOR_BLOB_SCOPES.TELEGRAM) {
+      if (!existsSync(tgSecretsPath)) return true
+      try {
+        const blob = decodeOperatorBlobBytes(new Uint8Array(readFileSync(tgSecretsPath)))
+        return tryDecryptOperatorBlobWithKey(blob, key, OPERATOR_BLOB_SCOPES.TELEGRAM)
+      } catch {
+        return true
+      }
+    }
+    return true
+  }
 }

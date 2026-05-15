@@ -20,6 +20,9 @@ export {
   sniffKeystoreVersion,
   deriveKeystoreKey,
   deriveBlobKey,
+  deriveLegacyEmptyDomainKey,
+  tryDecryptKeystoreWithKey,
+  tryDecryptOperatorBlobWithKey,
   type OperatorEncryptedKeystore,
   type OperatorEncryptedBlob,
 } from './operator-keystore-crypto'
@@ -28,6 +31,8 @@ export {
   DEFAULT_OPERATOR_SESSION_TTL_MS,
   type OperatorSession,
   type OperatorSessionKeys,
+  type PrecomputeAllScopesOpts,
+  type PrecomputeVerifyKey,
   operatorSessionPath,
   writeOperatorSession,
   readOperatorSession,
