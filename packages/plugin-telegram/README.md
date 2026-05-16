@@ -17,7 +17,7 @@ Telegram gateway for anima. Operator DMs `@anima_<name>_bot` from any phone; the
 ```
 anima telegram setup    # one-time interactive: bot token + allowed user IDs
 anima                   # start the TUI; listener boots automatically
-# DM @anima_<name>_bot from your phone — agent replies
+# DM @anima_<name>_bot from your phone, agent replies
 ```
 
 ## Architecture

@@ -123,18 +123,18 @@ On macOS that path resolves under `/var/folders/...`. Use `anima logs --tail N` 
 
 ## CLI surface most agents need
 
-- `anima --version` — confirm the user is on the surface you expect (currently v0.24.3).
-- `anima init` — interactive only, see above.
-- `anima` or `anima chat` — drop into the TUI. User types from there.
-- `anima status` — agent state, wallet positions, config snapshot.
-- `anima logs --tail 50` — recent activity log entries. JSONL, includes `tool-call`, `brain-response`, errors.
-- `anima balance` — full economic position: operator EOA, agent EOA, compute ledger, sandbox reserve.
-- `anima inspect [ref]` — decode IntelligentData slots from chain. `--slot keystore`, `--diff`, `--full`, `--raw` for foreign iNFTs.
-- `anima topup --agent N` — operator sends N 0G to agent EOA.
-- `anima topup --compute N` — agent deposits N 0G into 0G Compute ledger.
-- `anima model` — re-pick brain provider and model from the live 0G Compute catalog.
-- `anima sync` — force a memory and activity-log flush plus on-chain anchor.
-- `anima restore <iNFT-ref>` — recover an agent on a new machine. Ref formats: `eip155:16661:0x...:N` or `0g-mainnet:0x...:N`.
+- `anima --version`: confirm the user is on the surface you expect (currently v0.24.3).
+- `anima init`: interactive only, see above.
+- `anima` or `anima chat`: drop into the TUI. User types from there.
+- `anima status`: agent state, wallet positions, config snapshot.
+- `anima logs --tail 50`: recent activity log entries. JSONL, includes `tool-call`, `brain-response`, errors.
+- `anima balance`: full economic position: operator EOA, agent EOA, compute ledger, sandbox reserve.
+- `anima inspect [ref]`: decode IntelligentData slots from chain. `--slot keystore`, `--diff`, `--full`, `--raw` for foreign iNFTs.
+- `anima topup --agent N`: operator sends N 0G to agent EOA.
+- `anima topup --compute N`: agent deposits N 0G into 0G Compute ledger.
+- `anima model`: re-pick brain provider and model from the live 0G Compute catalog.
+- `anima sync`: force a memory and activity-log flush plus on-chain anchor.
+- `anima restore <iNFT-ref>`: recover an agent on a new machine. Ref formats: `eip155:16661:0x...:N` or `0g-mainnet:0x...:N`.
 
 Skip the niche admin commands (`anima admin autotopup-tick`, `anima drain`, `anima ledger refund`) unless the user explicitly asks for them.
 
@@ -142,8 +142,8 @@ Skip the niche admin commands (`anima admin autotopup-tick`, `anima drain`, `ani
 
 This page is regenerated from the same `apps/web/content/docs/*.md` source as the rest of the docs. Machine-readable surfaces:
 
-- [/llms.txt](/llms.txt) — index file with one bullet per doc, install line, contract addresses. Fetch this first.
-- [/llms-full.txt](/llms-full.txt) — single-file dump of every doc plus the README. About 35 KB.
-- [/docs/<slug>.md](/docs/agents.md) — raw markdown per page (e.g. `/docs/quickstart.md`, `/docs/cli.md`). Use these when you want one section without the HTML chrome.
+- [/llms.txt](/llms.txt): index file with one bullet per doc, install line, contract addresses. Fetch this first.
+- [/llms-full.txt](/llms-full.txt): single-file dump of every doc plus the README. About 35 KB.
+- [/docs/<slug>.md](/docs/agents.md): raw markdown per page (e.g. `/docs/quickstart.md`, `/docs/cli.md`). Use these when you want one section without the HTML chrome.
 
 When the CLI version moves, this page moves with it. Always re-fetch before relying on cached prior advice.

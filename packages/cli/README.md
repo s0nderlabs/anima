@@ -1,6 +1,6 @@
 # @s0nderlabs/anima
 
-CLI binary for **anima** — the first fully on-chain sovereign agent harness on 0G.
+CLI binary for **anima**: the first fully on-chain sovereign agent harness on 0G.
 
 ## Install
 

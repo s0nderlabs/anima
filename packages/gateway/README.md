@@ -12,6 +12,6 @@ Requires [bun](https://bun.sh) ≥ 1.1.
 
 ## Use
 
-You don't run this directly on a laptop — it's bootstrapped automatically by `anima deploy` (Local→Sandbox migration) and `anima upgrade`. Documented for transparency; consumed by `@s0nderlabs/anima` (the CLI).
+You don't run this directly on a laptop. It's bootstrapped automatically by `anima deploy` (Local→Sandbox migration) and `anima upgrade`. Documented for transparency; consumed by `@s0nderlabs/anima` (the CLI).
 
 See the [root README](https://github.com/s0nderlabs/anima#readme) for the full sandbox architecture.
