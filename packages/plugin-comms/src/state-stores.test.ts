@@ -296,4 +296,33 @@ describe('HistoryStore', () => {
     h.close()
     rmSync(d, { recursive: true, force: true })
   })
+
+  it('insert returns true on first insert, false on duplicate (v0.24.11)', () => {
+    const d = tempDir()
+    const h = new HistoryStore(d)
+    const row = {
+      txHash: '0xdup' as Hex,
+      logIndex: 0,
+      blockNumber: 1,
+      fromAddr: ALICE,
+      toAddr: BOB,
+      direction: 'in' as const,
+      type: 'msg' as const,
+      content: 'first',
+      filename: null,
+      mime: null,
+      size: null,
+      inReplyTo: null,
+      ts: 1000,
+    }
+    expect(h.insert(row)).toBe(true)
+    // Duplicate (same txHash + logIndex) — listener uses this signal to
+    // bail out before re-waking the brain on safety-net catch-up replays.
+    expect(h.insert({ ...row, content: 'second-attempt' })).toBe(false)
+    // Different logIndex on same tx is a distinct event — must insert.
+    expect(h.insert({ ...row, logIndex: 1 })).toBe(true)
+    expect(h.search({ peer: ALICE }).length).toBe(2)
+    h.close()
+    rmSync(d, { recursive: true, force: true })
+  })
 })

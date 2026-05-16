@@ -102,6 +102,16 @@ export interface BuildRuntimeOpts {
    * approve tool calls via inline keyboard.
    */
   secrets?: GatewaySecrets
+  /**
+   * v0.24.11: callback invoked when a fresh A2A inbound is enqueued by the
+   * a2a-inbox listener. Without this, queued messages would sit until the
+   * next operator chat turn drains them — the brain never autonomously
+   * responds. real-runtime wires this to `#drainInbound`. Symmetric callback
+   * for market events: `onAutoTriggerMarket`.
+   */
+  onAutoTriggerInbox?: () => void
+  /** v0.24.11: same as `onAutoTriggerInbox` but for AnimaMarket events. */
+  onAutoTriggerMarket?: () => void
 }
 
 export interface BuiltRuntime {
@@ -1064,6 +1074,14 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
       txHash: m.txHash,
       preview: previewBody(m),
     })
+    // v0.24.11: autonomous brain wake. Without this, A2A inbound from a
+    // contact would sit in `inboundQueue` until the operator next ran a
+    // chat turn (drainInbound is only triggered at end of runChatTurn).
+    // Mirrors how plugin-telegram fires brain.infer inline on every TG
+    // message — A2A is no different. real-runtime wires this to
+    // `#drainInbound`, which is single-flight + queue-drain so concurrent
+    // arrivals coalesce safely.
+    opts.onAutoTriggerInbox?.()
   }
   onInboundNotice = notice => {
     events.publish('listener-event', {
@@ -1083,6 +1101,10 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
       txHash: e.txHash,
     })
     marketBrainQueue.push(e)
+    // v0.24.11: same autonomous trigger for marketplace events. Buyer's
+    // `acceptResult`, provider's `markDone`, etc need brain attention
+    // without waiting for the operator to type something.
+    opts.onAutoTriggerMarket?.()
   }
 
   // Drain anything queued during boot. The first deliverers only buffered

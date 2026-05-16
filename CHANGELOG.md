@@ -4,6 +4,28 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.11] - 2026-05-16
+
+### Fixed
+
+- **A2A inbox listener silently dropped events after ~20h of uptime.** `watchContractEvent`'s HTTP polling subscription on long-running daemons would advance its cursor past blocks containing relevant `Message` events but never insert them into `history.db` — the brain saw no inbound, even though the messages were confirmed on chain (confirmed live May 16 2026: specter daemon at 20h57m uptime, fresh tx `0x4611f9de…` at block 33391419, cursor advanced to that block, zero new rows). Diagnosis: `getMessagesFor` on a stale viem filter returned empty despite the RPC having the logs. Restarting the daemon recovered immediately. Fix: `A2AListener` now runs a periodic safety-net `catchUp({ safety: true })` every `catchUpIntervalMs` (default 60s) that re-scans the last `catchUpSafetyBlocks` (default 240, ~12 min on 0G's 3s blocks). Idempotency via `HistoryStore.insert` returning a boolean (true on new row, false on PK conflict) + a cheap `HistoryStore.has(txHash, logIndex)` short-circuit BEFORE the expensive `resolveInbound` + ECIES decrypt steps in `handleEvent`. No double-brain-wake possible. `setInterval` is `.unref?.()`'d so the timer doesn't keep bun's event loop alive past daemon shutdown.
+
+- **A2A inbound never woke the brain autonomously — only on the next operator chat turn.** `drainInbound` was only invoked at the end of `runChatTurn`, so an inbound from an approved contact would sit in `inboundQueue` indefinitely waiting for the operator to type something. Telegram already triggered `brain.infer` directly inside its plugin dispatcher; A2A mirrored that pattern only implicitly via the chat-turn-drain. Fix: `BuildRuntimeOpts` gained `onAutoTriggerInbox` / `onAutoTriggerMarket` callbacks; `RealRuntime.start` wires them to `void this.#drainInbound?.()` / `void this.#drainMarket?.()`. The boot-replay queue is also drained explicitly after `#wireDrains` to catch arrivals between `buildAnimaRuntime` returning and the drains being assigned. Verified live May 16: enigma → specter A2A round-trip with operator's TUI killed; specter daemon autonomously called `shell.run date`, replied via `agent.message` with `in_reply_to` threading, all without operator interaction.
+
+- **`CursorStore`'s module-level `DEFAULT` object was returned by reference from `loadJson`, allowing mutation aliasing across parallel listener instances.** Replaced with a `defaultCursor()` factory that returns a fresh literal per call. The same latent pattern exists in `presence.ts` / `mutes.ts` / `contacts.ts` but is out of scope for this patch (single-daemon-per-agent in production prevents the cross-instance leak from biting).
+
+### Added
+
+- **`/healthz.listeners` now reports `a2a-inbox` and `a2a-market` state** alongside the existing `telegram` entry (`'active' | 'disabled' | 'failed'`). Operators can now spot a daemon whose comms listener registration failed without grepping the gateway log.
+
+### Tests
+
+- 3 new integration tests in `packages/plugin-comms/src/listener.test.ts` cover handleEvent idempotency on duplicate live delivery, safety-net catch-up recovering events the live subscribe missed, and safety-net replay through already-stored events staying a no-op.
+- 1 new `state-stores.test.ts` test verifies `HistoryStore.insert` returns `true` on first insert, `false` on duplicate `(txHash, logIndex)`.
+- Full repo: 2548/2548 unit tests pass, typecheck clean, biome clean.
+
+[0.24.11]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.11
+
 ## [0.24.10] - 2026-05-15
 
 ### Fixed

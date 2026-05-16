@@ -13,7 +13,11 @@ interface CursorFile {
   startBlock?: string
 }
 
-const DEFAULT: CursorFile = { v: 1, lastSeenBlock: '0' }
+// NB: returned by-value (fresh literal per call) to avoid shared-default
+// mutation aliasing — `state-files.loadJson` returns the fallback by
+// reference, so a long-lived default object would get mutated by every
+// CursorStore instance that fell back to it.
+const defaultCursor = (): CursorFile => ({ v: 1, lastSeenBlock: '0' })
 
 export class CursorStore {
   private readonly path: string
@@ -21,7 +25,7 @@ export class CursorStore {
 
   constructor(agentDir: string) {
     this.path = join(agentDir, 'comms', 'cursor.json')
-    this.state = loadJson(this.path, DEFAULT)
+    this.state = loadJson(this.path, defaultCursor())
   }
 
   get(): bigint {

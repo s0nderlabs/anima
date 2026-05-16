@@ -78,8 +78,13 @@ export class RealRuntime implements RuntimeAdapter {
   #events: EventHub | null = null
   #pendingFlush: Promise<void> | null = null
   // v0.21.12: per-listener state for /healthz visibility.
+  // Expanded to cover comms listeners so operators can spot a daemon whose
+  // a2a-inbox / market subscription stalled mid-life (cursor advances but
+  // history.db stops gaining rows — diagnosed May 16 2026).
   #listenerStates: Record<string, 'active' | 'disabled' | 'failed'> = {
     telegram: 'disabled',
+    'a2a-inbox': 'disabled',
+    'a2a-market': 'disabled',
   }
 
   constructor(opts: RealRuntimeOpts) {
@@ -107,10 +112,27 @@ export class RealRuntime implements RuntimeAdapter {
       events: opts.events,
       approvals: this.#approvals,
       secrets: opts.secrets,
+      // v0.24.11: autonomous brain wake on listener events. Without these
+      // hooks, A2A inbound + market events queue but the brain never runs
+      // until the operator's next chat turn. drainInbound / drainMarket are
+      // wired by #wireDrains() below; we forward-bind the triggers to
+      // arrow functions that look up the late-bound drains at fire time.
+      onAutoTriggerInbox: () => {
+        void this.#drainInbound?.()
+      },
+      onAutoTriggerMarket: () => {
+        void this.#drainMarket?.()
+      },
     })
     this.#runtime = runtime
     this.#events = opts.events
     this.#wireDrains(opts.events)
+    // v0.24.11: an inbound that arrived BEFORE #wireDrains() set the drain
+    // functions will have called `onAutoTriggerInbox` with the drain still
+    // null. Drain explicitly here to catch the boot replay (the
+    // `bootInbound.splice` loop in build-runtime fires before wireDrains).
+    void this.#drainInbound?.()
+    void this.#drainMarket?.()
     // v0.21.12: surface listener state for /healthz. The telegram listener is
     // 'active' when secrets were provided AND build-runtime registered the
     // listener (which requires both ctx.telegram + secrets.telegram). When
@@ -122,6 +144,15 @@ export class RealRuntime implements RuntimeAdapter {
     } else {
       this.#listenerStates.telegram = 'disabled'
     }
+    // comms listeners register conditionally on plugins:[..., 'comms']. We treat
+    // 'active' as registered + started; if buildAnimaRuntime swallowed a start
+    // error it stays 'disabled' here (same caveat as telegram above).
+    this.#listenerStates['a2a-inbox'] = runtime.listeners.some(l => l.name === 'a2a-inbox')
+      ? 'active'
+      : 'disabled'
+    this.#listenerStates['a2a-market'] = runtime.listeners.some(l => l.name === 'a2a-market')
+      ? 'active'
+      : 'disabled'
     this.#ready = true
   }
 

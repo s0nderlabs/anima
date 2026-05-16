@@ -57,8 +57,34 @@ export class HistoryStore {
     `)
   }
 
-  insert(row: HistoryRow): void {
-    this.db
+  /**
+   * Cheap existence check on the PRIMARY KEY `(txHash, logIndex)`. Used by
+   * the listener to bail BEFORE the expensive ciphertext fetch + ECIES
+   * decrypt steps when the safety-net periodic catch-up replays an event
+   * the live subscribe already processed. Without this, every safety-net
+   * tick (~60s) would re-fetch every spillover blob and re-decrypt every
+   * inline message in the last `catchUpSafetyBlocks` window. PK lookup is
+   * O(log n) on the sqlite btree.
+   */
+  has(txHash: Hex, logIndex: number): boolean {
+    const row = this.db
+      .prepare('SELECT 1 FROM messages WHERE txHash = ? AND logIndex = ? LIMIT 1')
+      .get(txHash, logIndex)
+    return row !== null
+  }
+
+  /**
+   * Insert a row. Returns `true` if a new row was inserted, `false` if the
+   * row already existed (matched by PRIMARY KEY `(txHash, logIndex)`).
+   *
+   * The listener uses this return value to bail out of the brain-wake /
+   * contact-gate steps when the same event is delivered twice — e.g. by both
+   * the live `watchContractEvent` subscription AND the safety-net periodic
+   * catch-up scan (v0.24.11). Without this signal, idempotent re-scans
+   * would re-wake the brain for already-processed messages.
+   */
+  insert(row: HistoryRow): boolean {
+    const result = this.db
       .prepare(
         `INSERT OR IGNORE INTO messages
          (txHash, logIndex, blockNumber, fromAddr, toAddr, direction, type, content, filename, mime, size, inReplyTo, ts)
@@ -79,6 +105,7 @@ export class HistoryStore {
         row.inReplyTo,
         row.ts,
       )
+    return result.changes > 0
   }
 
   /**
