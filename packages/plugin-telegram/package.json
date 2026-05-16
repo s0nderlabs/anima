@@ -1,6 +1,6 @@
 {
   "name": "@s0nderlabs/anima-plugin-telegram",
-  "version": "0.24.12",
+  "version": "0.24.13",
   "type": "module",
   "description": "Telegram gateway plugin for anima — long-poll bot, debounced dispatch, reactions, allowlist",
   "license": "MIT",

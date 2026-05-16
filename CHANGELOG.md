@@ -4,6 +4,18 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.13] - 2026-05-16
+
+### Fixed
+
+- **v0.24.12 clarify-on-market-wake directive was overridden by `MARKETPLACE_GUIDANCE` and never fired in practice.** The plugin-comms guidance shipped with the older line "Never ask the operator for permission" which the brain treated as more specific and authoritative than the new global directive in `frozen-prefix.ts`. Observed live May 16 2026 ~14:30 WIB: enigma daemon on v0.24.12 received two autonomous `JobCreated` wakes (jobs #6 + #7), listener fired correctly, brain ran inference, but emitted zero tool calls — silent drop. Fix: rewrite the provider-side rules in `packages/plugin-comms/src/market-guidance.ts` so it expresses the same hesitate-and-ask behavior. New rule: on `job-offered` event with NO prior negotiation in `agent.history` with the buyer, call `clarify`; with prior negotiation, act autonomously. Buyer side stays autonomous on `markedDone` (settles the trade they already agreed to). Removed the over-eager global directive from frozen-prefix; the marketplace guidance is the single source of truth now (when comms plugin is loaded). TG broadcast wiring from v0.24.12 (`OperatorNotifierSlot` + `extractClarifyQuestion` in `build-runtime.onToolCall`) carries over unchanged.
+
+### Tests
+
+- Full repo: 1274/1274 unit tests pass, typecheck clean, biome clean.
+
+[0.24.13]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.13
+
 ## [0.24.12] - 2026-05-16
 
 ### Added
