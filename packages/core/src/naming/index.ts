@@ -1,9 +1,11 @@
 export {
   SannClient,
   SANN_ADDRESSES,
+  SANN_SUFFIX,
   sannNamehash,
   subnameNode,
   readRegistryOwner,
+  resolveSubnameAddress,
   type SannClientOpts,
 } from './sann'
 export {

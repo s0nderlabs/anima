@@ -117,6 +117,13 @@ export class RealRuntime implements RuntimeAdapter {
   #network: '0g-mainnet' | '0g-testnet' | null = null
   #events: EventHub | null = null
   #pendingFlush: Promise<void> | null = null
+  // Safety-net interval that periodically re-fires the drains in case a
+  // wake-trigger callback was lost between the listener and the drain
+  // queue (observed May 16 2026: 11 wakes queued, 0 brain inferences over
+  // 14 minutes until restart). Drains have their own single-flight guards,
+  // so this is a no-op when the queues are empty or a drain is already
+  // running.
+  #drainScanInterval: ReturnType<typeof setInterval> | null = null
   // v0.21.12: per-listener state for /healthz visibility.
   // Expanded to cover comms listeners so operators can spot a daemon whose
   // a2a-inbox / market subscription stalled mid-life (cursor advances but
@@ -193,6 +200,12 @@ export class RealRuntime implements RuntimeAdapter {
     this.#listenerStates['a2a-market'] = runtime.listeners.some(l => l.name === 'a2a-market')
       ? 'active'
       : 'disabled'
+    this.#drainScanInterval = setInterval(() => {
+      const r = this.#runtime
+      if (!r) return
+      if (r.inboundQueue.length > 0) void this.#drainInbound?.()
+      if (r.marketBrainQueue.length > 0) void this.#drainMarket?.()
+    }, 30_000)
     this.#ready = true
   }
 
@@ -327,6 +340,10 @@ export class RealRuntime implements RuntimeAdapter {
     if (this.#stopping) return
     this.#stopping = true
     this.#ready = false
+    if (this.#drainScanInterval) {
+      clearInterval(this.#drainScanInterval)
+      this.#drainScanInterval = null
+    }
     if (this.#pendingFlush) {
       await this.#pendingFlush.catch(() => {})
     }

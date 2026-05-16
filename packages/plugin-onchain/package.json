@@ -1,6 +1,6 @@
 {
   "name": "@s0nderlabs/anima-plugin-onchain",
-  "version": "0.24.16",
+  "version": "0.24.17",
   "type": "module",
   "description": "On-chain wallet + chain ops plugin for anima (JAINE swap, Gimo LST, Multicall3 discovery)",
   "license": "MIT",

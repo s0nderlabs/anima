@@ -19,6 +19,7 @@ import {
   type AnimaNetwork,
   OPERATOR_BLOB_SCOPES,
   type OperatorSigner,
+  agentPaths,
   deriveBlobKey,
 } from '@s0nderlabs/anima-core'
 import { type Address, type Hex, bytesToHex } from 'viem'
@@ -201,7 +202,7 @@ export async function runTelegramStep(opts: TelegramStepOpts): Promise<TelegramS
       },
       precomputedKey: telegramScopeKey,
     })
-    sSave.stop(`saved → ~/.anima/agents/${opts.agentId}/telegram-secrets.encrypted`)
+    sSave.stop(`saved → ${agentPaths.agent(opts.agentId).dir}/telegram-secrets.encrypted`)
   } catch (e) {
     sSave.stop(`save failed: ${(e as Error).message.slice(0, 200)}`)
     return { configured: false, cancelled: true }

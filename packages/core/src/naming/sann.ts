@@ -18,6 +18,8 @@ import { waitForReceiptResilient } from '../identity/receipt'
  * SPACE ID on 0G mainnet uses the SANN architecture. Contracts discovered via
  * `RegistrarController.sann()` + `SANN.registry()` + `SANN.tldBase(IDENTIFIER)`.
  */
+export const SANN_SUFFIX = '.anima.0g' as const
+
 export const SANN_ADDRESSES = {
   controller: '0xD7b837A0E388B4c25200983bdAa3EF3A83ca86b7' as Address,
   resolver: '0x6D3B3F99177FB2A5de7F9E928a9BD807bF7b5BAD' as Address,
@@ -115,6 +117,32 @@ export async function readRegistryOwner(client: PublicClient, node: Hex): Promis
     functionName: 'owner',
     args: [node],
   })) as Address
+}
+
+/**
+ * Resolve a `<label>.anima.0g` subname to the address text record published
+ * by the agent at init time. Returns null when the record is empty / invalid;
+ * throws on RPC failure. Shared by chain.send + agent.message + any future
+ * tool that accepts a SANN name where an address is expected.
+ */
+export async function resolveSubnameAddress(
+  client: PublicClient,
+  label: string,
+): Promise<Address | null> {
+  if (!label) return null
+  const node = subnameNode(label)
+  const raw = (await client.readContract({
+    address: SANN_ADDRESSES.resolver,
+    abi: RESOLVER_ABI,
+    functionName: 'text',
+    args: [node, 'address'],
+  })) as string
+  if (!raw) return null
+  try {
+    return raw as Address
+  } catch {
+    return null
+  }
 }
 
 export interface SannClientOpts {

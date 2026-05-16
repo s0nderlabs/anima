@@ -3,8 +3,15 @@
  */
 
 import type { ToolDef } from '@s0nderlabs/anima-core'
-import { getGasPriceWithFloor } from '@s0nderlabs/anima-core'
-import { type Address, getAddress, parseEther, parseUnits } from 'viem'
+import { SANN_SUFFIX, getGasPriceWithFloor, resolveSubnameAddress } from '@s0nderlabs/anima-core'
+import {
+  type Address,
+  type PublicClient,
+  getAddress,
+  isAddress,
+  parseEther,
+  parseUnits,
+} from 'viem'
 import { z } from 'zod'
 import { ERC20_ABI } from '../abis'
 import { isNativeToken, resolveToken } from '../tokens'
@@ -12,7 +19,10 @@ import type { OnchainRuntimeContext } from '../types'
 import { waitForReceipt } from '../wait-receipt'
 
 const Schema = z.object({
-  to: z.string().min(42).describe('Recipient 0x address.'),
+  to: z
+    .string()
+    .min(1)
+    .describe(`Recipient 0x address OR \`<name>${SANN_SUFFIX}\` subname (resolved via SANN).`),
   amount: z.string().min(1).describe('Amount in token units (e.g. "0.05" for 0.05 0G).'),
   token: z
     .string()
@@ -20,6 +30,23 @@ const Schema = z.object({
     .describe('Symbol or 0x address. Omit / "0G" / "native" for native transfer.'),
 })
 type Args = z.infer<typeof Schema>
+
+async function resolveRecipient(to: string, publicClient: PublicClient): Promise<Address> {
+  const trimmed = to.trim()
+  if (isAddress(trimmed)) return getAddress(trimmed) as Address
+  if (trimmed.endsWith(SANN_SUFFIX)) {
+    const label = trimmed.slice(0, -SANN_SUFFIX.length)
+    if (!label) throw new Error(`empty subname label in ${trimmed}`)
+    const addr = await resolveSubnameAddress(publicClient, label)
+    if (!addr || !isAddress(addr)) {
+      throw new Error(`${trimmed}: address text record empty or invalid`)
+    }
+    return getAddress(addr) as Address
+  }
+  throw new Error(
+    `cannot resolve recipient "${trimmed}": expected 0x address or *${SANN_SUFFIX} name`,
+  )
+}
 
 export function makeChainSend(ctx: OnchainRuntimeContext): ToolDef<Args> {
   return {
@@ -30,7 +57,7 @@ export function makeChainSend(ctx: OnchainRuntimeContext): ToolDef<Args> {
     schema: Schema,
     handler: async args => {
       try {
-        const recipient = getAddress(args.to) as Address
+        const recipient = await resolveRecipient(args.to, ctx.publicClient)
         const account = ctx.walletClient.account
         if (!account) {
           return { ok: false, error: 'walletClient has no account; cannot send' }
