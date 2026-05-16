@@ -56,56 +56,63 @@ describe('RealRuntime contract', () => {
 })
 
 describe('stringifyMarketEvent (v0.24.15 BigInt-safe drainMarket)', () => {
-  test('serializes a `created` event with BigInt jobId + amount', () => {
-    const e = {
-      kind: 'created',
-      jobId: 16n,
-      buyer: '0xaaa' as `0x${string}`,
-      amount: 1_000_000_000_000_000n,
-      descriptionHash: '0xbb' as `0x${string}`,
-    }
-    const out = stringifyMarketEvent(e)
-    const parsed = JSON.parse(out)
-    expect(parsed.jobId).toBe('16')
-    expect(parsed.amount).toBe('1000000000000000')
-    expect(parsed.buyer).toBe('0xaaa')
-    expect(parsed.kind).toBe('created')
-  })
+  const cases: { name: string; event: Record<string, unknown>; expect: Record<string, string> }[] =
+    [
+      {
+        name: 'created (jobId + amount + blockNumber)',
+        event: {
+          kind: 'created',
+          jobId: 16n,
+          buyer: '0xaaa',
+          amount: 1_000_000_000_000_000n,
+          descriptionHash: '0xbb',
+          blockNumber: 33_000_000n,
+        },
+        expect: { jobId: '16', amount: '1000000000000000', blockNumber: '33000000' },
+      },
+      {
+        name: 'settled (payout + fee + blockNumber)',
+        event: {
+          kind: 'settled',
+          jobId: 5n,
+          recipient: '0xprov',
+          payout: 4_750_000_000_000_000n,
+          fee: 250_000_000_000_000n,
+          blockNumber: 33_000_001n,
+        },
+        expect: { jobId: '5', payout: '4750000000000000', fee: '250000000000000' },
+      },
+      {
+        name: 'splitProposed (both amounts + blockNumber)',
+        event: {
+          kind: 'splitProposed',
+          jobId: 7n,
+          proposer: '0xprop',
+          buyerAmount: 2_000_000_000_000_000n,
+          providerAmount: 3_000_000_000_000_000n,
+          blockNumber: 33_000_002n,
+        },
+        expect: { jobId: '7', buyerAmount: '2000000000000000', providerAmount: '3000000000000000' },
+      },
+      {
+        name: 'markedDone (blockNumber-only BigInt path)',
+        event: { kind: 'markedDone', jobId: 9n, blockNumber: 33_000_003n, txHash: '0xcc' },
+        expect: { jobId: '9', blockNumber: '33000003' },
+      },
+    ]
 
-  test('serializes a `settled` event with payout + fee BigInts', () => {
-    const e = {
-      kind: 'settled',
-      jobId: 5n,
-      recipient: '0xprov' as `0x${string}`,
-      payout: 4_750_000_000_000_000n,
-      fee: 250_000_000_000_000n,
-    }
-    const out = stringifyMarketEvent(e)
-    const parsed = JSON.parse(out)
-    expect(parsed.payout).toBe('4750000000000000')
-    expect(parsed.fee).toBe('250000000000000')
-    expect(parsed.jobId).toBe('5')
-  })
-
-  test('serializes a `splitProposed` event with both BigInt amounts', () => {
-    const e = {
-      kind: 'splitProposed',
-      jobId: 7n,
-      proposer: '0xprop' as `0x${string}`,
-      buyerAmount: 2_000_000_000_000_000n,
-      providerAmount: 3_000_000_000_000_000n,
-    }
-    const out = stringifyMarketEvent(e)
-    const parsed = JSON.parse(out)
-    expect(parsed.buyerAmount).toBe('2000000000000000')
-    expect(parsed.providerAmount).toBe('3000000000000000')
-  })
+  for (const c of cases) {
+    test(`serializes ${c.name}`, () => {
+      const parsed = JSON.parse(stringifyMarketEvent(c.event))
+      for (const [k, v] of Object.entries(c.expect)) expect(parsed[k]).toBe(v)
+      expect(parsed.kind).toBe(c.event.kind)
+    })
+  }
 
   test('plain JSON.stringify throws on the same shape (regression guard)', () => {
     const e = { kind: 'created', jobId: 16n, amount: 1n }
     expect(() => JSON.stringify(e)).toThrow(/BigInt/)
     expect(() => JSON.stringify({ ...e, jobId: e.jobId.toString() })).toThrow(/BigInt/)
-    // proves stringifyMarketEvent is strictly required for these shapes
     expect(() => stringifyMarketEvent(e)).not.toThrow()
   })
 })

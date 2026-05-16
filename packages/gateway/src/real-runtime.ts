@@ -49,17 +49,42 @@ async function dispatchBypass(bypass: ParsedBypass, r: BuiltRuntime): Promise<st
 
 /**
  * v0.24.15: BigInt-safe JSON serialization for market event payloads.
- * `MarketJobEvent` unions carry BigInt fields beyond jobId (amount on
- * `created`; payout/fee on `settled`; buyerAmount/providerAmount on
- * `splitProposed`). The prior pattern `JSON.stringify({...e, jobId:
- * e.jobId.toString()})` only converted jobId, so JSON.stringify threw
- * "cannot serialize BigInt" for every other event type. drainMarket
- * caught the throw into an EventHub log event (invisible without an SSE
- * subscriber), and the brain never ran on those wakes. Replacer covers
- * every BigInt regardless of depth.
+ * Every JobEvent carries `blockNumber: bigint` plus kind-specific BigInts
+ * (`amount` on `created`; `payout/fee` on `settled`; etc). The replacer
+ * walks every field regardless of depth.
  */
 export function stringifyMarketEvent(e: unknown): string {
   return JSON.stringify(e, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
+}
+
+type DrainSource = 'a2a' | 'market'
+
+/**
+ * v0.24.16: shared drain-failure logger. Publishes a structured EventHub
+ * `log` event AND mirrors to daemon stderr so silent failures surface in
+ * `~/anima-logs/anima-gateway.log` without an SSE subscriber attached.
+ *
+ * Stderr is rate-limited per source: identical messages within
+ * `STDERR_DEDUP_WINDOW_MS` only print once, so a stuck drain loop on a
+ * persistent RPC error doesn't flood the log. EventHub publish always
+ * fires so SSE subscribers see every occurrence.
+ */
+const STDERR_DEDUP_WINDOW_MS = 5000
+const stderrLastSeen = new Map<string, number>()
+function logTurnFailure(
+  source: DrainSource,
+  err: unknown,
+  events: Pick<EventHub, 'publish'>,
+): void {
+  const msg = err instanceof Error ? err.message : String(err)
+  events.publish('log', { level: 'error', message: `${source} turn failed: ${msg}` })
+  const key = `${source}:${msg}`
+  const now = Date.now()
+  const last = stderrLastSeen.get(key) ?? 0
+  if (now - last >= STDERR_DEDUP_WINDOW_MS) {
+    stderrLastSeen.set(key, now)
+    console.error(`[${source}] turn failed: ${msg}`)
+  }
 }
 
 export interface RealRuntimeOpts {
@@ -429,14 +454,7 @@ export class RealRuntime implements RuntimeAdapter {
               })
             }
           } catch (err) {
-            const msg = (err as Error).message ?? 'unknown'
-            events.publish('log', {
-              level: 'error',
-              message: `a2a turn failed: ${msg}`,
-            })
-            // v0.24.15: stderr fallback so silent inbound failures are
-            // visible in daemon log (paired with the market drain fix).
-            console.error(`[a2a] turn failed: ${msg}`)
+            logTurnFailure('a2a', err, events)
           }
         }
       } finally {
@@ -495,18 +513,7 @@ export class RealRuntime implements RuntimeAdapter {
               })
             }
           } catch (err) {
-            const msg = (err as Error).message ?? 'unknown'
-            events.publish('log', {
-              level: 'error',
-              message: `market turn failed: ${msg}`,
-            })
-            // v0.24.15: also write to daemon stderr so the failure is visible
-            // in ~/anima-logs/anima-gateway.log. Previously the only sink was
-            // the EventHub 'log' event, which is invisible unless an SSE
-            // subscriber is attached. That hid the BigInt-stringify bug for
-            // jobs 10-16 (May 16 2026 session): every market wake triggered
-            // a silent throw and operators saw no diagnostic anywhere.
-            console.error(`[market] turn failed: ${msg}`)
+            logTurnFailure('market', err, events)
           }
         }
       } finally {

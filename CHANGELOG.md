@@ -4,6 +4,21 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.16] - 2026-05-16
+
+### Changed
+
+- **Extracted `logTurnFailure(source, err, events)` helper** shared by `drainInbound` and `drainMarket` so the dual-sink (EventHub `log` event + daemon stderr) stays consistent between paths. Replaces two near-identical try/catch blocks.
+- **Tightened `err -> message` normalization** to `err instanceof Error ? err.message : String(err)`. Prior `(err as Error).message ?? 'unknown'` would have thrown on string-throws (`Promise.reject('reason')`) by accessing `.message` on a non-Error.
+- **Rate-limited the stderr mirror** in `logTurnFailure` per `source+message` over a 5s window so a stuck drain loop on a persistent RPC failure can't flood `~/anima-logs/anima-gateway.log`. EventHub publish still fires on every occurrence so SSE subscribers see the full series.
+- **Consolidated three near-identical `stringifyMarketEvent` tests** into an array-driven block + added a 4th case for `markedDone` (blockNumber-only BigInt path).
+
+### Tests
+
+- Full repo: 1281/1281 unit tests pass, typecheck clean, biome clean.
+
+[0.24.16]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.16
+
 ## [0.24.15] - 2026-05-16
 
 ### Fixed
