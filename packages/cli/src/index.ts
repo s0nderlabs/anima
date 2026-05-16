@@ -81,12 +81,13 @@ async function main(): Promise<void> {
       // backwards compat with v0.17.1+ runbooks.
       const sandboxIdx = argv.indexOf('--sandbox')
       const providerIdx = argv.indexOf('--provider')
+      const visionIdx = argv.indexOf('--vision')
       const parseAmount = (flag: string, raw: string | undefined): number | undefined => {
         if (raw === undefined) return undefined
         const n = Number(raw)
         if (!Number.isFinite(n) || n <= 0 || n > 1e6) {
           console.error(
-            `Bad amount for ${flag}: ${raw}\n  Each topup flag takes an amount in 0G, not an address: ${flag} <amount>\n  Examples: anima topup --compute 2     anima topup --sandbox 5     anima topup --agent 1`,
+            `Bad amount for ${flag}: ${raw}\n  Each topup flag takes an amount in 0G, not an address: ${flag} <amount>\n  Examples: anima topup --compute 2     anima topup --sandbox 5     anima topup --agent 1     anima topup --vision 1`,
           )
           process.exit(2)
         }
@@ -102,6 +103,7 @@ async function main(): Promise<void> {
         '--provider',
         providerIdx >= 0 ? argv[providerIdx + 1] : undefined,
       )
+      const vision = parseAmount('--vision', visionIdx >= 0 ? argv[visionIdx + 1] : undefined)
       if (providerLegacyArg !== undefined && sandboxArg === undefined) {
         console.warn(
           '[deprecated] `anima topup --provider` is renamed to `--sandbox` (Galileo testnet billing); both flags work for now but `--provider` will be removed in a future release.',
@@ -114,7 +116,7 @@ async function main(): Promise<void> {
       }
       const sandbox = sandboxArg ?? providerLegacyArg
       const { runTopup } = await import('./commands/topup')
-      await runTopup({ agent, compute, sandbox })
+      await runTopup({ agent, compute, sandbox, vision })
       return
     }
     case 'model': {
@@ -335,7 +337,8 @@ function printHelp(): void {
       '  anima transfer <ref>      transfer iNFT to a new operator with re-encrypted keystore',
       '                            flags: --to <addr>, --recipient-key <hex>, --oracle-key <hex>,',
       '                                   --dry-run, --yes, --no-purge',
-      '  anima topup               add funds  (flags: --agent N  --compute N  --sandbox N)',
+      '  anima topup               add funds  (flags: --agent N  --compute N  --sandbox N  --vision N)',
+      '                            (--vision N seeds the 0G Compute vision provider sub-account)',
       '                            (--provider N is a deprecated alias for --sandbox)',
       '  anima ledger [sub]        compute ledger ops  (subs: balance | refund | retrieve | close)',
       '                            flags: --amount N  --all  --yes',

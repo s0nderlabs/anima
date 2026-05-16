@@ -7,6 +7,7 @@ import {
   type PermissionRequest,
   SANDBOX_PROVIDER_URL_GALILEO,
   SandboxProviderClient,
+  agentPaths,
   getLedgerDetailReadOnly,
   getSandboxBillingReserve,
   iNFTAgentId,
@@ -182,7 +183,7 @@ export async function runChatSandbox(
     // standalone gateway path gets a clearer label; sandbox path keeps its
     // existing "connected to sandbox X @ Y" copy.
     initialSystem: isLocalGateway
-      ? `connected to local gateway (~/.anima/agents/${agentId.slice(0, 8)}/gateway.sock)`
+      ? `connected to local gateway (${agentPaths.agent(agentId).dir}/gateway.sock)`
       : `connected to sandbox ${sandboxId.slice(0, 8)} @ ${sandboxEndpoint}`,
     // v0.22.0: subname (if registered) + full EOA. Brain provider dropped.
     identityLabel: `agent ${config.subname ?? agentId}  ${agentAddress}`,

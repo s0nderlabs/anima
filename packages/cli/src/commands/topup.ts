@@ -3,6 +3,7 @@ import {
   SANDBOX_BURN_RATE_OG_PER_HOUR,
   SANDBOX_PROVIDER_GALILEO,
   SandboxSettlementClient,
+  VISION_PROVIDER_DEFAULTS,
   agentPaths,
   depositToLedger,
   explorerTxUrl,
@@ -10,9 +11,10 @@ import {
   getGasPriceWithFloor,
   getLedgerBalance,
   iNFTAgentId,
+  transferFundToProvider,
   waitForReceiptResilient,
 } from '@s0nderlabs/anima-core'
-import { type Address, formatEther, parseEther } from 'viem'
+import { type Address, formatEther, getAddress, parseEther } from 'viem'
 import { findAndLoadConfig } from '../config/load'
 import { withSilencedConsole } from '../util/silence-console'
 import { loadOrPickOperatorSigner } from './init/operator-picker'
@@ -34,6 +36,13 @@ export interface TopupOpts {
    * will be removed in a future release.
    */
   provider?: number
+  /**
+   * Transfer N 0G from the main ledger into the vision provider sub-account.
+   * Without this, `vision.analyze` + `browser.vision` fail with "Sub-account
+   * not found" on fresh agents (init wizard only seeds the inference
+   * provider). Mainnet-only — no vision provider exists on testnet.
+   */
+  vision?: number
 }
 
 export async function runTopup(opts: TopupOpts): Promise<void> {
@@ -58,9 +67,9 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
   })
   const paths = agentPaths.agent(finalAgentId)
 
-  // v0.21.5: 'sandbox' is the canonical mode discriminant (was 'provider' in
-  // v0.17.1+). `opts.provider` is accepted as a backwards-compat alias.
-  let mode: 'agent' | 'compute' | 'sandbox' | null = null
+  // 'sandbox' is the canonical mode discriminant (was 'provider' in v0.17.1+).
+  // `opts.provider` is accepted as a backwards-compat alias.
+  let mode: 'agent' | 'compute' | 'sandbox' | 'vision' | null = null
   let amount = 0
   if (opts.agent !== undefined) {
     mode = 'agent'
@@ -74,6 +83,9 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
   } else if (opts.provider !== undefined) {
     mode = 'sandbox'
     amount = opts.provider
+  } else if (opts.vision !== undefined) {
+    mode = 'vision'
+    amount = opts.vision
   }
 
   if (!mode) {
@@ -91,12 +103,17 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
           hint: 'agent deposits 0G into 0G Compute (mainnet)',
         },
         {
+          value: 'vision' as const,
+          label: 'Vision provider sub-account (vision.analyze + browser.vision)',
+          hint: 'transfer from main ledger into vision provider envelope (mainnet)',
+        },
+        {
           value: 'sandbox' as const,
           label: 'Sandbox billing deposit (Galileo testnet runtime fees)',
           hint: 'operator deposits 0G into SandboxBilling for harness burn',
         },
       ],
-    })) as 'agent' | 'compute' | 'sandbox' | symbol
+    })) as 'agent' | 'compute' | 'sandbox' | 'vision' | symbol
     if (isCancel(choice)) {
       cancel('Aborted.')
       return
@@ -197,8 +214,12 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
     return
   }
 
-  // mode === 'compute' — needs the agent's privkey to deposit to its ledger.
-  // Phase 6.6: fetch encrypted keystore, ask operator to sign typed data, decrypt.
+  // mode === 'compute' or 'vision' — both need the agent's privkey since
+  // they're agent-signed broker calls (depositFund vs transferFund).
+  if (mode === 'vision' && network !== '0g-mainnet') {
+    cancel('Vision provider is mainnet-only; no testnet provider exists yet.')
+    return
+  }
   const operator = await loadOrPickOperatorSigner({ network, hint: config.operator })
   if (!operator) return
 
@@ -240,6 +261,32 @@ export async function runTopup(opts: TopupOpts): Promise<void> {
     )
   } catch (e) {
     sBal.stop(`balance read failed: ${(e as Error).message.slice(0, 120)}`)
+  }
+
+  if (mode === 'vision') {
+    const providerRaw = VISION_PROVIDER_DEFAULTS[network as '0g-mainnet']
+    if (!providerRaw) {
+      console.error(`Vision provider not configured for network ${network}`)
+      await operator.close?.()
+      return
+    }
+    const provider = getAddress(providerRaw)
+    const sVis = spinner()
+    sVis.start(`Transferring ${amount} 0G from main ledger to vision provider sub-account`)
+    try {
+      await withSilencedConsole(() =>
+        transferFundToProvider({ network, privkeyHex: agentPrivkey, provider, amount }),
+      )
+      sVis.stop(`vision sub-account seeded (${provider.slice(0, 8)}...${provider.slice(-4)})`)
+      outro(
+        `vision provider has ${amount} 0G allocated. vision.analyze + browser.vision should work now.`,
+      )
+    } catch (e) {
+      sVis.stop(`transfer failed: ${(e as Error).message.slice(0, 160)}`)
+    } finally {
+      await operator.close?.()
+    }
+    return
   }
 
   const sDep = spinner()

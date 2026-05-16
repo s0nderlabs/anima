@@ -457,6 +457,7 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     operatorAddress,
     brainProvider: modelPick?.provider ?? null,
     brainModel: modelPick?.model ?? null,
+    subname: requestedSubname || null,
   })
 
   // v0.23.1: cache the operator scope keys to `.operator-session` so:
@@ -779,6 +780,12 @@ interface SeedStarterOpts {
   operatorAddress: Address
   brainProvider: string | null
   brainModel: string | null
+  /**
+   * Operator-chosen SANN label (e.g. "chou" for `chou.anima.0g`). Threaded
+   * into identity + persona so the agent introduces itself by name on the
+   * very first turn instead of the generic "I am Anima" template.
+   */
+  subname: string | null
 }
 
 /**
@@ -796,9 +803,17 @@ async function seedStarterMemoryFiles(opts: SeedStarterOpts): Promise<void> {
   await mkdir(userMem, { recursive: true })
 
   const now = new Date().toISOString().slice(0, 10)
-  const identity = `---\nname: identity\ndescription: Auto-written agent identity facts.\ntype: agent-identity\n---\n# Anima identity\n\n- iNFT: #${opts.tokenId.toString()} at ${opts.contractAddress} (${opts.network})\n- Agent EOA: ${opts.agentAddress}\n- Operator: ${opts.operatorAddress}\n- Minted: ${now}\n${opts.brainProvider ? `- Brain provider: ${opts.brainProvider}\n` : ''}${opts.brainModel ? `- Brain model: ${opts.brainModel}\n` : ''}`
-  const persona =
-    '---\nname: persona\ndescription: Voice + behavior style.\ntype: agent-persona\n---\n# Persona\n\nI am Anima, a sovereign agent harness on 0G. I anchor my state on chain every turn, decrypt my keystore via my operator wallet at session start, and use 0G Compute (TEE-attested) for reasoning. I am direct, concise, and factual.\n'
+  const displayName = opts.subname ?? 'anima'
+  const fullName = opts.subname ? `${opts.subname}.anima.0g` : null
+  const identityTitle = opts.subname
+    ? `# ${opts.subname} identity (anima harness)`
+    : '# Anima identity'
+  const subnameLine = fullName ? `- Subname: ${fullName}\n` : ''
+  const personaIntro = fullName
+    ? `I am ${displayName} (${fullName}), a sovereign agent running on the anima harness on 0G.`
+    : 'I am anima, a sovereign agent harness on 0G.'
+  const identity = `---\nname: identity\ndescription: Auto-written agent identity facts.\ntype: agent-identity\n---\n${identityTitle}\n\n- Name: ${displayName}\n${subnameLine}- iNFT: #${opts.tokenId.toString()} at ${opts.contractAddress} (${opts.network})\n- Agent EOA: ${opts.agentAddress}\n- Operator: ${opts.operatorAddress}\n- Minted: ${now}\n${opts.brainProvider ? `- Brain provider: ${opts.brainProvider}\n` : ''}${opts.brainModel ? `- Brain model: ${opts.brainModel}\n` : ''}`
+  const persona = `---\nname: persona\ndescription: Voice + behavior style.\ntype: agent-persona\n---\n# Persona\n\n${personaIntro} I anchor my state on chain every turn, decrypt my keystore via my operator wallet at session start, and use 0G Compute (TEE-attested) for reasoning. I am direct, concise, and factual. When asked who I am, I introduce myself as ${displayName}.\n`
   const profile =
     '---\nname: profile\ndescription: User profile (operator-scoped, never anchored on chain).\ntype: user\n---\n# User profile\n\n(empty, fills as we chat)\n'
 

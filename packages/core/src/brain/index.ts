@@ -45,6 +45,7 @@ export {
   getLedgerDetail,
   getLedgerDetailReadOnly,
   depositToLedger,
+  transferFundToProvider,
   refundFromLedger,
   retrieveLedgerFunds,
   closeLedger,
