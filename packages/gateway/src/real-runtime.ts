@@ -47,6 +47,21 @@ async function dispatchBypass(bypass: ParsedBypass, r: BuiltRuntime): Promise<st
   }
 }
 
+/**
+ * v0.24.15: BigInt-safe JSON serialization for market event payloads.
+ * `MarketJobEvent` unions carry BigInt fields beyond jobId (amount on
+ * `created`; payout/fee on `settled`; buyerAmount/providerAmount on
+ * `splitProposed`). The prior pattern `JSON.stringify({...e, jobId:
+ * e.jobId.toString()})` only converted jobId, so JSON.stringify threw
+ * "cannot serialize BigInt" for every other event type. drainMarket
+ * caught the throw into an EventHub log event (invisible without an SSE
+ * subscriber), and the brain never ran on those wakes. Replacer covers
+ * every BigInt regardless of depth.
+ */
+export function stringifyMarketEvent(e: unknown): string {
+  return JSON.stringify(e, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
+}
+
 export interface RealRuntimeOpts {
   approvals: ApprovalRelay
   /** Optional override of the agent state directory. Default `${TMPDIR}/anima-gateway/<agentId>`. */
@@ -414,10 +429,14 @@ export class RealRuntime implements RuntimeAdapter {
               })
             }
           } catch (err) {
+            const msg = (err as Error).message ?? 'unknown'
             events.publish('log', {
               level: 'error',
-              message: `a2a turn failed: ${(err as Error).message}`,
+              message: `a2a turn failed: ${msg}`,
             })
+            // v0.24.15: stderr fallback so silent inbound failures are
+            // visible in daemon log (paired with the market drain fix).
+            console.error(`[a2a] turn failed: ${msg}`)
           }
         }
       } finally {
@@ -446,7 +465,7 @@ export class RealRuntime implements RuntimeAdapter {
                 source: 'marketplace',
                 payload: {
                   label: `market:${e.kind}`,
-                  data: JSON.stringify({ ...e, jobId: e.jobId.toString() }),
+                  data: stringifyMarketEvent(e),
                 },
                 ts: Date.now(),
               },
@@ -476,10 +495,18 @@ export class RealRuntime implements RuntimeAdapter {
               })
             }
           } catch (err) {
+            const msg = (err as Error).message ?? 'unknown'
             events.publish('log', {
               level: 'error',
-              message: `market turn failed: ${(err as Error).message}`,
+              message: `market turn failed: ${msg}`,
             })
+            // v0.24.15: also write to daemon stderr so the failure is visible
+            // in ~/anima-logs/anima-gateway.log. Previously the only sink was
+            // the EventHub 'log' event, which is invisible unless an SSE
+            // subscriber is attached. That hid the BigInt-stringify bug for
+            // jobs 10-16 (May 16 2026 session): every market wake triggered
+            // a silent throw and operators saw no diagnostic anywhere.
+            console.error(`[market] turn failed: ${msg}`)
           }
         }
       } finally {

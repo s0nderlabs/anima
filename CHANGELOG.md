@@ -4,6 +4,23 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.15] - 2026-05-16
+
+### Fixed
+
+- **`drainMarket` silently threw `JSON.stringify cannot serialize BigInt` on every `JobCreated` (`job-offered`) autonomous wake, so the brain never ran on those events.** Discovered live May 16 2026 ~16:01 WIB after attaching an SSE subscriber to enigma and capturing the `log` event the drain emitted. The line `JSON.stringify({ ...e, jobId: e.jobId.toString() })` only converted the `jobId` BigInt; `created` events carry `amount: bigint`, `settled` carries `payout/fee: bigint`, `splitProposed` carries `buyerAmount/providerAmount: bigint`. JSON.stringify threw on those, the drain catch published an EventHub `log` event with `level: 'error'`, and the event went nowhere — daemon stdout/stderr was silent, activity-log got the `wake` entry but no `brain-response`. That's why jobs 6–16 in the May 16 session never produced clarify, agent.message, or anything else autonomously. `markedDone/accepted` events worked (no BigInt beyond jobId) which is why job 5's cycle succeeded earlier and masked the bug.
+
+  Fix: extracted `stringifyMarketEvent(e)` helper that uses a `JSON.stringify` replacer converting every BigInt to its decimal string, regardless of depth. drainMarket calls it instead of the partial pattern.
+
+- **Drain-loop failures now write to daemon stderr (`~/anima-logs/anima-gateway.log`), not just the EventHub.** The prior pattern published a `log` event to subscribers only — invisible without an attached SSE client, which is exactly when autonomous wakes are most likely to silently fail. Added `console.error` fallback in both `drainMarket` and `drainInbound` catch blocks so future inference / serialization failures are visible in the daemon log file.
+
+### Tests
+
+- 4 new tests for `stringifyMarketEvent` covering `created` (jobId + amount), `settled` (jobId + payout + fee), `splitProposed` (jobId + buyerAmount + providerAmount), and a regression guard that asserts plain `JSON.stringify` still throws on these shapes so the helper is strictly required.
+- Full repo: 1280/1280 unit tests pass, typecheck clean, biome clean.
+
+[0.24.15]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.15
+
 ## [0.24.14] - 2026-05-16
 
 ### Fixed

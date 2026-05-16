@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import { ApprovalRelay } from './approval-relay'
 import { EventHub } from './events'
-import { RealRuntime } from './real-runtime'
+import { RealRuntime, stringifyMarketEvent } from './real-runtime'
 
 describe('RealRuntime contract', () => {
   test('ready() is false before start', () => {
@@ -52,5 +52,60 @@ describe('RealRuntime contract', () => {
     // Internal field; we just confirm the public surface doesn't blow up
     expect(rt).toBeInstanceOf(RealRuntime)
     approvals.stop()
+  })
+})
+
+describe('stringifyMarketEvent (v0.24.15 BigInt-safe drainMarket)', () => {
+  test('serializes a `created` event with BigInt jobId + amount', () => {
+    const e = {
+      kind: 'created',
+      jobId: 16n,
+      buyer: '0xaaa' as `0x${string}`,
+      amount: 1_000_000_000_000_000n,
+      descriptionHash: '0xbb' as `0x${string}`,
+    }
+    const out = stringifyMarketEvent(e)
+    const parsed = JSON.parse(out)
+    expect(parsed.jobId).toBe('16')
+    expect(parsed.amount).toBe('1000000000000000')
+    expect(parsed.buyer).toBe('0xaaa')
+    expect(parsed.kind).toBe('created')
+  })
+
+  test('serializes a `settled` event with payout + fee BigInts', () => {
+    const e = {
+      kind: 'settled',
+      jobId: 5n,
+      recipient: '0xprov' as `0x${string}`,
+      payout: 4_750_000_000_000_000n,
+      fee: 250_000_000_000_000n,
+    }
+    const out = stringifyMarketEvent(e)
+    const parsed = JSON.parse(out)
+    expect(parsed.payout).toBe('4750000000000000')
+    expect(parsed.fee).toBe('250000000000000')
+    expect(parsed.jobId).toBe('5')
+  })
+
+  test('serializes a `splitProposed` event with both BigInt amounts', () => {
+    const e = {
+      kind: 'splitProposed',
+      jobId: 7n,
+      proposer: '0xprop' as `0x${string}`,
+      buyerAmount: 2_000_000_000_000_000n,
+      providerAmount: 3_000_000_000_000_000n,
+    }
+    const out = stringifyMarketEvent(e)
+    const parsed = JSON.parse(out)
+    expect(parsed.buyerAmount).toBe('2000000000000000')
+    expect(parsed.providerAmount).toBe('3000000000000000')
+  })
+
+  test('plain JSON.stringify throws on the same shape (regression guard)', () => {
+    const e = { kind: 'created', jobId: 16n, amount: 1n }
+    expect(() => JSON.stringify(e)).toThrow(/BigInt/)
+    expect(() => JSON.stringify({ ...e, jobId: e.jobId.toString() })).toThrow(/BigInt/)
+    // proves stringifyMarketEvent is strictly required for these shapes
+    expect(() => stringifyMarketEvent(e)).not.toThrow()
   })
 })
