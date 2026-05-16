@@ -4,7 +4,7 @@ First fully on-chain sovereign agent harness on 0G.
 
 Anima is a CLI-hosted agent harness where the agent's identity, memory, reasoning, wallet, and economic life all live on 0G's decentralized infrastructure. Operator runs `anima init` once. After that, the agent persists on chain. Close the laptop, walk away, the agent survives. Any operator machine can re-attach via the iNFT.
 
-The pitch in one line: Hermes, OpenClaw, and Claude Code are always-on daemons on your machine. Anima is a serverless agent on decentralized infrastructure. The agent is an iNFT plus a Storage namespace, only wakes on a trigger, survives operator death.
+The pitch in one line: Hermes, OpenClaw, and Claude Code can all run on a VPS, but the agent is still a process tied to one server. Anima makes the agent itself an on-chain entity. The agent is an iNFT plus a Storage namespace, only wakes on a trigger, survives operator death.
 
 Full documentation: [anima.s0nderlabs.xyz/docs](https://anima.s0nderlabs.xyz/docs)
 Operator console: [anima.s0nderlabs.xyz/console](https://anima.s0nderlabs.xyz/console)
@@ -20,7 +20,7 @@ Operator console: [anima.s0nderlabs.xyz/console](https://anima.s0nderlabs.xyz/co
 
 Submitted to the **0G APAC Hackathon** (May 16 2026), Track 1 (Agentic Infrastructure and OpenClaw Lab). Secondary fit: Track 3 (Agentic Economy and Autonomous Applications).
 
-**Repo activity during hackathon window** (registration opened Mar 19 2026): 158 commits, 118 versioned releases (v0.1.0 on Apr 24 2026 to v0.24.10 on May 15 2026), 7 published `@s0nderlabs/anima-*` workspace packages, all built during this window. See [npm](https://www.npmjs.com/~s0nderlabs) or [GitHub Releases](https://github.com/s0nderlabs/anima/releases) for the latest.
+**Repo activity during hackathon window** (registration opened Mar 19 2026): 165 commits, 124 versioned releases (v0.1.0 on Apr 24 2026 to v0.24.16 on May 16 2026), 7 published `@s0nderlabs/anima-*` workspace packages, all built during this window. See [npm](https://www.npmjs.com/~s0nderlabs) or [GitHub Releases](https://github.com/s0nderlabs/anima/releases) for the latest.
 
 **Verify on chain in 30 seconds** (no install required, just [foundry](https://getfoundry.sh)):
 
@@ -125,7 +125,7 @@ The HackQuest spec accepts five sponsor-eligible components: **0G Storage, 0G Co
 |---|---|---|
 | **0G Chain** | Identity, A2A messaging, and marketplace contracts deployed on mainnet (chainId 16661) via CREATE2. Per-turn memory sync emits an `updateSlots` tx anchoring the iNFT's 6 IntelligentData slots. | Live bytecode confirmed on chain (`eth_getCode` returns 8345 bytes for the iNFT, 4559 for AnimaMarket, 1640 for the SubnameRegistrar, 560 for AnimaInbox). Addresses canonical at [`packages/core/src/identity/deployments.ts`](packages/core/src/identity/deployments.ts). |
 | **0G Storage** | Encrypted agent keystore plus memory blobs, root hashes anchored in the iNFT's IntelligentData slots. The v0.24.0 packed-blob envelope wraps every file under `memory/agent/` (slot 0) and `memory/user/` (slot 3) into one encrypted partition blob per slot. Operators no longer lose files on reprovision, cross-device handoff, or iNFT transfer. Indexer-degraded path falls through to direct discovered-nodes fetch. | [`packages/core/src/storage/og.ts`](packages/core/src/storage/og.ts) (`downloadBlobByRoot`, `downloadBlobViaDiscoveredNodes`), [`packages/core/src/memory/pack-blob.ts`](packages/core/src/memory/pack-blob.ts) (envelope encode/decode plus 19 round-trip unit tests). |
-| **0G Compute** | Brain inference via `@0glabs/0g-serving-broker` SDK in TeeML mode. No hardcoded model default; `anima init` fetches the live 0G Compute catalog via `OGComputeBrain.listServicesFor()` and asks the operator to pick. GLM-5 was the catalog flagship through Q1 2026; Qwen3.6 took over after. Prompt-caching observed live across multi-turn sessions (`cached_tokens: 1408` on 4 sequential turns of a verified mainnet session). | [`packages/core/src/brain/og-compute.ts`](packages/core/src/brain/og-compute.ts), [`packages/cli/src/commands/init/model-picker.ts`](packages/cli/src/commands/init/model-picker.ts). Recorded session (2026-04-23, model picked: `zai-org/GLM-5-FP8`) hit mainnet provider `0xd9966e13a6026Fcca4b13E7ff95c94DE268C471C` with 6 HTTP 200 calls on chainId 16661, agent EOA balance moved 8.54 to 5.54 0G (3.003 0G spent). |
+| **0G Compute** | Brain inference via `@0glabs/0g-serving-broker` SDK in TeeML mode. No hardcoded model default; `anima init` fetches the live 0G Compute catalog via `OGComputeBrain.listServicesFor()` and asks the operator to pick. GLM-5 was the catalog flagship through Q1 2026; Qwen3.6 took over after. Prompt-caching observed live across multi-turn sessions (`cached_tokens: 1408` on 4 sequential turns of a verified mainnet session). | [`packages/core/src/brain/og-compute.ts`](packages/core/src/brain/og-compute.ts), [`packages/cli/src/commands/init/model-picker.ts`](packages/cli/src/commands/init/model-picker.ts). Recorded session (2026-04-23, model picked: `zai-org/GLM-5-FP8`) hit mainnet provider `0xd9966e13a6026Fcca4b13E7ff95c94DE268C471C` with 6 HTTP 200 calls on chainId 16661, agent EOA balance moved 8.54 to 5.54 0G (3.003 0G spent). Current live mainnet agents (specter token #4, enigma token #6) run `Qwen3.6-plus`, picked by their operator at init from the same catalog. |
 | **Agent ID (ERC-7857)** | `AnimaAgentNFT` (symbol `ANIMA`) deployed on mainnet. Six IntelligentData slots: memory-index, identity, persona, profile, keystore, activity-log. Slot 3 (profile) uses operator-scoped HKDF-SHA256 plus AES-256-GCM and cryptographically purges on `iTransferFrom`; agent-scoped slots re-encrypt for the new owner via the TEE oracle. | Foundry project at [`contracts/`](contracts/). On-chain client at [`packages/core/src/identity/contract.ts`](packages/core/src/identity/contract.ts). Live mint count via `cast call ... totalSupply()` (snippet in the For-Judges block above). |
 | **Privacy / secure execution** | TeeML attested inference at the Compute layer (every brain call lands inside the provider's TEE enclave). Optional TDX TEE harness on 0G Sandbox (Galileo testnet today; 0G's Sandbox mainnet has not yet launched, so the hybrid model puts identity, wallet, Storage, and Compute on mainnet while the optional persistent container lives on Galileo). All operator key material derives from `signTypedData` and never leaves the wallet's signature surface; the operator console performs every memory decryption inside the tab. | [`packages/core/src/og-sandbox/`](packages/core/src/og-sandbox/), [`apps/web/lib/crypto/`](apps/web/lib/crypto/), [`packages/core/src/memory/pack-blob.ts`](packages/core/src/memory/pack-blob.ts). |
 
@@ -224,7 +224,7 @@ Structural sandbox is a separate floor under `sandbox.mode`: `none` (default, pa
 
 ## Packages
 
-Seven workspace packages, all published as `@s0nderlabs/anima-*` at the same version (changesets fixed group). Current: v0.24.10.
+Seven workspace packages, all published as `@s0nderlabs/anima-*` at the same version (changesets fixed group). Current: v0.24.16.
 
 | Dir | npm |
 |---|---|
@@ -304,7 +304,7 @@ Testing rules and integration scripts live under `test/local/`. The `/e2e` skill
 
 ## Status
 
-Pre-alpha. Hackathon build, target the 0G APAC Hackathon (May 16 2026). Current release: v0.24.10.
+Pre-alpha. Hackathon build, target the 0G APAC Hackathon (May 16 2026). Current release: v0.24.16.
 
 ## License
 
