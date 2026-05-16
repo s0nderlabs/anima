@@ -346,7 +346,7 @@ export async function runChatSandbox(
   const eventSignal = new AbortController()
   const eventLoop = (async () => {
     try {
-      for await (const ev of client.events({ signal: eventSignal.signal })) {
+      for await (const ev of client.events({ signal: eventSignal.signal, clientKind: 'tui' })) {
         renderEvent(ev.kind, ev.data)
       }
     } catch (err) {

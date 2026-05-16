@@ -37,9 +37,24 @@ export interface GatewayEvent {
 
 export type Subscriber = (event: GatewayEvent) => void
 
+/**
+ * v0.24.14: subscriber kind so EventHub can distinguish a live operator TUI
+ * (chat.tsx attached to the daemon) from passive dashboards (/console web UI,
+ * anima-launch viewer, monitoring scrapers). The TG forward gate in
+ * build-runtime.ts only needs to know "is the operator actually watching",
+ * not "is anyone polling events." `tui` clients block TG forwarding;
+ * `dashboard` and `other` do not.
+ */
+export type SubscriberKind = 'tui' | 'dashboard' | 'other'
+
+interface SubEntry {
+  fn: Subscriber
+  kind: SubscriberKind
+}
+
 export class EventHub {
   #seq = 0
-  #subs = new Set<Subscriber>()
+  #subs = new Set<SubEntry>()
   #buffer: GatewayEvent[] = []
   #bufferLimit: number
 
@@ -52,9 +67,9 @@ export class EventHub {
     const event: GatewayEvent = { seq: this.#seq, kind, ts: Date.now(), data }
     this.#buffer.push(event)
     if (this.#buffer.length > this.#bufferLimit) this.#buffer.shift()
-    for (const sub of this.#subs) {
+    for (const entry of this.#subs) {
       try {
-        sub(event)
+        entry.fn(event)
       } catch {
         // never let one slow subscriber block the bus
       }
@@ -62,21 +77,37 @@ export class EventHub {
     return event
   }
 
-  /** Subscribe; returns unsubscribe fn. Optionally replay since last-event-id. */
-  subscribe(sub: Subscriber, sinceSeq?: number): () => void {
+  /**
+   * Subscribe; returns unsubscribe fn. Optionally replay since last-event-id.
+   * `kind` (v0.24.14) defaults to `other` so existing callers behave as
+   * before. The TG forward gate only checks for `tui` subscribers; passing
+   * `dashboard` for /console-style web clients lets the gate fire even when
+   * a dashboard tab is open.
+   */
+  subscribe(sub: Subscriber, sinceSeq?: number, kind: SubscriberKind = 'other'): () => void {
     if (typeof sinceSeq === 'number') {
       for (const e of this.#buffer) {
         if (e.seq > sinceSeq) sub(e)
       }
     }
-    this.#subs.add(sub)
+    const entry: SubEntry = { fn: sub, kind }
+    this.#subs.add(entry)
     return () => {
-      this.#subs.delete(sub)
+      this.#subs.delete(entry)
     }
   }
 
   size(): number {
     return this.#subs.size
+  }
+
+  /** v0.24.14: count subscribers of a specific kind. */
+  sizeOfKind(kind: SubscriberKind): number {
+    let n = 0
+    for (const entry of this.#subs) {
+      if (entry.kind === kind) n += 1
+    }
+    return n
   }
 
   lastSeq(): number {

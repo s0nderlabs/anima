@@ -52,4 +52,38 @@ describe('EventHub', () => {
     hub.publish('log', { msg: 'a' })
     expect(got.length).toBe(1)
   })
+
+  test('sizeOfKind tracks tagged subscribers independently (v0.24.14)', () => {
+    const hub = new EventHub()
+    expect(hub.sizeOfKind('tui')).toBe(0)
+    expect(hub.sizeOfKind('dashboard')).toBe(0)
+    expect(hub.sizeOfKind('other')).toBe(0)
+
+    const unsubA = hub.subscribe(() => {}, undefined, 'tui')
+    const unsubB = hub.subscribe(() => {}, undefined, 'dashboard')
+    const unsubC = hub.subscribe(() => {}, undefined, 'dashboard')
+    const unsubD = hub.subscribe(() => {})
+
+    expect(hub.size()).toBe(4)
+    expect(hub.sizeOfKind('tui')).toBe(1)
+    expect(hub.sizeOfKind('dashboard')).toBe(2)
+    expect(hub.sizeOfKind('other')).toBe(1)
+
+    unsubA()
+    expect(hub.sizeOfKind('tui')).toBe(0)
+    expect(hub.sizeOfKind('dashboard')).toBe(2)
+
+    unsubB()
+    unsubC()
+    unsubD()
+    expect(hub.size()).toBe(0)
+  })
+
+  test('subscribe defaults kind to "other" for back-compat (v0.24.14)', () => {
+    const hub = new EventHub()
+    hub.subscribe(() => {})
+    expect(hub.sizeOfKind('other')).toBe(1)
+    expect(hub.sizeOfKind('tui')).toBe(0)
+    expect(hub.sizeOfKind('dashboard')).toBe(0)
+  })
 })

@@ -825,16 +825,17 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
         durationMs,
         summary: summarizeToolResult(result),
       })
-      // v0.24.12: forward clarify questions to Telegram operators when no
-      // TUI is connected. Without this the question lands only in
-      // activity-log on autonomous market wakes and TG-only operators
-      // never see it. `events.size()` is exactly the count of live SSE
-      // subscribers (chat.tsx, anima-launch UI, etc.) per gateway/server.ts
-      // line 77; the TG listener does NOT subscribe. Zero subscribers ⇒
-      // no eyes on the TUI ⇒ forward to TG.
+      // v0.24.12+v0.24.14: forward clarify questions to Telegram operators
+      // when no live TUI is connected. v0.24.12 originally gated on
+      // `events.size() === 0` (no SSE subscribers at all) but in practice
+      // /console + anima-launch dashboards hold persistent SSE
+      // connections, so the gate never fired. v0.24.14 swaps to
+      // `events.sizeOfKind("tui") === 0`: chat.tsx tags itself `tui` on
+      // subscribe, web dashboards tag themselves `dashboard`. Only a
+      // missing TUI triggers TG forwarding now.
       if (call.name === 'clarify' && result.ok !== false) {
         const tgNotify = telegramOperatorNotifier.current
-        if (tgNotify && events.size() === 0) {
+        if (tgNotify && events.sizeOfKind('tui') === 0) {
           const question = extractClarifyQuestion(effectiveCall.args)
           if (question) {
             void tgNotify(question).catch(err => {

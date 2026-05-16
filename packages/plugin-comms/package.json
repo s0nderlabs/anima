@@ -1,6 +1,6 @@
 {
   "name": "@s0nderlabs/anima-plugin-comms",
-  "version": "0.24.13",
+  "version": "0.24.14",
   "type": "module",
   "description": "A2A messaging (AnimaInbox) + ERC-8183 marketplace plugin for anima",
   "license": "MIT",

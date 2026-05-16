@@ -9,7 +9,7 @@ import {
   verifyChatSig,
   verifyProvisionSig,
 } from './auth'
-import type { EventHub, GatewayEvent } from './events'
+import type { EventHub, GatewayEvent, SubscriberKind } from './events'
 import type { RuntimeConfig } from './runtime'
 import { type GatewaySession, transitionToProvisioned, transitionToReady } from './state'
 
@@ -57,11 +57,31 @@ async function readJson(req: http.IncomingMessage, maxBytes = 256 * 1024): Promi
   })
 }
 
+/**
+ * v0.24.14: parse `?client=tui|dashboard|other` from a /events URL. Anything
+ * unrecognized falls through to `other`. Used to tag SSE subscribers so the
+ * TG forward gate in build-runtime.ts can distinguish operator TUIs from
+ * passive web dashboards.
+ */
+function parseClientKind(url: string): SubscriberKind {
+  const q = url.indexOf('?')
+  if (q < 0) return 'other'
+  const params = new URLSearchParams(url.slice(q + 1))
+  const raw = params.get('client')
+  if (raw === 'tui' || raw === 'dashboard' || raw === 'other') return raw
+  return 'other'
+}
+
 function ssePayload(event: GatewayEvent): string {
   return `id: ${event.seq}\nevent: ${event.kind}\ndata: ${JSON.stringify({ ts: event.ts, data: event.data })}\n\n`
 }
 
-function attachSse(res: http.ServerResponse, hub: EventHub, sinceSeq?: number): () => void {
+function attachSse(
+  res: http.ServerResponse,
+  hub: EventHub,
+  sinceSeq?: number,
+  clientKind: SubscriberKind = 'other',
+): () => void {
   res.writeHead(200, {
     'content-type': 'text/event-stream',
     'cache-control': 'no-cache, no-transform',
@@ -74,9 +94,13 @@ function attachSse(res: http.ServerResponse, hub: EventHub, sinceSeq?: number): 
   }, 15_000)
   heartbeat.unref?.()
 
-  const unsub = hub.subscribe(event => {
-    if (!res.writableEnded) res.write(ssePayload(event))
-  }, sinceSeq)
+  const unsub = hub.subscribe(
+    event => {
+      if (!res.writableEnded) res.write(ssePayload(event))
+    },
+    sinceSeq,
+    clientKind,
+  )
 
   const cleanup = (): void => {
     clearInterval(heartbeat)
@@ -147,7 +171,12 @@ export function createGatewayServer(deps: ServerDeps): http.Server {
       if (method === 'GET' && (url === '/events' || url.startsWith('/events?'))) {
         const sinceHeader = req.headers['last-event-id']
         const sinceSeq = sinceHeader ? Number.parseInt(String(sinceHeader), 10) : undefined
-        attachSse(res, session.events, Number.isFinite(sinceSeq) ? sinceSeq : undefined)
+        // v0.24.14: accept `?client=tui|dashboard|other` so the daemon can
+        // distinguish a live operator TUI from passive web dashboards.
+        // Default is `other` (back-compat: pre-v0.24.14 clients keep
+        // existing semantics, and the TG forward gate only blocks on `tui`).
+        const clientKind = parseClientKind(url)
+        attachSse(res, session.events, Number.isFinite(sinceSeq) ? sinceSeq : undefined, clientKind)
         return
       }
 

@@ -340,17 +340,25 @@ export class SandboxClient {
    * Cancel via the AbortSignal in opts.
    */
   async *events(
-    opts: { signal?: AbortSignal; sinceSeq?: number } = {},
+    opts: {
+      signal?: AbortSignal
+      sinceSeq?: number
+      clientKind?: 'tui' | 'dashboard' | 'other'
+    } = {},
   ): AsyncGenerator<ParsedSseEvent> {
     let lastSeq = opts.sinceSeq
     const signal = opts.signal
+    // v0.24.14: tag subscriber kind so the daemon's TG forward gate can
+    // distinguish a live operator TUI from passive web dashboards.
+    // Default `other` keeps back-compat for callers that don't set it.
+    const clientKind = opts.clientKind ?? 'other'
     while (true) {
       if (signal?.aborted) return
       const headers: Record<string, string> = { accept: 'text/event-stream' }
       if (typeof lastSeq === 'number') headers['last-event-id'] = String(lastSeq)
       let res: Response
       try {
-        res = await this.#fetch(`${this.endpoint}/events`, { headers, signal })
+        res = await this.#fetch(`${this.endpoint}/events?client=${clientKind}`, { headers, signal })
       } catch {
         if (signal?.aborted) return
         await new Promise(resolve => setTimeout(resolve, 1000))

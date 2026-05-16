@@ -4,6 +4,18 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.14] - 2026-05-16
+
+### Fixed
+
+- **v0.24.12 TG forward gate `events.size() === 0` never fired in practice.** Observed live May 16 2026 ~15:15 WIB: enigma v0.24.13 brain correctly called `clarify` on a `JobCreated` autonomous wake (job#9), question landed inline in the TUI, but the TG fallback path stayed silent. Root cause: any open SSE client holds the count at ≥1 — operator's /console at `anima.s0nderlabs.xyz/console/<id>`, anima-launch HyperFrames Studio, monitoring scrapers, stale-but-not-yet-timed-out connections. Bare count can't distinguish "TUI alive" from "dashboard tab left open." Fix: tag SSE subscribers at subscribe time. `EventHub.subscribe(fn, sinceSeq, kind)` now accepts a `SubscriberKind` (`tui` | `dashboard` | `other`, default `other`). New `EventHub.sizeOfKind(kind)` counts a single kind. Gateway `/events` endpoint parses `?client=...` query param via `parseClientKind`; `attachSse` threads it through. CLI sandbox client `client.events({clientKind})` opt + `chat-sandbox.tsx` passes `clientKind: 'tui'`. Build-runtime forward gate now reads `events.sizeOfKind('tui') === 0`, so dashboards and other passive subscribers don't suppress the TG fallback. 2 new EventHub tests cover tagged-count tracking + default-`other` back-compat.
+
+### Tests
+
+- Full repo: 1276/1276 unit tests pass, typecheck clean, biome clean.
+
+[0.24.14]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.14
+
 ## [0.24.13] - 2026-05-16
 
 ### Fixed
