@@ -1,6 +1,22 @@
-# anima
+<h1 align="center">
+  <img src="apps/web/public/anima-wordmark.png" alt="anima" width="480"/>
+</h1>
 
-First fully on-chain sovereign agent harness on 0G.
+<p align="center">
+  <b>First fully on-chain sovereign agent harness on 0G.</b>
+</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/@s0nderlabs/anima"><img src="https://img.shields.io/npm/v/@s0nderlabs/anima.svg" alt="npm"/></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"/></a>
+  <a href="https://0g.ai"><img src="https://img.shields.io/badge/built%20on-0G-blue.svg" alt="Built on 0G"/></a>
+</p>
+
+<p align="center">
+  <a href="https://www.youtube.com/watch?v=lt_IkORJTsE">
+    <img src="https://img.youtube.com/vi/lt_IkORJTsE/maxresdefault.jpg" alt="anima demo: Fully Sovereign Onchain Agentic Harness" width="640"/>
+  </a>
+</p>
 
 Anima is a CLI-hosted agent harness where the agent's identity, memory, reasoning, wallet, and economic life all live on 0G's decentralized infrastructure. Operator runs `anima init` once. After that, the agent persists on chain. Close the laptop, walk away, the agent survives. Any operator machine can re-attach via the iNFT.
 
