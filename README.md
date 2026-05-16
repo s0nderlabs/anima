@@ -20,7 +20,7 @@
 </p>
 
 <p align="center">
-  <sub><a href="https://www.youtube.com/watch?v=lt_IkORJTsE">Watch on YouTube</a></sub>
+  <sub><a href="https://www.youtube.com/watch?v=lt_IkORJTsE">Watch demo on YouTube</a></sub>
 </p>
 
 Anima is a CLI-hosted agent harness where the agent's identity, memory, reasoning, wallet, and economic life all live on 0G's decentralized infrastructure. Operator runs `anima init` once. After that, the agent persists on chain. Close the laptop, walk away, the agent survives. Any operator machine can re-attach via the iNFT.
