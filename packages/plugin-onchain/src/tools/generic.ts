@@ -18,6 +18,7 @@ import {
   getAddress,
   parseAbiItem,
   parseAbiParameters,
+  parseEther,
 } from 'viem'
 import { z } from 'zod'
 import type { OnchainRuntimeContext } from '../types'
@@ -123,9 +124,22 @@ const WriteSchema = z.object({
   to: z.string().min(42),
   signature: z.string().min(1),
   args: z.array(z.unknown()).optional(),
-  value: z.string().optional().describe('Native value to send in wei (decimal string).'),
+  value: z
+    .string()
+    .optional()
+    .describe(
+      'Native value to send. Accepts decimal 0G ("0.0001") OR wei integer ("100000000000000").',
+    ),
 })
 type WriteArgs = z.infer<typeof WriteSchema>
+
+function parseChainWriteValue(raw: string): bigint {
+  const trimmed = raw.trim()
+  if (trimmed.includes('.')) {
+    return parseEther(trimmed as `${number}`)
+  }
+  return BigInt(trimmed)
+}
 
 export function makeChainWrite(ctx: OnchainRuntimeContext): ToolDef<WriteArgs> {
   return {
@@ -144,7 +158,7 @@ export function makeChainWrite(ctx: OnchainRuntimeContext): ToolDef<WriteArgs> {
           abi: [fn] as readonly [import('viem').AbiFunction],
           args: coerced,
         })
-        const value = args.value ? BigInt(args.value) : 0n
+        const value = args.value ? parseChainWriteValue(args.value) : 0n
         const gasPrice = await getGasPriceWithFloor(ctx.publicClient)
         const txHash = await ctx.walletClient.sendTransaction({
           to: getAddress(args.to) as Address,

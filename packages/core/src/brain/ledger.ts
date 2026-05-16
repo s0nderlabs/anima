@@ -1,6 +1,6 @@
 import { createZGComputeNetworkBroker } from '@0glabs/0g-serving-broker'
 import { Contract, JsonRpcProvider, Wallet } from 'ethers'
-import type { Address, Hex } from 'viem'
+import { type Address, type Hex, parseEther } from 'viem'
 import { type AnimaNetwork, NETWORK_RPC } from '../config'
 
 /**
@@ -151,6 +151,29 @@ export async function depositToLedger(opts: {
 }): Promise<void> {
   const broker = await makeBroker(opts.network, opts.privkeyHex)
   await broker.ledger.depositFund(opts.amount)
+}
+
+/**
+ * Transfer `amount` 0G from the agent's main ledger (already opened + funded
+ * via depositToLedger) into a specific provider sub-account. The 0G Compute
+ * SDK requires per-provider sub-accounts; the init wizard only seeds the
+ * inference provider, so vision.analyze fails on fresh agents with
+ * "Sub-account not found" until a separate transfer lands.
+ *
+ * `serviceType` is `'inference'` because the SDK uses one bucket for all
+ * provider envelopes regardless of which model sits behind them.
+ */
+export async function transferFundToProvider(opts: {
+  network: AnimaNetwork
+  privkeyHex: Hex
+  /** 0x address of the provider whose sub-account to seed. */
+  provider: Address
+  /** Amount in 0G (floating point), converted to wei internally. */
+  amount: number
+}): Promise<void> {
+  const broker = await makeBroker(opts.network, opts.privkeyHex)
+  const amountWei = parseEther(opts.amount.toString() as `${number}`)
+  await broker.ledger.transferFund(opts.provider, 'inference', amountWei)
 }
 
 export interface ProviderSubAccount {

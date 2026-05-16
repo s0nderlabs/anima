@@ -4,6 +4,31 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.17] - 2026-05-17
+
+### Fixed
+
+- **`chain.send` now accepts `.anima.0g` subnames** as the recipient (was rejected by `min(42)` schema). Resolves via a new `resolveSubnameAddress(client, label)` helper in `@s0nderlabs/anima-core/naming/sann.ts` that reads the `address` text record from the SANN resolver. 0x address path unchanged.
+- **`chain.write` now accepts decimal `value` strings** (`"0.0001"`) in addition to wei integers. Previously threw `Failed to parse String to BigInt` on any decimal input. Decimal detection is by `.` so hex wei (`0xde0b...`) still routes through `BigInt` unchanged.
+- **`anima gateway stop` prints the target subname + EOA + config path** before issuing SIGTERM when `--agent` is not passed (preventing the "killed wrong daemon" hazard observed during the May 16 2026 multi-agent test).
+- **Gateway runtime safety-net interval** re-fires both drain queues every 30s. Defense against the wake-collapse symptom where 11 wakes queued for 14 minutes without any brain inference until manual restart. Drains keep their existing single-flight guards so the scan is a no-op when queues are empty.
+- **Frozen-prefix multi-tool fidelity guidance** explicitly requires one tool call per requested action when the operator's prompt enumerates N steps. Prompt-only nudge for qwen3.6-plus; cannot guarantee model behavior but reduces single-pass result narration.
+- **TUI status bar + telegram-step save message** now display the actual on-disk path (via `agentPaths.agent(id).dir`) instead of hardcoded `~/.anima/agents/<id>/...`. Output now respects `ANIMA_ROOT`.
+
+### Added
+
+- **`anima topup --vision N`** seeds the 0G Compute vision provider sub-account, fixing the fresh-agent `vision.analyze` / `browser.vision` "Sub-account not found" failure. Wraps the new `transferFundToProvider` core export. Mainnet only.
+- **Subname injection into seeded `agent/identity.md` + `agent/persona.md`** at init time so agents introduce themselves by their `.anima.0g` name (e.g. "I am chou") instead of the generic "I am Anima" template. Backward-compatible: agents without a subname still seed with the unchanged template.
+- **`SANN_SUFFIX = '.anima.0g'`** constant exported from `@s0nderlabs/anima-core` for use by any tool that resolves SANN names.
+
+### Tests
+
+- 2562/2562 unit tests pass, typecheck clean.
+- Live verified on chou (local, iNFT #16 mainnet) across TUI + TG + `/chat` HTTP surfaces.
+- Specter (iNFT #4, mainnet) + enigma (iNFT #6, sandbox) untouched throughout.
+
+[0.24.17]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.17
+
 ## [0.24.16] - 2026-05-16
 
 ### Changed

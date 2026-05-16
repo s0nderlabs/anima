@@ -40,6 +40,16 @@ export async function runGatewayStop(opts: GatewayStopOpts): Promise<void> {
     const contractAddress = getAddress(found.config.identity.iNFT!.contract as Address)
     const tokenId = BigInt(found.config.identity.iNFT!.tokenId)
     agentId = iNFTAgentId({ contractAddress, tokenId })
+    const subname = found.config.subname ?? null
+    const agentEoa = (found.config.identity?.agent as string | undefined) ?? null
+    const label = subname ? `${subname}.anima.0g` : `agent ${agentId.slice(0, 8)}…`
+    const eoaLabel = agentEoa ? ` (EOA ${agentEoa.slice(0, 6)}…${agentEoa.slice(-4)})` : ''
+    const configPath = found.path ?? '<unknown>'
+    console.log(`anima gateway stop → ${label}${eoaLabel}`)
+    console.log(`  config: ${configPath}`)
+    console.log(
+      '  if this is not the agent you meant, set ANIMA_ROOT or pass --agent <id> before re-running.',
+    )
   }
   const lockFile = findGatewayLock(agentId)
   if (!lockFile) {
