@@ -31,7 +31,7 @@ const Schema = z.object({
 })
 type Args = z.infer<typeof Schema>
 
-async function resolveRecipient(to: string, publicClient: PublicClient): Promise<Address> {
+export async function resolveRecipient(to: string, publicClient: PublicClient): Promise<Address> {
   const trimmed = to.trim()
   if (isAddress(trimmed)) return getAddress(trimmed) as Address
   if (trimmed.endsWith(SANN_SUFFIX)) {

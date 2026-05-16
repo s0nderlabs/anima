@@ -444,22 +444,6 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
     return
   }
 
-  // Phase 6.7: seed canonical memory starter files so identity / persona /
-  // profile slots can land on chain on the first chat turn. Without this the
-  // sync manager has nothing to anchor for those slots and they stay
-  // bootstrap-placeholder forever (gap discovered during stress test).
-  await seedStarterMemoryFiles({
-    paths,
-    network,
-    contractAddress: contractAddress!,
-    tokenId: mintedTokenId!,
-    agentAddress: agent.address as Address,
-    operatorAddress,
-    brainProvider: modelPick?.provider ?? null,
-    brainModel: modelPick?.model ?? null,
-    subname: requestedSubname || null,
-  })
-
   // v0.23.1: cache the operator scope keys to `.operator-session` so:
   //   - First `anima` chat does NOT re-prompt Touch ID (`gateway-start` will
   //     find both keystore + profile scopes already cached and skip
@@ -546,6 +530,25 @@ export async function runInit(opts?: { cwd?: string; resume?: boolean }): Promis
       sSub.stop(`subname registration failed: ${(e as Error).message.slice(0, 120)}`)
     }
   }
+
+  // v0.24.17: seed canonical memory starter files AFTER the SANN claim resolves
+  // so identity.md + persona.md reflect the VERIFIED subname, not the operator's
+  // intent. If the claim races or reverts, registeredSubname stays null and the
+  // seed falls back to the generic "I am anima" template. Prior to v0.24.17 the
+  // seed ran before the claim with `requestedSubname`, so a failed claim left
+  // the agent confidently anchoring "I am chou" on slots 1+2 during the first
+  // chat turn even though chain disagreed.
+  await seedStarterMemoryFiles({
+    paths,
+    network,
+    contractAddress: contractAddress!,
+    tokenId: mintedTokenId!,
+    agentAddress: agent.address as Address,
+    operatorAddress,
+    brainProvider: modelPick?.provider ?? null,
+    brainModel: modelPick?.model ?? null,
+    subname: registeredSubname,
+  })
 
   // v0.24.4: Phase E (Telegram bot setup) MUST run before Phase 11 (sandbox
   // provision) so the sandbox handoff envelope can ship `telegram-secrets`

@@ -133,7 +133,7 @@ const WriteSchema = z.object({
 })
 type WriteArgs = z.infer<typeof WriteSchema>
 
-function parseChainWriteValue(raw: string): bigint {
+export function parseChainWriteValue(raw: string): bigint {
   const trimmed = raw.trim()
   if (trimmed.includes('.')) {
     return parseEther(trimmed as `${number}`)

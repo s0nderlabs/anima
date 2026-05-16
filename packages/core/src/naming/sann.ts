@@ -5,6 +5,7 @@ import {
   type PublicClient,
   type WalletClient,
   encodeAbiParameters,
+  getAddress,
   keccak256,
   pad,
   stringToBytes,
@@ -139,7 +140,7 @@ export async function resolveSubnameAddress(
   })) as string
   if (!raw) return null
   try {
-    return raw as Address
+    return getAddress(raw)
   } catch {
     return null
   }

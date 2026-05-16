@@ -41,7 +41,7 @@ Operator console: [anima.s0nderlabs.xyz/console](https://anima.s0nderlabs.xyz/co
 
 Submitted to the **0G APAC Hackathon** (May 16 2026), Track 1 (Agentic Infrastructure and OpenClaw Lab). Secondary fit: Track 3 (Agentic Economy and Autonomous Applications).
 
-**Repo activity during hackathon window** (registration opened Mar 19 2026): 165 commits, 124 versioned releases (v0.1.0 on Apr 24 2026 to v0.24.16 on May 16 2026), 7 published `@s0nderlabs/anima-*` workspace packages, all built during this window. See [npm](https://www.npmjs.com/~s0nderlabs) or [GitHub Releases](https://github.com/s0nderlabs/anima/releases) for the latest.
+**Repo activity during hackathon window** (registration opened Mar 19 2026): 166+ commits, 125 versioned releases (v0.1.0 on Apr 24 2026 through v0.24.17 on May 17 2026), 7 published `@s0nderlabs/anima-*` workspace packages, all built during this window. The May 16 2026 submission was v0.24.16; v0.24.17 is a post-deadline polish release with no behavior change to the demo path. See [npm](https://www.npmjs.com/~s0nderlabs) or [GitHub Releases](https://github.com/s0nderlabs/anima/releases) for the latest.
 
 **Verify on chain in 30 seconds** (no install required, just [foundry](https://getfoundry.sh)):
 
@@ -246,7 +246,7 @@ Structural sandbox is a separate floor under `sandbox.mode`: `none` (default, pa
 
 ## Packages
 
-Seven workspace packages, all published as `@s0nderlabs/anima-*` at the same version (changesets fixed group). Current: v0.24.16.
+Seven workspace packages, all published as `@s0nderlabs/anima-*` at the same version (changesets fixed group). Current: v0.24.17.
 
 | Dir | npm |
 |---|---|
@@ -326,7 +326,7 @@ Testing rules and integration scripts live under `test/local/`. The `/e2e` skill
 
 ## Status
 
-Pre-alpha. Hackathon build, target the 0G APAC Hackathon (May 16 2026). Current release: v0.24.16.
+Pre-alpha. Hackathon build, target the 0G APAC Hackathon (May 16 2026). Current release: v0.24.17 (post-deadline polish; v0.24.16 was the submitted version, demo video link still points at the v0.24.16 release asset above).
 
 ## License
 

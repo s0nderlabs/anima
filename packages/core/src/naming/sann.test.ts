@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test'
-import { SANN_ADDRESSES, sannNamehash, subnameNode } from './sann'
+import type { PublicClient } from 'viem'
+import { SANN_ADDRESSES, resolveSubnameAddress, sannNamehash, subnameNode } from './sann'
+
+const SPECTER_EOA = '0x1e930c1647EaB93651FD94e760E0cbbb5F4FC99f'
+
+function fakeClient(textReturn: string): Partial<PublicClient> {
+  return {
+    readContract: async () => textReturn,
+  } as Partial<PublicClient>
+}
 
 describe('sann namehash', () => {
   test('baseNode for 0g matches on-chain readout', () => {
@@ -20,5 +29,45 @@ describe('sann namehash', () => {
 
   test('different labels produce different subname nodes', () => {
     expect(subnameNode('alice')).not.toBe(subnameNode('bob'))
+  })
+})
+
+describe('resolveSubnameAddress', () => {
+  test('empty label short-circuits to null', async () => {
+    const r = await resolveSubnameAddress(fakeClient('') as PublicClient, '')
+    expect(r).toBeNull()
+  })
+
+  test('empty resolver text record returns null', async () => {
+    const r = await resolveSubnameAddress(fakeClient('') as PublicClient, 'alice')
+    expect(r).toBeNull()
+  })
+
+  test('valid checksummed address returned as Address', async () => {
+    const r = await resolveSubnameAddress(fakeClient(SPECTER_EOA) as PublicClient, 'alice')
+    expect(r).toBe(SPECTER_EOA)
+  })
+
+  test('lowercase address is checksum-corrected by getAddress', async () => {
+    const r = await resolveSubnameAddress(
+      fakeClient(SPECTER_EOA.toLowerCase()) as PublicClient,
+      'alice',
+    )
+    expect(r).toBe(SPECTER_EOA)
+  })
+
+  test('malformed hex returns null (getAddress throws, caught)', async () => {
+    const r = await resolveSubnameAddress(fakeClient('0xZZZZ') as PublicClient, 'alice')
+    expect(r).toBeNull()
+  })
+
+  test('non-hex garbage returns null (getAddress throws, caught)', async () => {
+    const r = await resolveSubnameAddress(fakeClient('not-an-address') as PublicClient, 'alice')
+    expect(r).toBeNull()
+  })
+
+  test('truncated 0x-prefixed string returns null', async () => {
+    const r = await resolveSubnameAddress(fakeClient('0xdeadbeef') as PublicClient, 'alice')
+    expect(r).toBeNull()
   })
 })
