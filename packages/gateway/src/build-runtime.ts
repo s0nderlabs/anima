@@ -540,6 +540,11 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
   let telegramPendingApprovals: Map<string, (choice: ApprovalChoiceKind) => void> | null = null
   let telegramApprovalIdFactory: (() => string) | null = null
   let telegramApprovalBridge: TelegramApprovalBridge | null = null
+  // v0.24.12: slot the TG listener fills on start with a broadcast method;
+  // gateway calls it on clarify tool calls when no TUI is connected.
+  const telegramOperatorNotifier: { current: ((text: string) => Promise<void>) | null } = {
+    current: null,
+  }
   if (opts.secrets?.telegram && pluginNames.includes('telegram')) {
     const tg = opts.secrets.telegram
     telegramDispatchSlot = { current: null }
@@ -575,6 +580,7 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
         })
       },
       approvalBridge: telegramApprovalBridge,
+      operatorNotifier: telegramOperatorNotifier,
     }
   }
 
@@ -819,6 +825,26 @@ export async function buildAnimaRuntime(opts: BuildRuntimeOpts): Promise<BuiltRu
         durationMs,
         summary: summarizeToolResult(result),
       })
+      // v0.24.12: forward clarify questions to Telegram operators when no
+      // TUI is connected. Without this the question lands only in
+      // activity-log on autonomous market wakes and TG-only operators
+      // never see it. `events.size()` is exactly the count of live SSE
+      // subscribers (chat.tsx, anima-launch UI, etc.) per gateway/server.ts
+      // line 77; the TG listener does NOT subscribe. Zero subscribers ⇒
+      // no eyes on the TUI ⇒ forward to TG.
+      if (call.name === 'clarify' && result.ok !== false) {
+        const tgNotify = telegramOperatorNotifier.current
+        if (tgNotify && events.size() === 0) {
+          const question = extractClarifyQuestion(effectiveCall.args)
+          if (question) {
+            void tgNotify(question).catch(err => {
+              console.warn(
+                `[gateway] tg operator notify failed: ${(err as Error).message?.slice(0, 200) ?? 'unknown'}`,
+              )
+            })
+          }
+        }
+      }
       // v0.21.2 R1: see chat.tsx for paired logic. Gateway sinks are SSE
       // start/end events instead of TUI state rows; orchestration shared
       // via runEscalation.
@@ -1291,6 +1317,26 @@ function summarizeToolResult(result: unknown): string {
   if (r.ok === false) return (r.error ?? 'failed').slice(0, 200)
   const path = typeof r.data?.path === 'string' ? r.data.path : null
   return path ? path : 'ok'
+}
+
+/**
+ * v0.24.12: pull the `question` string out of clarify tool args. Schema is
+ * `{ question: string, options?: string[] }`. Returns null for unexpected
+ * shapes so the forwarder no-ops silently rather than spamming garbage.
+ */
+function extractClarifyQuestion(args: unknown): string | null {
+  if (typeof args !== 'object' || args === null) return null
+  const q = (args as { question?: unknown }).question
+  if (typeof q !== 'string' || q.trim().length === 0) return null
+  const opts = (args as { options?: unknown }).options
+  if (Array.isArray(opts) && opts.length > 0) {
+    const lines = opts
+      .filter((o): o is string => typeof o === 'string')
+      .map((o, i) => `${i + 1}. ${o}`)
+      .join('\n')
+    return lines ? `${q.trim()}\n\n${lines}` : q.trim()
+  }
+  return q.trim()
 }
 
 /**

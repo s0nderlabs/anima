@@ -50,6 +50,19 @@ export interface TelegramRuntimeContext {
    * modal handles all approvals as before.
    */
   approvalBridge?: TelegramApprovalBridge
+  /**
+   * v0.24.12: outbound slot the listener fills on `start()` with a method
+   * that broadcasts a short text to every allowed operator chat. The
+   * gateway uses it to forward unsolicited brain prompts (clarify on
+   * autonomous market wakes) when no TUI is connected. When absent, the
+   * gateway logs the question to activity-log only.
+   */
+  operatorNotifier?: OperatorNotifierSlot
+}
+
+/** Mutable slot the listener fills on start so the gateway can broadcast clarify questions. */
+export interface OperatorNotifierSlot {
+  current: ((text: string) => Promise<void>) | null
 }
 
 export type ApprovalChoiceKind = 'once' | 'session' | 'always' | 'deny'

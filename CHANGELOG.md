@@ -4,6 +4,18 @@ All notable changes to the anima monorepo are tracked per-package via [changeset
 
 Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.24.12] - 2026-05-16
+
+### Added
+
+- **Autonomous market wakes now route clarify questions to the operator instead of silently dropping the wake.** v0.24.11 wired listener wakes for `JobCreated` / `JobAccepted` / `JobSettled` events so the brain *sees* the hire, but absent a system-prompt directive the brain stayed quiet (no auto-commit to paid work). System prompt updated: on `<channel source="market" kind="created" jobId="...">` blocks the brain now calls `clarify` to ask the operator whether to accept and deliver. The TUI surfaces the clarify question inline via existing SSE wiring. Sandbox-mode daemons additionally forward the question to every allowed Telegram chat when `events.size() === 0` (no live SSE subscribers), so TG-only operators see the prompt on their phone. Build-runtime `onToolCall` taps clarify calls, extracts the `question` (and any options) via `extractClarifyQuestion`, and broadcasts through a new `OperatorNotifierSlot` that the TG listener fills on start. Slot is cleared on `stop()` so duplicate broadcasts can't fire from a dead listener. Best-effort delivery: per-chat send failures log a warning but don't block the broadcast.
+
+### Tests
+
+- Full repo: 1274/1274 unit tests pass, typecheck clean, biome clean.
+
+[0.24.12]: https://github.com/s0nderlabs/anima/releases/tag/v0.24.12
+
 ## [0.24.11] - 2026-05-16
 
 ### Fixed

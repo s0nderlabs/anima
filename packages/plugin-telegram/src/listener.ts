@@ -237,6 +237,14 @@ export class TelegramListener {
         this.installCallbackHandler(handler)
     }
 
+    // v0.24.12: operator-notifier slot. Gateway fills it with brain clarify
+    // questions on autonomous market wakes; we broadcast to every allowed
+    // chat so the operator sees the question on their phone when no TUI is
+    // attached.
+    if (this.opts.operatorNotifier) {
+      this.opts.operatorNotifier.current = text => this.notifyOperators(text)
+    }
+
     await clearWebhookBeforePolling(this.bot)
 
     // v0.20.0: register the bot command menu so Telegram clients show
@@ -279,6 +287,7 @@ export class TelegramListener {
       clearTimeout(this.retryTimer)
       this.retryTimer = null
     }
+    if (this.opts.operatorNotifier) this.opts.operatorNotifier.current = null
     if (!this.running) {
       this.releaseLock()
       return
@@ -296,6 +305,30 @@ export class TelegramListener {
     }
     await Promise.allSettled([...this.inflight.values()])
     this.releaseLock()
+  }
+
+  /**
+   * v0.24.12: broadcast a short text to every allowed operator chat. Used
+   * by the gateway to forward unsolicited brain prompts (clarify on
+   * autonomous market wakes) when no TUI is connected. Best-effort: per-chat
+   * failures are logged but don't stop the broadcast.
+   */
+  private async notifyOperators(text: string): Promise<void> {
+    if (!this.running) return
+    const trimmed = text.trim()
+    if (trimmed.length === 0) return
+    const body = trimmed.length > 3500 ? `${trimmed.slice(0, 3500)}\n[truncated]` : trimmed
+    await Promise.allSettled(
+      this.opts.allowedUserIds.map(async chatId => {
+        try {
+          await this.bot.api.sendMessage(chatId, body)
+        } catch (err) {
+          console.warn(
+            `[telegram] notifyOperators chat=${chatId} failed: ${(err as Error).message?.slice(0, 200) ?? 'unknown'}`,
+          )
+        }
+      }),
+    )
   }
 
   private scheduleStartRetry(): void {
